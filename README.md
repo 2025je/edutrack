@@ -54,9 +54,11 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8000/> e inicia sesión. Para revisar los logs usa `docker compose logs -f web`; para detener los servicios sin borrar los datos, `docker compose down`.
+5. Abre <http://localhost:8000/> e inicia sesión. Compose arranca Django con `runserver_plus` y expone el puerto solo en `localhost`. Para revisar los logs usa `docker compose logs -f web`; para detener los servicios sin borrar los datos, `docker compose down`.
 
 > `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo únicamente cuando quieras borrar la base por completo.
+
+> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es exclusivamente para desarrollo: el puerto queda limitado a localhost y no debe exponerse a una LAN, Internet ni usarse en producción.
 
 ## Configuración inicial
 
@@ -82,8 +84,10 @@ Configura las variables de `.env.example` en el entorno de PowerShell: Django le
 ```powershell
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py runserver 127.0.0.1:8000
+python manage.py runserver_plus 127.0.0.1:8000
 ```
+
+El depurador de `runserver_plus` permite inspeccionar errores durante el desarrollo. No lo uses con datos reales ni en producción.
 
 ## Pruebas y migraciones
 

@@ -61,6 +61,9 @@ jobs:
       - name: Check Django configuration
         run: python manage.py check
 
+      - name: Verify runserver_plus command
+        run: python manage.py help runserver_plus
+
       - name: Check migrations
         run: python manage.py makemigrations --check --dry-run
 
