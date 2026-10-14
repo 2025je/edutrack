@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Registrar pago · EduTrack{% endblock %}
+{% block content %}<div class="row justify-content-center"><div class="col-lg-7"><div class="card p-4">
+<h1 class="h3">Registrar pago</h1><p class="text-secondary">Solo se muestran matrículas con deuda pendiente. Busca por nombre del alumno o curso.</p>
+<form method="get" class="mb-4">
+  <label class="form-label" for="payment-search">Buscar matrícula pendiente</label>
+  <div class="input-group">
+    <input id="payment-search" class="form-control" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso">
+    <button class="btn btn-outline-primary" type="submit">Buscar</button>
+    {% if request.GET.q %}<a class="btn btn-outline-secondary" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
+  </div>
+</form>
+{% if not form.fields.enrollment.queryset.exists %}<div class="alert alert-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}
+<form method="post">{% csrf_token %}
+{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+{% for field in form %}<div class="mb-3"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}
+<div class="alert alert-warning small">Verifica la matrícula y el importe antes de confirmar. Los recibos quedan auditados.</div>
+<button class="btn btn-primary">Confirmar pago y registrar recibo</button> <a class="btn btn-outline-secondary" href="{% url 'payment-list' %}">Cancelar</a>
+</form></div></div></div>
+<script>document.querySelectorAll('input,select,textarea').forEach(e=>e.classList.add('form-control'))</script>
+{% endblock %}

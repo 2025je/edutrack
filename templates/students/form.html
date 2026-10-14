@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Formulario · EduTrack{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card p-4 shadow-sm">
+            <h1 class="h3 mb-3">
+                {% if "matriculas" in request.path %}
+                    Registrar matrícula
+                {% else %}
+                    Registrar estudiante
+                {% endif %}
+            </h1>
+
+            <form method="post" novalidate>
+                {% csrf_token %}
+
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger" role="alert">
+                        {% for error in form.non_field_errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                <div class="row g-3">
+                    {% for field in form %}
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ field.id_for_label }}">
+                                {{ field.label }}
+                                {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
+                            </label>
+
+                            {{ field }}
+
+                            {% if field.name == "student" and "matriculas" in request.path %}
+                                <div id="student-course-help" class="form-text">Primero selecciona un curso para ver los alumnos que aún no están inscritos.</div>
+                                <div id="student-course-status" class="form-text" role="status" aria-live="polite"></div>
+                            {% endif %}
+
+                            {% if field.name == "course" %}
+                                {% if field.field.queryset.count == 0 %}
+                                    <div class="form-text text-danger">
+                                        No hay cursos activos disponibles en la sede seleccionada.
+                                        Verifica que haya cursos activos asignados a esta sede.
+                                    </div>
+                                {% else %}
+                                    <div class="form-text">
+                                        Selecciona el curso al que se matriculará el estudiante. La capacidad es informativa; si se supera, se mostrará una alerta sin impedir la matrícula.
+                                    </div>
+                                    <div id="course-capacity-alert" class="alert alert-warning mt-2 d-none" role="status" aria-live="polite"></div>
+                                {% endif %}
+                            {% endif %}
+
+                            {% if field.help_text %}
+                                <div class="form-text">{{ field.help_text }}</div>
+                            {% endif %}
+
+                            {% for error in field.errors %}
+                                <div class="text-danger small mt-1">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mt-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1" aria-hidden="true"></i>Guardar
+                    </button>
+                    <a class="btn btn-outline-secondary" href="javascript:history.back()">Cancelar</a>
+                </div>
+
+                <div class="form-text mt-3">
+                    <span class="text-danger">*</span> Campos obligatorios.
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    // Aplicar clases de Bootstrap a los campos del formulario.
+    document.querySelectorAll("input, select, textarea").forEach(function (element) {
+        if (
+            element.type !== "hidden" &&
+            !element.classList.contains("form-check-input") &&
+            !element.classList.contains("btn")
+        ) {
+            element.classList.add(
+                element.tagName === "SELECT" ? "form-select" : "form-control"
+            );
+        }
+    });
+
+    const courseSelect = document.getElementById("id_course");
+    const enrollmentFee = document.getElementById("id_enrollment_fee");
+    const monthlyFee = document.getElementById("id_monthly_fee");
+    const capacityAlert = document.getElementById("course-capacity-alert");
+
+    const studentSelect = document.getElementById("id_student");
+    const studentStatus = document.getElementById("student-course-status");
+    const isEnrollmentForm = Boolean(courseSelect && studentSelect && studentStatus);
+
+    if (isEnrollmentForm) {
+        const endpoint = "{% url 'course-students-available' %}";
+        const initialStudent = studentSelect.value;
+
+        async function loadAvailableStudents(keepSelection) {
+            const courseId = courseSelect.value;
+            studentSelect.innerHTML = "";
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = courseId ? "Cargando alumnos..." : "Primero selecciona un curso";
+            studentSelect.appendChild(placeholder);
+            studentSelect.disabled = true;
+            studentStatus.textContent = "";
+
+            if (!courseId) {
+                studentStatus.textContent = "Los alumnos se mostrarán después de seleccionar un curso.";
+                return;
+            }
+
+            try {
+                const response = await fetch(`${endpoint}?course_id=${encodeURIComponent(courseId)}`, {
+                    headers: {"X-Requested-With": "XMLHttpRequest"}
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error("No se pudo cargar la lista de alumnos.");
+
+                studentSelect.innerHTML = "";
+                const prompt = document.createElement("option");
+                prompt.value = "";
+                prompt.textContent = "Selecciona un alumno";
+                studentSelect.appendChild(prompt);
+
+                data.students.forEach(function (student) {
+                    const option = document.createElement("option");
+                    option.value = student.id;
+                    option.textContent = student.full_name;
+                    if (keepSelection && String(student.id) === String(initialStudent)) option.selected = true;
+                    studentSelect.appendChild(option);
+                });
+
+                studentSelect.disabled = false;
+                if (data.students.length === 0) {
+                    studentStatus.textContent = "Todos los alumnos activos de esta sede ya están inscritos en este curso, o no hay alumnos disponibles.";
+                    studentSelect.disabled = true;
+                } else {
+                    studentStatus.textContent = `${data.students.length} alumno(s) disponible(s) para este curso.`;
+                }
+            } catch (error) {
+                studentSelect.innerHTML = "";
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "No se pudo cargar la lista";
+                studentSelect.appendChild(option);
+                studentStatus.textContent = "Ocurrió un error al cargar alumnos. Cambia de curso o vuelve a intentarlo.";
+            }
+        }
+
+        courseSelect.addEventListener("change", function () { loadAvailableStudents(false); });
+        loadAvailableStudents(true);
+    }
+
+    if (courseSelect && enrollmentFee && monthlyFee) {
+        function updateCourseFees() {
+            const option = courseSelect.selectedOptions[0];
+            if (!option || !option.value) {
+                if (capacityAlert) {
+                    capacityAlert.textContent = "";
+                    capacityAlert.classList.add("d-none");
+                }
+                return;
+            }
+
+            const registrationFee = option.dataset.registrationFee;
+            const monthlyFeeValue = option.dataset.monthlyFee;
+
+            if (registrationFee !== undefined) enrollmentFee.value = registrationFee;
+            if (monthlyFeeValue !== undefined) monthlyFee.value = monthlyFeeValue;
+
+            if (capacityAlert) {
+                const capacity = Number(option.dataset.capacity);
+                const enrolled = Number(option.dataset.enrolledCount || 0);
+                const projected = enrolled + 1;
+                if (capacity > 0 && projected > capacity) {
+                    capacityAlert.textContent = `Atención: este curso tiene ${enrolled} estudiante(s) matriculado(s) y una capacidad informativa de ${capacity}. Con esta matrícula tendrá ${projected}, es decir, ${projected - capacity} por encima de la capacidad. Puedes continuar con la inscripción.`;
+                    capacityAlert.classList.remove("d-none");
+                } else if (capacity > 0 && projected === capacity) {
+                    capacityAlert.textContent = `Aviso: con esta matrícula el curso llegará a su capacidad informativa de ${capacity} estudiante(s). La inscripción puede continuar.`;
+                    capacityAlert.classList.remove("d-none");
+                } else {
+                    capacityAlert.textContent = "";
+                    capacityAlert.classList.add("d-none");
+                }
+            }
+        }
+
+        courseSelect.addEventListener("change", updateCourseFees);
+        // Actualiza importes y alerta al cargar o volver a mostrar el formulario.
+        updateCourseFees();
+
+        // Diagnóstico: permite verificar en la consola si el servidor envió cursos.
+        console.log("Opciones de cursos disponibles:", Math.max(0, courseSelect.options.length - 1));
+    }
+});
+</script>
+{% endblock %}

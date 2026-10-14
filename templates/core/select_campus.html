@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Seleccionar sede · EduTrack{% endblock %}
+{% block content %}
+<div class="row justify-content-center py-4"><div class="col-md-7 col-lg-5"><div class="card p-4">
+<h1 class="h3 mb-2">Seleccionar sede</h1>
+<p class="text-secondary">Elige la sede en la que vas a registrar matrículas y pagos.</p>
+{% if campuses %}
+<form method="post">{% csrf_token %}
+<label for="campus" class="form-label">Sede</label>
+<select class="form-select mb-3" name="campus" id="campus" required>
+<option value="">Selecciona una sede</option>
+{% for campus in campuses %}<option value="{{ campus.pk }}" {% if selected_campus.pk == campus.pk %}selected{% endif %}>{{ campus.name }}</option>{% endfor %}
+</select>
+<button class="btn btn-primary w-100" type="submit">Continuar</button>
+</form>
+{% else %}<div class="alert alert-warning mb-0">Tu usuario no tiene sedes activas asignadas. Solicita al administrador que configure tus permisos.</div>{% endif %}
+</div></div></div>
+{% endblock %}
