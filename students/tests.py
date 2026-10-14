@@ -199,7 +199,8 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.post(
 			reverse("student-update", args=[self.student.pk]),
 			{
-				"full_name": "Estudiante actualizado",
+				"last_name": "Apellidos actualizados",
+				"first_name": "Nombres",
 				"document_number": self.student.document_number,
 				"phone_numbers": self.student.phone,
 				"active": "on",
@@ -208,10 +209,29 @@ class StudentEnrollmentCrudTests(TestCase):
 		)
 		self.assertEqual(response.status_code, 200)
 		self.student.refresh_from_db()
-		self.assertEqual(self.student.full_name, "Estudiante actualizado")
+		self.assertEqual(self.student.full_name, "Apellidos actualizados Nombres")
 
 		response = self.client.get(reverse("enrollment-update", args=[self.enrollment.pk]))
 		self.assertEqual(response.status_code, 200)
+		response = self.client.post(
+			reverse("enrollment-update", args=[self.enrollment.pk]),
+			{
+				"course": self.course.pk,
+				"student": self.student.pk,
+				"record_code": "202601",
+				"promoter": [],
+				"enrollment_date": self.enrollment.enrollment_date.isoformat(),
+				"enrollment_fee": "40.00",
+				"monthly_fee": "60.00",
+				"active": "on",
+			},
+			follow=True,
+		)
+		self.assertEqual(response.status_code, 200)
+		self.enrollment.refresh_from_db()
+		self.assertEqual(self.enrollment.record_code, "202601")
+
+	def test_enrollment_record_code_accepts_only_numbers_or_empty(self):
 		response = self.client.post(
 			reverse("enrollment-update", args=[self.enrollment.pk]),
 			{
@@ -224,11 +244,42 @@ class StudentEnrollmentCrudTests(TestCase):
 				"monthly_fee": "60.00",
 				"active": "on",
 			},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, "Ingrese solo números en el código de ficha.")
+		self.enrollment.refresh_from_db()
+		self.assertEqual(self.enrollment.record_code, "")
+
+	def test_student_creation_requires_separate_last_and_first_names(self):
+		response = self.client.post(
+			reverse("student-create"),
+			{
+				"last_name": "Pérez",
+				"first_name": "Ana",
+				"document_number": "12345678",
+				"phone_numbers": "987654321",
+				"active": "on",
+			},
 			follow=True,
 		)
+
 		self.assertEqual(response.status_code, 200)
-		self.enrollment.refresh_from_db()
-		self.assertEqual(self.enrollment.record_code, "F-2026-01")
+		student = Student.objects.get(full_name="Pérez Ana")
+		self.assertEqual(student.last_name, "Pérez")
+		self.assertEqual(student.first_name, "Ana")
+
+		invalid_response = self.client.post(
+			reverse("student-create"),
+			{
+				"last_name": "",
+				"first_name": "Ana",
+				"phone_numbers": "987654321",
+				"active": "on",
+			},
+		)
+		self.assertEqual(invalid_response.status_code, 200)
+		self.assertContains(invalid_response, "Este campo es obligatorio.")
 
 	def test_enrollment_creation_saves_user_selected_date(self):
 		new_student = Student.objects.create(
@@ -243,7 +294,7 @@ class StudentEnrollmentCrudTests(TestCase):
 			{
 				"course": self.course.pk,
 				"student": new_student.pk,
-				"record_code": "F-2026-FECHA",
+				"record_code": "202602",
 				"promoter": [],
 				"enrollment_date": "2026-09-29",
 				"enrollment_fee": "25.00",
@@ -283,7 +334,7 @@ class StudentEnrollmentCrudTests(TestCase):
 			{
 				"course": self.course.pk,
 				"student": self.student.pk,
-				"record_code": "F-2026-MULTI",
+				"record_code": "202603",
 				"promoter": [first_promoter.pk, second_promoter.pk],
 				"enrollment_date": self.enrollment.enrollment_date.isoformat(),
 				"enrollment_fee": "40.00",
@@ -355,6 +406,47 @@ class StudentEnrollmentCrudTests(TestCase):
 			str(response.context["form"]["enrollment"].value()),
 			str(self.enrollment.pk),
 		)
+
+	def test_student_list_shows_active_enrollment_count_and_highlights_zero(self):
+		student_without_enrollments = Student.objects.create(
+			campus=self.campus,
+			full_name="Estudiante sin matrícula",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=student_without_enrollments,
+			course=self.course,
+			active=False,
+		)
+
+		response = self.client.get(reverse("student-list"))
+		students = {student.pk: student for student in response.context["students"]}
+
+		self.assertEqual(students[self.student.pk].enrollment_count, 1)
+		self.assertEqual(students[student_without_enrollments.pk].enrollment_count, 0)
+		self.assertEqual(students[self.student.pk].row_number, 1)
+		self.assertContains(response, "Cursos matriculados")
+		self.assertContains(response, ">N.º</a>")
+		self.assertContains(response, "text-bg-danger")
+		self.assertNotContains(response, "<th>Sede</th>")
+
+		by_name = self.client.get(
+			reverse("student-list"), {"sort": "name", "direction": "desc"}
+		)
+		self.assertEqual(
+			by_name.context["students"][0].pk, student_without_enrollments.pk
+		)
+		by_enrollments = self.client.get(
+			reverse("student-list"), {"sort": "enrollments", "direction": "desc"}
+		)
+		self.assertEqual(by_enrollments.context["students"][0].pk, self.student.pk)
+		by_row_number = self.client.get(
+			reverse("student-list"), {"sort": "row_number", "direction": "desc"}
+		)
+		self.assertEqual(
+			by_row_number.context["students"][0].pk, student_without_enrollments.pk
+		)
+		self.assertContains(response, "?sort=row_number&amp;direction=asc")
 
 	def test_student_name_links_to_only_that_students_enrollments(self):
 		other_student = Student.objects.create(
@@ -614,15 +706,15 @@ class StudentEnrollmentCrudTests(TestCase):
 
 	def test_enrollment_filters_cover_student_course_record_code_and_promoter(self):
 		promoter = Promoter.objects.create(name="Promotor de prueba", active=True)
-		self.enrollment.record_code = "FICHA-42"
-		self.enrollment.record_code = "FICHA-42"
+		self.enrollment.record_code = "42"
+		self.enrollment.record_code = "42"
 		self.enrollment.save(update_fields=["record_code"])
 		self.enrollment.promoter.add(promoter)
 
 		filters = {
 			"student": "Estudiante de",
 			"course": "Curso de",
-			"record_code": "FICHA-4",
+			"record_code": "4",
 			"promoter": "Promotor de",
 		}
 		for field, value in filters.items():
@@ -631,6 +723,48 @@ class StudentEnrollmentCrudTests(TestCase):
 				self.assertEqual(response.status_code, 200)
 				self.assertEqual(len(response.context["enrollments"]), 1)
 				self.assertEqual(response.context["enrollments"][0].pk, self.enrollment.pk)
+
+	def test_record_code_check_lists_missing_codes_for_the_selected_date(self):
+		check_date = date(2026, 10, 14)
+		for record_code in ["1", "2", "4", "5"]:
+			student = Student.objects.create(
+				campus=self.campus,
+				full_name=f"Alumno de ficha {record_code}",
+			)
+			Enrollment.objects.create(
+				campus=self.campus,
+				student=student,
+				course=self.course,
+				record_code=record_code,
+				enrollment_date=check_date,
+			)
+		other_date_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Alumno de otra fecha",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=other_date_student,
+			course=self.course,
+			record_code="3",
+			enrollment_date=date(2026, 10, 15),
+		)
+
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{
+				"record_code_check_date": check_date.isoformat(),
+				"record_code_start": "1",
+				"record_code_end": "10",
+				"check_record_codes": "1",
+			},
+		)
+
+		self.assertEqual(
+			response.context["missing_record_codes"],
+			["3", "6", "7", "8", "9", "10"],
+		)
+		self.assertContains(response, "3, 6, 7, 8, 9, 10")
 
 	def test_enrollment_rows_highlight_debt_and_no_debt(self):
 		Installment.objects.create(
@@ -774,13 +908,13 @@ class StudentEnrollmentCrudTests(TestCase):
 				campus=self.campus,
 				student=student,
 				course=self.course,
-				record_code="PAGINADO",
+				record_code="999",
 			)
 
-		response = self.client.get(reverse("enrollment-list"), {"record_code": "PAGINADO"})
+		response = self.client.get(reverse("enrollment-list"), {"record_code": "999"})
 
 		self.assertTrue(response.context["is_paginated"])
-		self.assertContains(response, "?record_code=PAGINADO&amp;page=2")
+		self.assertContains(response, "?record_code=999&amp;page=2")
 
 	def test_enrollment_list_shows_associated_receipt_numbers_and_void_status(self):
 		confirmed_payment = Payment.objects.create(
@@ -824,7 +958,8 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertContains(response, "Teléfonos")
 		form_data = QueryDict(mutable=True)
 		form_data.update({
-			"full_name": self.student.full_name,
+			"last_name": "Estudiante de",
+			"first_name": "prueba",
 			"document_number": self.student.document_number,
 			"active": "on",
 		})
@@ -836,7 +971,8 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.post(
 			reverse("student-update", args=[self.student.pk]),
 			{
-				"full_name": self.student.full_name,
+				"last_name": "Estudiante de",
+				"first_name": "prueba",
 				"document_number": self.student.document_number,
 				"phone_numbers": "987654321, 912345678",
 				"active": "on",
@@ -851,7 +987,8 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.post(
 			reverse("student-update", args=[self.student.pk]),
 			{
-				"full_name": self.student.full_name,
+				"last_name": "Estudiante de",
+				"first_name": "prueba",
 				"document_number": self.student.document_number,
 				"phone_numbers": "",
 				"active": "on",
@@ -867,7 +1004,8 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.post(
 			reverse("student-update", args=[self.student.pk]),
 			{
-				"full_name": self.student.full_name,
+				"last_name": "Estudiante de",
+				"first_name": "prueba",
 				"document_number": self.student.document_number,
 				"phone_numbers": "987654321, 123456789",
 				"active": "on",

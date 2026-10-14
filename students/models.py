@@ -8,9 +8,16 @@ phone_validator = RegexValidator(
     "Ingrese uno o más celulares peruanos de 9 dígitos, separados por comas.",
 )
 
+record_code_validator = RegexValidator(
+    r"^\d*$",
+    "Ingrese solo números en el código de ficha.",
+)
+
 class Student(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
-    full_name = models.CharField("Apellidos y nombres", max_length=180, unique=True)
+    full_name = models.CharField("Nombre completo", max_length=180, unique=True)
+    last_name = models.CharField("Apellidos", max_length=120, blank=True)
+    first_name = models.CharField("Nombres", max_length=120, blank=True)
     document_number = models.CharField("DNI", max_length=20, blank=True)
     phone = models.CharField("Teléfonos", max_length=120, validators=[phone_validator])
     active = models.BooleanField("Activo", default=True)
@@ -80,7 +87,12 @@ class Enrollment(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Estudiante")
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Curso")
-    record_code = models.CharField("Código de ficha", max_length=50, blank=True)
+    record_code = models.CharField(
+        "Código de ficha",
+        max_length=50,
+        blank=True,
+        validators=[record_code_validator],
+    )
     promoter = models.ManyToManyField(
         Promoter,
         related_name="enrollments",

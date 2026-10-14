@@ -13,6 +13,17 @@
 	<div class="col-sm-6 col-lg-3"><select class="form-select" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
 	<div class="col-auto"><button class="btn btn-primary" type="submit">Filtrar</button> <a class="btn btn-outline-secondary" href="{% url 'enrollment-list' %}">Limpiar</a></div>
 </form>
+<div class="card card-body mb-3">
+	<h2 class="h5">Verificar códigos de ficha faltantes</h2>
+	<p class="text-secondary mb-2">Seleccione una fecha de matrícula e indique el rango numérico de códigos que desea comprobar.</p>
+	<form method="get" class="row g-2 align-items-end">
+		<div class="col-sm-4"><label class="form-label" for="record-code-check-date">Fecha de matrícula</label><input class="form-control" id="record-code-check-date" type="date" name="record_code_check_date" value="{{ record_code_check_date }}" required></div>
+		<div class="col-sm-3"><label class="form-label" for="record-code-start">Desde</label><input class="form-control" id="record-code-start" type="number" name="record_code_start" value="{{ record_code_start }}" min="0" step="1" required></div>
+		<div class="col-sm-3"><label class="form-label" for="record-code-end">Hasta</label><input class="form-control" id="record-code-end" type="number" name="record_code_end" value="{{ record_code_end }}" min="0" step="1" required></div>
+		<div class="col-auto"><button class="btn btn-outline-primary" type="submit" name="check_record_codes" value="1">Verificar</button></div>
+	</form>
+	{% if record_code_check_error %}<div class="alert alert-warning mt-3 mb-0">{{ record_code_check_error }}</div>{% elif missing_record_codes is not None %}<div class="mt-3">{% if missing_record_codes %}<strong>Códigos de ficha no registrados:</strong> {{ missing_record_codes|join:", " }}{% else %}<span class="text-success">Todos los códigos del rango están registrados.</span>{% endif %}</div>{% endif %}
+</div>
 <div class="card table-responsive"><table class="table table-hover mb-0"><thead><tr>
 <th><a class="link-dark text-decoration-none" href="{{ sort_urls.row_number }}">N.º{% if current_sort == "row_number" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a class="link-dark text-decoration-none" href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>

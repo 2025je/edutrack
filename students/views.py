@@ -22,6 +22,9 @@ from .models import Student, Enrollment, Course
 from .forms import StudentForm, EnrollmentForm
 
 
+MAX_RECORD_CODE_CHECK_RANGE = 10_000
+
+
 class CampusScopedMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin):
     permission_field = "can_manage_students"
     def campus_queryset(self, qs, field="campus"):
@@ -34,13 +37,38 @@ class StudentListView(CampusScopedMixin, ListView):
     template_name = "students/student_list.html"
     context_object_name = "students"
     paginate_by = 25
+    sortable_fields = {
+        "row_number": "created_at",
+        "name": "full_name",
+        "enrollments": "enrollment_count",
+    }
 
     def get_queryset(self):
-        qs = self.campus_queryset(Student.objects.select_related("campus"))
+        qs = self.campus_queryset(
+            Student.objects.select_related("campus").annotate(
+                enrollment_count=Count(
+                    "enrollments",
+                    filter=Q(enrollments__active=True),
+                    distinct=True,
+                )
+            ).order_by("full_name", "pk")
+        )
         q = self.request.GET.get("q", "").strip()
         if q:
             qs = qs.filter(Q(full_name__icontains=q) | Q(document_number__icontains=q))
-        return qs
+        sort = self.request.GET.get("sort", "name")
+        direction = self.request.GET.get("direction", "asc")
+        sort_field = self.sortable_fields.get(sort, "full_name")
+        if direction not in {"asc", "desc"}:
+            direction = "asc"
+        if sort == "row_number":
+            chronological_fields = ["created_at", "pk"]
+            if direction == "desc":
+                chronological_fields = [f"-{field}" for field in chronological_fields]
+            return qs.order_by(*chronological_fields)
+        if direction == "desc":
+            sort_field = f"-{sort_field}"
+        return qs.order_by(sort_field, "full_name", "pk")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -51,6 +79,30 @@ class StudentListView(CampusScopedMixin, ListView):
                 pending_enrollments_for_campus(get_selected_campus(self.request))
                 .values_list("student_id", flat=True)
             )
+        context["current_sort"] = self.request.GET.get("sort", "name")
+        context["current_direction"] = self.request.GET.get("direction", "asc")
+        context["sort_urls"] = {}
+        for key in self.sortable_fields:
+            sort_params = self.request.GET.copy()
+            sort_params.pop("page", None)
+            if context["current_sort"] == key:
+                next_direction = (
+                    "desc" if context["current_direction"] == "asc" else "asc"
+                )
+            else:
+                next_direction = "asc"
+            sort_params["sort"] = key
+            sort_params["direction"] = next_direction
+            context["sort_urls"][key] = f"?{sort_params.urlencode()}"
+        chronological_ids = self.object_list.order_by(
+            "created_at", "pk"
+        ).values_list("pk", flat=True)
+        row_numbers = {
+            student_id: row_number
+            for row_number, student_id in enumerate(chronological_ids, start=1)
+        }
+        for student in context["students"]:
+            student.row_number = row_numbers[student.pk]
         return context
 
 
@@ -260,6 +312,52 @@ class EnrollmentListView(CampusScopedMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         from decimal import Decimal
+        context["missing_record_codes"] = None
+        context["record_code_check_error"] = None
+        context["record_code_check_date"] = self.request.GET.get(
+            "record_code_check_date", ""
+        ).strip()
+        context["record_code_start"] = self.request.GET.get(
+            "record_code_start", ""
+        ).strip()
+        context["record_code_end"] = self.request.GET.get(
+            "record_code_end", ""
+        ).strip()
+        if self.request.GET.get("check_record_codes"):
+            enrollment_date = parse_date(context["record_code_check_date"])
+            if enrollment_date is None:
+                context["record_code_check_error"] = (
+                    "Seleccione una fecha de matrícula válida."
+                )
+            elif not (
+                context["record_code_start"].isdigit()
+                and context["record_code_end"].isdigit()
+            ):
+                context["record_code_check_error"] = (
+                    "Ingrese un rango numérico válido de códigos de ficha."
+                )
+            else:
+                first_code, last_code = sorted(
+                    (int(context["record_code_start"]), int(context["record_code_end"]))
+                )
+                if last_code - first_code + 1 > MAX_RECORD_CODE_CHECK_RANGE:
+                    context["record_code_check_error"] = (
+                        f"El rango no puede superar {MAX_RECORD_CODE_CHECK_RANGE:,} códigos."
+                    )
+                else:
+                    expected_codes = [
+                        str(code) for code in range(first_code, last_code + 1)
+                    ]
+                    registered_codes = set(
+                        Enrollment.objects.filter(
+                            campus=get_selected_campus(self.request),
+                            enrollment_date=enrollment_date,
+                            record_code__in=expected_codes,
+                        ).values_list("record_code", flat=True)
+                    )
+                    context["missing_record_codes"] = [
+                        code for code in expected_codes if code not in registered_codes
+                    ]
         query_params = self.request.GET.copy()
         query_params.pop("page", None)
         context["pagination_query"] = query_params.urlencode()

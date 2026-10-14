@@ -34,6 +34,12 @@ class PhoneListWidget(forms.TextInput):
 
 
 class StudentForm(forms.ModelForm):
+    last_name = forms.CharField(
+        label="Apellidos",
+        max_length=120,
+        widget=forms.TextInput(attrs={"autofocus": True}),
+    )
+    first_name = forms.CharField(label="Nombres", max_length=120)
     phone_numbers = forms.CharField(
         label="Teléfonos",
         required=True,
@@ -50,10 +56,7 @@ class StudentForm(forms.ModelForm):
 
     class Meta:
         model = Student
-        fields = ["full_name", "document_number", "active"]
-        widgets = {
-            "full_name": forms.TextInput(attrs={"autofocus": True}),
-        }
+        fields = ["last_name", "first_name", "document_number", "active"]
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -78,8 +81,30 @@ class StudentForm(forms.ModelForm):
                 )
         return ", ".join(phone_numbers)
 
+    def clean(self):
+        cleaned_data = super().clean()
+        full_name = " ".join(
+            part.strip()
+            for part in (
+                cleaned_data.get("last_name", ""),
+                cleaned_data.get("first_name", ""),
+            )
+            if part.strip()
+        )
+        if full_name:
+            duplicate = Student.objects.filter(full_name=full_name)
+            if self.instance.pk:
+                duplicate = duplicate.exclude(pk=self.instance.pk)
+            if duplicate.exists():
+                self.add_error(
+                    "last_name", "Ya existe un estudiante con estos apellidos y nombres."
+                )
+        cleaned_data["full_name"] = full_name
+        return cleaned_data
+
     def save(self, commit=True):
         student = super().save(commit=False)
+        student.full_name = self.cleaned_data["full_name"]
         student.phone = self.cleaned_data["phone_numbers"]
         if commit:
             student.save()
@@ -93,6 +118,12 @@ class EnrollmentForm(forms.ModelForm):
         fields = ["course", "student", "record_code", "promoter", "enrollment_date", "enrollment_fee", "monthly_fee", "active"]
         widgets = {
             "promoter": forms.CheckboxSelectMultiple,
+            "record_code": forms.TextInput(
+                attrs={
+                    "inputmode": "numeric",
+                    "pattern": r"\d*",
+                }
+            ),
             "enrollment_date": forms.DateInput(
                 attrs={"type": "date"},
                 format="%Y-%m-%d",
