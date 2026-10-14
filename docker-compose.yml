@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME} -h localhost"]
       interval: 5s
@@ -23,18 +23,33 @@ services:
   web:
     build: .
     container_name: django_app
-    command: python manage.py runserver_plus 0.0.0.0:8000
+    command: sh -c "python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -"
     env_file:
       - .env
-    ports:
-      - "127.0.0.1:8000:8000"
+    expose:
+      - "8000"
     volumes:
       - .:/app
       - django_media:/app/media
+      - django_static:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
 
+  # Instancia 3: Proxy inverso y servidor de archivos estáticos
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - django_media:/srv/media:ro
+      - django_static:/srv/static:ro
+    depends_on:
+      - web
+
 volumes:
   postgres_data:
   django_media:
+  django_static:

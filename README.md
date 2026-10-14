@@ -33,8 +33,9 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
 
    ```dotenv
    DJANGO_SECRET_KEY=una-clave-larga-aleatoria
-   DJANGO_DEBUG=True
+   DJANGO_DEBUG=False
    DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+   DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
    DB_NAME=edutrack_pagos
    DB_USER=edutrack_user
    DB_PASSWORD=una-contrasena-segura
@@ -55,11 +56,13 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8000/> e inicia sesión. Compose arranca Django con `runserver_plus` y expone el puerto solo en `localhost`. Para revisar los logs usa `docker compose logs -f web`; para detener los servicios sin borrar los datos, `docker compose down`.
+5. Abre <http://localhost:8080/> e inicia sesión. Docker sirve la aplicación mediante Gunicorn y Nginx; Nginx publica el puerto 8080 del equipo y entrega los archivos estáticos y multimedia. Para revisar los logs usa `docker compose logs -f web nginx`; para detener los servicios sin borrar los datos, `docker compose down`.
+
+Si ya tienes un `.env`, agrega la variable `DJANGO_CSRF_TRUSTED_ORIGINS` como arriba y recrea el servicio para que cargue la configuración: `docker compose up -d --build web`.
 
 > `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo únicamente cuando quieras borrar la base por completo.
 
-> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es exclusivamente para desarrollo: el puerto queda limitado a localhost y no debe exponerse a una LAN, Internet ni usarse en producción.
+> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es exclusivamente para desarrollo y no debe exponerse a una LAN, Internet ni usarse en producción. En despliegues públicos, configura HTTPS (directamente en Nginx o mediante un proxy TLS de confianza) y ajusta `DJANGO_ALLOWED_HOSTS` al dominio utilizado.
 
 ## Configuración inicial
 
@@ -110,6 +113,6 @@ Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Eje
 docker compose exec -T db pg_dump -U edutrack_user -d edutrack_pagos > backup_edutrack.sql
 ```
 
-Antes de usar datos reales, define `DJANGO_DEBUG=False`, usa secretos privados y `ALLOWED_HOSTS` restringido, configura HTTPS, un servidor WSGI/ASGI de producción, reglas de firewall y un procedimiento probado de restauración. `runserver` es solo para desarrollo.
+En Docker, Gunicorn sirve Django y Nginx actúa como proxy inverso y sirve los archivos estáticos y multimedia. Antes de exponer el servicio a Internet, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración. El puerto 8080 del host se asigna al puerto 80 de Nginx; el servicio Django no publica directamente su puerto.
 
 Los recibos emitidos por la aplicación son comprobantes internos; no son comprobantes electrónicos tributarios autorizados por SUNAT.
