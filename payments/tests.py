@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.db.models import Sum
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import Campus, User
 from payments.models import Installment, Payment, PaymentAllocation
@@ -80,6 +81,85 @@ class PaymentCrudTests(TestCase):
 			PaymentAllocation.objects.filter(payment=self.payment).aggregate(total=Sum("amount"))["total"],
 			Decimal("70.00"),
 		)
+
+	def test_payment_list_filters_and_sorts_receipts_students_and_dates(self):
+		other_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Beatriz de pagos",
+		)
+		other_course = Course.objects.create(
+			campus=self.campus,
+			name="Otro curso",
+			start_date=date(2026, 10, 14),
+		)
+		other_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=other_student,
+			course=other_course,
+		)
+		other_payment = Payment.objects.create(
+			campus=self.campus,
+			enrollment=other_enrollment,
+			cashier=self.user,
+			receipt_number="P-002",
+			amount=20,
+		)
+		void_payment = Payment.objects.create(
+			campus=self.campus,
+			enrollment=other_enrollment,
+			cashier=self.user,
+			receipt_number="P-003",
+			amount=10,
+			status=Payment.Status.VOID,
+		)
+		Payment.objects.filter(pk=self.payment.pk).update(
+			created_at=timezone.make_aware(datetime(2026, 10, 10, 9, 0))
+		)
+		Payment.objects.filter(pk=other_payment.pk).update(
+			created_at=timezone.make_aware(datetime(2026, 10, 11, 9, 0))
+		)
+		Payment.objects.filter(pk=void_payment.pk).update(
+			created_at=timezone.make_aware(datetime(2026, 10, 12, 9, 0))
+		)
+
+		response = self.client.get(reverse("payment-list"), {"sort": "receipt", "direction": "asc"})
+		self.assertEqual(response.context["payments"][0].receipt_number, "P-001")
+		self.assertContains(response, 'name="receipt"')
+		self.assertContains(response, 'name="date_from"')
+		self.assertContains(response, 'name="date_to"')
+		self.assertContains(response, "Fecha de pago - Desde")
+		self.assertContains(response, "Fecha de pago - Hasta")
+		self.assertNotContains(response, "<th>Sede</th>")
+		self.assertContains(response, "?sort=receipt&amp;direction=desc")
+		self.assertEqual(response.context["payments"][0].row_number, 1)
+
+		student_sort = self.client.get(
+			reverse("payment-list"), {"sort": "student", "direction": "asc"}
+		)
+		self.assertEqual(student_sort.context["payments"][0].pk, self.payment.pk)
+		date_sort = self.client.get(
+			reverse("payment-list"), {"sort": "date", "direction": "asc"}
+		)
+		self.assertEqual(date_sort.context["payments"][0].pk, self.payment.pk)
+
+		for query, expected_payments in (
+			({"student": "Beatriz"}, [other_payment, void_payment]),
+			({"receipt": "P-001"}, self.payment),
+			({"status": "ANULADO"}, void_payment),
+			({"date_from": "2026-10-10", "date_to": "2026-10-10"}, self.payment),
+			({"date_from": "2026-10-13"}, None),
+		):
+			with self.subTest(query=query):
+				response = self.client.get(reverse("payment-list"), query)
+				if expected_payments is None:
+					self.assertEqual(list(response.context["payments"]), [])
+				else:
+					if not isinstance(expected_payments, list):
+						expected_payments = [expected_payments]
+					self.assertEqual(
+						{payment.pk for payment in response.context["payments"]},
+						{payment.pk for payment in expected_payments},
+					)
 
 	def test_payment_can_be_voided_without_deleting_receipt_or_allocation(self):
 		response = self.client.get(reverse("payment-delete", args=[self.payment.pk]))

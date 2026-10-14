@@ -6,6 +6,7 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
+from django.utils.dateparse import parse_date
 from django.views.generic import FormView, ListView, DetailView, UpdateView, DeleteView
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
 from students.models import Enrollment
@@ -22,13 +23,63 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
     template_name = "payments/payment_list.html"
     context_object_name = "payments"
     paginate_by = 30
+    sortable_fields = {
+        "receipt": "receipt_number",
+        "student": "enrollment__student__full_name",
+        "date": "created_at",
+        "cashier": "cashier__username",
+        "amount": "amount",
+        "status": "status",
+    }
 
     def get_queryset(self):
         qs = Payment.objects.filter(campus=get_selected_campus(self.request)).select_related("campus", "enrollment__student", "enrollment__course", "cashier")
-        q = self.request.GET.get("q", "").strip()
-        if q:
-            qs = qs.filter(Q(receipt_number__icontains=q) | Q(enrollment__student__full_name__icontains=q))
-        return qs
+        receipt = self.request.GET.get("receipt", "").strip()
+        student = self.request.GET.get("student", "").strip()
+        if receipt:
+            qs = qs.filter(receipt_number__icontains=receipt)
+        if student:
+            qs = qs.filter(enrollment__student__full_name__icontains=student)
+        for parameter, lookup in (("date_from", "created_at__date__gte"), ("date_to", "created_at__date__lte")):
+            value = self.request.GET.get(parameter, "").strip()
+            if value:
+                parsed_date = parse_date(value)
+                qs = qs.filter(**{lookup: parsed_date}) if parsed_date else qs.none()
+        status = self.request.GET.get("status", "")
+        if status in Payment.Status.values:
+            qs = qs.filter(status=status)
+
+        sort = self.request.GET.get("sort", "date")
+        direction = self.request.GET.get("direction", "desc")
+        sort_field = self.sortable_fields.get(sort, "created_at")
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+        if direction == "desc":
+            sort_field = f"-{sort_field}"
+        return qs.order_by(sort_field, "pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        query_params = self.request.GET.copy()
+        query_params.pop("page", None)
+        context["pagination_query"] = query_params.urlencode()
+        context["current_sort"] = self.request.GET.get("sort", "date")
+        context["current_direction"] = self.request.GET.get("direction", "desc")
+        context["sort_urls"] = {}
+        for key in self.sortable_fields:
+            sort_params = self.request.GET.copy()
+            sort_params.pop("page", None)
+            if context["current_sort"] == key:
+                next_direction = "desc" if context["current_direction"] == "asc" else "asc"
+            else:
+                next_direction = "asc"
+            sort_params["sort"] = key
+            sort_params["direction"] = next_direction
+            context["sort_urls"][key] = f"?{sort_params.urlencode()}"
+        page_start = context["page_obj"].start_index() if context.get("is_paginated") else 1
+        for offset, payment in enumerate(context["payments"]):
+            payment.row_number = page_start + offset
+        return context
 
 
 class PaymentCreateView(SelectedCampusViewMixin, FormView):

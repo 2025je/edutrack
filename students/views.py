@@ -229,6 +229,14 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         if enrollment_date:
             parsed_date = parse_date(enrollment_date)
             qs = qs.filter(enrollment_date=parsed_date) if parsed_date else qs.none()
+        for parameter, lookup in (
+            ("enrollment_date_from", "enrollment_date__gte"),
+            ("enrollment_date_to", "enrollment_date__lte"),
+        ):
+            value = self.request.GET.get(parameter, "").strip()
+            if value:
+                parsed_date = parse_date(value)
+                qs = qs.filter(**{lookup: parsed_date}) if parsed_date else qs.none()
         debt_status = self.request.GET.get("debt_status", "")
         if debt_status == "with_debt":
             qs = qs.filter(total_debt__gt=0)
@@ -276,6 +284,9 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             if selected_promoter:
                 context["promoter_filter_value"] = selected_promoter.name
         context["enrollment_date_filter_value"] = self.request.GET.get("enrollment_date", "")
+        exact_enrollment_date = self.request.GET.get("enrollment_date", "")
+        context["enrollment_date_from"] = self.request.GET.get("enrollment_date_from", "") or exact_enrollment_date
+        context["enrollment_date_to"] = self.request.GET.get("enrollment_date_to", "") or exact_enrollment_date
         context["debt_filter_value"] = self.request.GET.get("debt_status", "")
         context["sort_urls"] = {}
         for key in self.sortable_fields:

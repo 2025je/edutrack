@@ -8,7 +8,8 @@
 	<div class="col-sm-6 col-lg-3"><input class="form-control" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
 	<div class="col-sm-6 col-lg-3"><input class="form-control" name="record_code" value="{{ request.GET.record_code }}" placeholder="Filtrar por código de ficha"></div>
 	<div class="col-sm-6 col-lg-3"><input class="form-control" name="promoter" value="{{ promoter_filter_value }}" placeholder="Filtrar por promotor"></div>
-	<div class="col-sm-6 col-lg-3"><input class="form-control" type="date" name="enrollment_date" value="{{ enrollment_date_filter_value }}" aria-label="Filtrar por fecha de matrícula"></div>
+	<div class="col-sm-6 col-lg-3"><label class="form-label" for="enrollment-date-from">Fecha de matrícula - Desde</label><input class="form-control" id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
+	<div class="col-sm-6 col-lg-3"><label class="form-label" for="enrollment-date-to">Fecha de matrícula - Hasta</label><input class="form-control" id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
 	<div class="col-sm-6 col-lg-3"><select class="form-select" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
 	<div class="col-auto"><button class="btn btn-primary" type="submit">Filtrar</button> <a class="btn btn-outline-secondary" href="{% url 'enrollment-list' %}">Limpiar</a></div>
 </form>

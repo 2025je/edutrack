@@ -410,7 +410,7 @@ class StudentEnrollmentCrudTests(TestCase):
 		filters = [
 			({"course_id": self.course.pk}, "course", self.course.name),
 			({"promoter_id": promoter.pk}, "promoter", promoter.name),
-			({"enrollment_date": "2026-09-29"}, "enrollment_date", "2026-09-29"),
+			({"enrollment_date": "2026-09-29"}, "enrollment_date_from", "2026-09-29"),
 		]
 		for query, input_name, expected_value in filters:
 			with self.subTest(query=query):
@@ -421,6 +421,8 @@ class StudentEnrollmentCrudTests(TestCase):
 					{self.enrollment.pk},
 				)
 				self.assertContains(response, f'name="{input_name}" value="{expected_value}"')
+				if "enrollment_date" in query:
+					self.assertContains(response, 'name="enrollment_date_to" value="2026-09-29"')
 
 	def test_enrollment_list_shows_costs_and_outstanding_debt(self):
 		self.add_payment_history()
@@ -615,6 +617,35 @@ class StudentEnrollmentCrudTests(TestCase):
 		)
 		self.assertContains(with_debt, 'value="with_debt" selected')
 		self.assertContains(without_debt, 'value="without_debt" selected')
+
+	def test_enrollment_list_filters_by_date_range(self):
+		older_student = Student.objects.create(campus=self.campus, full_name="Matrícula anterior")
+		older_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=older_student,
+			course=self.course,
+			enrollment_date=date(2026, 10, 1),
+		)
+
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{"enrollment_date_from": "2026-10-10"},
+		)
+		self.assertEqual(
+			{enrollment.pk for enrollment in response.context["enrollments"]},
+			{self.enrollment.pk},
+		)
+		self.assertContains(response, "Fecha de matrícula - Desde")
+		self.assertContains(response, "Fecha de matrícula - Hasta")
+
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{"enrollment_date_to": "2026-10-10"},
+		)
+		self.assertEqual(
+			{enrollment.pk for enrollment in response.context["enrollments"]},
+			{older_enrollment.pk},
+		)
 
 	def test_enrollment_table_sorts_by_student_and_outstanding_debt(self):
 		other_student = Student.objects.create(campus=self.campus, full_name="Zeta Estudiante")
