@@ -4,9 +4,13 @@ from .models import Campus, User
 
 @admin.register(Campus)
 class CampusAdmin(admin.ModelAdmin):
-    list_display = ("name", "active", "address")
+    list_display = ("name", "active", "address", "has_logo")
     list_filter = ("active",)
     search_fields = ("name",)
+
+    @admin.display(boolean=True, description="Tiene logo")
+    def has_logo(self, campus):
+        return bool(campus.logo)
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):

@@ -50,7 +50,7 @@ class PaymentCrudTests(TestCase):
 			campus=self.campus,
 			enrollment=self.enrollment,
 			cashier=self.user,
-			receipt_number="P-001",
+			receipt_number="D1",
 			amount=40,
 		)
 		self.allocation = PaymentAllocation.objects.create(
@@ -65,7 +65,7 @@ class PaymentCrudTests(TestCase):
 		response = self.client.post(
 			reverse("payment-update", args=[self.payment.pk]),
 			{
-				"receipt_number": "P-002",
+				"receipt_number": "D2",
 				"enrollment": self.enrollment.pk,
 				"amount": "70.00",
 				"reference": "Transferencia",
@@ -75,7 +75,7 @@ class PaymentCrudTests(TestCase):
 		)
 		self.assertEqual(response.status_code, 200)
 		self.payment.refresh_from_db()
-		self.assertEqual(self.payment.receipt_number, "P-002")
+		self.assertEqual(self.payment.receipt_number, "D2")
 		self.assertEqual(self.payment.amount, Decimal("70.00"))
 		self.assertEqual(
 			PaymentAllocation.objects.filter(payment=self.payment).aggregate(total=Sum("amount"))["total"],
@@ -101,14 +101,14 @@ class PaymentCrudTests(TestCase):
 			campus=self.campus,
 			enrollment=other_enrollment,
 			cashier=self.user,
-			receipt_number="P-002",
+			receipt_number="D2",
 			amount=20,
 		)
 		void_payment = Payment.objects.create(
 			campus=self.campus,
 			enrollment=other_enrollment,
 			cashier=self.user,
-			receipt_number="P-003",
+			receipt_number="D3",
 			amount=10,
 			status=Payment.Status.VOID,
 		)
@@ -123,7 +123,7 @@ class PaymentCrudTests(TestCase):
 		)
 
 		response = self.client.get(reverse("payment-list"), {"sort": "receipt", "direction": "asc"})
-		self.assertEqual(response.context["payments"][0].receipt_number, "P-001")
+		self.assertEqual(response.context["payments"][0].receipt_number, "D1")
 		self.assertContains(response, 'name="receipt"')
 		self.assertContains(response, 'name="date_from"')
 		self.assertContains(response, 'name="date_to"')
@@ -144,7 +144,7 @@ class PaymentCrudTests(TestCase):
 
 		for query, expected_payments in (
 			({"student": "Beatriz"}, [other_payment, void_payment]),
-			({"receipt": "P-001"}, self.payment),
+			({"receipt": "D1"}, self.payment),
 			({"status": "ANULADO"}, void_payment),
 			({"date_from": "2026-10-10", "date_to": "2026-10-10"}, self.payment),
 			({"date_from": "2026-10-13"}, None),
@@ -160,6 +160,69 @@ class PaymentCrudTests(TestCase):
 						{payment.pk for payment in response.context["payments"]},
 						{payment.pk for payment in expected_payments},
 					)
+
+	def test_payment_list_sorts_receipts_by_type_letter_and_number(self):
+		for receipt_number in ["44", "1", "7", "D45", "D23", "A43", "A34"]:
+			Payment.objects.create(
+				campus=self.campus,
+				enrollment=self.enrollment,
+				cashier=self.user,
+				receipt_number=receipt_number,
+				amount=1,
+			)
+
+		response = self.client.get(
+			reverse("payment-list"), {"sort": "receipt", "direction": "asc"}
+		)
+
+		self.assertEqual(
+			[payment.receipt_number for payment in response.context["payments"]],
+			["1", "7", "44", "A34", "A43", "D1", "D23", "D45"],
+		)
+
+	def test_receipt_check_lists_missing_numeric_receipts(self):
+		for receipt_number in ["1", "2", "4", "5"]:
+			Payment.objects.create(
+				campus=self.campus,
+				enrollment=self.enrollment,
+				cashier=self.user,
+				receipt_number=receipt_number,
+				amount=1,
+			)
+
+		response = self.client.get(
+			reverse("payment-list"),
+			{"receipt_start": "1", "receipt_end": "7", "check_receipts": "1"},
+		)
+
+		self.assertEqual(response.context["missing_receipts"], ["3", "6", "7"])
+		self.assertContains(response, "3, 6, 7")
+
+	def test_receipt_check_lists_missing_receipts_with_the_same_letter(self):
+		for receipt_number in ["D2", "D4", "D5"]:
+			Payment.objects.create(
+				campus=self.campus,
+				enrollment=self.enrollment,
+				cashier=self.user,
+				receipt_number=receipt_number,
+				amount=1,
+			)
+
+		response = self.client.get(
+			reverse("payment-list"),
+			{"receipt_start": "D1", "receipt_end": "D4", "check_receipts": "1"},
+		)
+
+		self.assertEqual(response.context["missing_receipts"], ["D3"])
+
+	def test_receipt_check_rejects_different_letter_prefixes(self):
+		response = self.client.get(
+			reverse("payment-list"),
+			{"receipt_start": "D1", "receipt_end": "E4", "check_receipts": "1"},
+		)
+
+		self.assertIsNone(response.context["missing_receipts"])
+		self.assertContains(response, "usar la misma letra")
 
 	def test_payment_can_be_voided_without_deleting_receipt_or_allocation(self):
 		response = self.client.get(reverse("payment-delete", args=[self.payment.pk]))

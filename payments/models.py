@@ -1,9 +1,14 @@
 from decimal import Decimal
 from django.db import models
 from django.db.models import Sum
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from core.models import Campus, User
 from students.models import Enrollment
+
+receipt_number_validator = RegexValidator(
+    r"^(?:\d+|[A-Z]\d+)$",
+    "Ingrese solo números o una letra mayúscula seguida de números, por ejemplo: 100 o D100.",
+)
 
 class Installment(models.Model):
     enrollment = models.ForeignKey(Enrollment, on_delete=models.PROTECT, related_name="installments", verbose_name="Matrícula")
@@ -37,7 +42,12 @@ class Payment(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
     enrollment = models.ForeignKey(Enrollment, on_delete=models.PROTECT, related_name="payments", verbose_name="Matrícula")
     cashier = models.ForeignKey(User, on_delete=models.PROTECT, related_name="registered_payments", verbose_name="Cajero")
-    receipt_number = models.CharField("N.º de recibo", max_length=40, unique=True)
+    receipt_number = models.CharField(
+        "N.º de recibo",
+        max_length=40,
+        unique=True,
+        validators=[receipt_number_validator],
+    )
     amount = models.DecimalField("Importe recibido", max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     reference = models.CharField("Referencia", max_length=100, blank=True)
     notes = models.CharField("Observaciones", max_length=250, blank=True)

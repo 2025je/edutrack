@@ -1,7 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db import models
-from .models import Student, Enrollment, Course, Promoter
+from .models import Student, Enrollment, Course, Promoter, phone_validator
 from core.campus import get_selected_campus
 
 
@@ -22,23 +22,69 @@ class CourseSelectWidget(forms.Select):
         return option
 
 
+class PhoneListWidget(forms.TextInput):
+    def value_from_datadict(self, data, files, name):
+        if hasattr(data, "getlist"):
+            raw_values = data.getlist(name)
+        else:
+            raw_value = data.get(name, "")
+            raw_values = raw_value if isinstance(raw_value, (list, tuple)) else [raw_value]
+        values = [value.strip() for value in raw_values]
+        return ", ".join(values)
+
+
 class StudentForm(forms.ModelForm):
+    phone_numbers = forms.CharField(
+        label="Teléfonos",
+        required=True,
+        widget=PhoneListWidget(
+            attrs={
+                "placeholder": "987654321",
+                "inputmode": "numeric",
+                "pattern": "9[0-9]{8}",
+                "maxlength": 9,
+                "required": True,
+            }
+        ),
+    )
+
     class Meta:
         model = Student
-        fields = ["full_name", "document_number", "phone", "active"]
+        fields = ["full_name", "document_number", "active"]
         widgets = {
             "full_name": forms.TextInput(attrs={"autofocus": True}),
-            "phone": forms.TextInput(attrs={"placeholder": "987654321, 912345678"}),
         }
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
         # La sede proviene de la sesión, nunca del formulario enviado por el navegador.
         self.selected_campus = get_selected_campus(request) if request and user else None
+        if self.instance and self.instance.phone:
+            self.initial["phone_numbers"] = self.instance.phone
 
-    def clean_phone(self):
-        phone_numbers = self.cleaned_data["phone"].split(",")
-        return ", ".join(number.strip() for number in phone_numbers if number.strip())
+    def clean_phone_numbers(self):
+        phone_numbers = [
+            number.strip()
+            for number in self.cleaned_data.get("phone_numbers", "").split(",")
+        ]
+        if not phone_numbers or any(not number for number in phone_numbers):
+            raise ValidationError("Ingrese al menos un teléfono y complete todos los campos.")
+        for phone in phone_numbers:
+            try:
+                phone_validator(phone)
+            except ValidationError:
+                raise ValidationError(
+                    f"El teléfono {phone} no es válido. Use 9 dígitos y empiece con 9."
+                )
+        return ", ".join(phone_numbers)
+
+    def save(self, commit=True):
+        student = super().save(commit=False)
+        student.phone = self.cleaned_data["phone_numbers"]
+        if commit:
+            student.save()
+            self.save_m2m()
+        return student
 
 
 class EnrollmentForm(forms.ModelForm):

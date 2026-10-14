@@ -2,14 +2,17 @@ from datetime import date
 from io import BytesIO
 
 from django.db import IntegrityError, transaction
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from django.http import QueryDict
 from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Campus, User
 from payments.models import Installment, Payment, PaymentAllocation
-from students.models import Course, Enrollment, Promoter, Student
+from students.forms import PhoneListWidget
+from students.models import Course, Enrollment, Promoter, Schedule, Student
 
 
 class CourseStudentExportTests(TestCase):
@@ -198,7 +201,7 @@ class StudentEnrollmentCrudTests(TestCase):
 			{
 				"full_name": "Estudiante actualizado",
 				"document_number": self.student.document_number,
-				"phone": self.student.phone,
+				"phone_numbers": self.student.phone,
 				"active": "on",
 			},
 			follow=True,
@@ -476,7 +479,93 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertIn("Estudiante de prueba", [value for row in rows for value in row])
 		self.assertNotIn("Otro estudiante para exportar", [value for row in rows for value in row])
 		self.assertEqual(rows[3][0], "N.º")
+		self.assertNotIn("Estado", rows[3])
 		self.assertEqual(rows[4][0], 1)
+
+	def test_enrollment_excel_export_excludes_inactive_enrollments(self):
+		inactive_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Estudiante con matrícula inactiva",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=inactive_student,
+			course=self.course,
+			active=False,
+		)
+
+		response = self.client.get(reverse("enrollment-excel"))
+
+		workbook = load_workbook(BytesIO(response.content), data_only=True)
+		worksheet = workbook["Matrículas"]
+		exported_values = [
+			value for row in worksheet.iter_rows(values_only=True) for value in row
+		]
+		self.assertIn(self.student.full_name, exported_values)
+		self.assertNotIn(inactive_student.full_name, exported_values)
+
+	def test_enrollment_excel_export_orders_rows_by_student_name(self):
+		first_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Ana Alumna",
+		)
+		last_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Zoe Alumna",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=first_student,
+			course=self.course,
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=last_student,
+			course=self.course,
+		)
+
+		response = self.client.get(reverse("enrollment-excel"))
+
+		workbook = load_workbook(BytesIO(response.content), data_only=True)
+		worksheet = workbook["Matrículas"]
+		rows = list(worksheet.iter_rows(min_row=5, values_only=True))
+		self.assertEqual(
+			[row[1] for row in rows],
+			["Ana Alumna", "Estudiante de prueba", "Zoe Alumna"],
+		)
+		self.assertEqual([row[0] for row in rows], [1, 2, 3])
+
+	def test_enrollment_excel_export_uses_debt_status_row_colors(self):
+		Installment.objects.create(
+			enrollment=self.enrollment,
+			concept="Cuota pendiente",
+			amount=100,
+			due_date=date(2026, 10, 14),
+		)
+		no_debt_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Alumno sin deuda",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=no_debt_student,
+			course=self.course,
+		)
+
+		response = self.client.get(reverse("enrollment-excel"))
+
+		workbook = load_workbook(BytesIO(response.content), data_only=True)
+		worksheet = workbook["Matrículas"]
+		rows_by_student = {
+			row[1].value: row
+			for row in worksheet.iter_rows(min_row=5)
+		}
+		self.assertTrue(
+			rows_by_student[self.student.full_name][0].fill.fgColor.rgb.endswith("FFF3CD")
+		)
+		self.assertTrue(
+			rows_by_student[no_debt_student.full_name][0].fill.fgColor.rgb.endswith("D1E7DD")
+		)
 
 	def test_enrollment_row_numbers_follow_oldest_enrollment_date(self):
 		self.enrollment.enrollment_date = date(2026, 9, 15)
@@ -520,8 +609,8 @@ class StudentEnrollmentCrudTests(TestCase):
 			row[1]: row[0]
 			for row in worksheet.iter_rows(min_row=5, values_only=True)
 		}
-		self.assertEqual(ranks_by_student["Inscripción más antigua"], 1)
-		self.assertEqual(ranks_by_student[self.student.full_name], 2)
+		self.assertEqual(ranks_by_student[self.student.full_name], 1)
+		self.assertEqual(ranks_by_student["Inscripción más antigua"], 2)
 
 	def test_enrollment_filters_cover_student_course_record_code_and_promoter(self):
 		promoter = Promoter.objects.create(name="Promotor de prueba", active=True)
@@ -733,12 +822,23 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.get(reverse("student-update", args=[self.student.pk]))
 		self.assertContains(response, "DNI")
 		self.assertContains(response, "Teléfonos")
+		form_data = QueryDict(mutable=True)
+		form_data.update({
+			"full_name": self.student.full_name,
+			"document_number": self.student.document_number,
+			"active": "on",
+		})
+		form_data.setlist("phone_numbers", ["987654321", "912345678"])
+		self.assertEqual(
+			PhoneListWidget().value_from_datadict(form_data, None, "phone_numbers"),
+			"987654321, 912345678",
+		)
 		response = self.client.post(
 			reverse("student-update", args=[self.student.pk]),
 			{
 				"full_name": self.student.full_name,
 				"document_number": self.student.document_number,
-				"phone": "987654321, 912345678",
+				"phone_numbers": "987654321, 912345678",
 				"active": "on",
 			},
 			follow=True,
@@ -746,6 +846,38 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.student.refresh_from_db()
 		self.assertEqual(self.student.phone, "987654321, 912345678")
+
+	def test_student_form_requires_at_least_one_phone(self):
+		response = self.client.post(
+			reverse("student-update", args=[self.student.pk]),
+			{
+				"full_name": self.student.full_name,
+				"document_number": self.student.document_number,
+				"phone_numbers": "",
+				"active": "on",
+			},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, "Este campo es obligatorio.")
+		self.student.refresh_from_db()
+		self.assertEqual(self.student.phone, "987654321")
+
+	def test_student_form_rejects_any_invalid_phone(self):
+		response = self.client.post(
+			reverse("student-update", args=[self.student.pk]),
+			{
+				"full_name": self.student.full_name,
+				"document_number": self.student.document_number,
+				"phone_numbers": "987654321, 123456789",
+				"active": "on",
+			},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, "no es válido")
+		self.student.refresh_from_db()
+		self.assertEqual(self.student.phone, "987654321")
 
 
 class CourseUniquenessTests(TestCase):
@@ -768,3 +900,18 @@ class CourseUniquenessTests(TestCase):
 		Course.objects.create(**self.course_data)
 		other_campus = Campus.objects.create(name="Otra sede", active=True)
 		Course.objects.create(**{**self.course_data, "campus": other_campus})
+
+	def test_course_requires_schedule_and_defaults_group_to_one(self):
+		course = Course(campus=self.campus, name="Curso sin horario")
+
+		with self.assertRaises(ValidationError) as context:
+			course.full_clean()
+
+		self.assertIn("schedule", context.exception.message_dict)
+		self.assertEqual(course.group, "1")
+
+	def test_default_schedules_are_available_in_the_catalog(self):
+		self.assertEqual(
+			set(Schedule.objects.values_list("name", flat=True)),
+			{"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM"},
+		)

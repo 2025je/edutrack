@@ -344,11 +344,13 @@ class StudentEnrollmentListView(EnrollmentListView):
 class EnrollmentExcelExportView(EnrollmentListView):
     def get(self, request, *args, **kwargs):
         self.request = request
-        enrollments = list(self.get_queryset())
+        enrollments = list(
+            self.get_queryset().filter(active=True).order_by("student__full_name", "pk")
+        )
         row_numbers = {
             enrollment.pk: row_number
             for row_number, enrollment in enumerate(
-                sorted(enrollments, key=lambda item: (item.enrollment_date, item.created_at, item.pk)),
+                enrollments,
                 start=1,
             )
         }
@@ -356,18 +358,18 @@ class EnrollmentExcelExportView(EnrollmentListView):
         worksheet = workbook.active
         worksheet.title = "Matrículas"
         worksheet.sheet_view.showGridLines = False
-        worksheet.merge_cells("A1:N1")
+        worksheet.merge_cells("A1:M1")
         worksheet["A1"] = "Reporte de matrículas"
         worksheet["A1"].font = Font(bold=True, color="FFFFFF", size=16)
         worksheet["A1"].fill = PatternFill("solid", fgColor="173A72")
-        worksheet.merge_cells("A2:N2")
+        worksheet.merge_cells("A2:M2")
         worksheet["A2"] = (
             f"Sede: {get_selected_campus(request).name} · "
             f"Exportado: {timezone.localdate():%d/%m/%Y}"
         )
         headers = [
             "N.º", "Estudiante", "Curso", "Código de ficha", "Promotores", "Fecha de matrícula",
-            "Inicio", "Inscripción", "Mensualidad", "Pago total", "Pagado", "Deuda", "Recibos", "Estado",
+            "Inicio", "Inscripción", "Mensualidad", "Pago total", "Pagado", "Deuda", "Recibos",
         ]
         for column, header in enumerate(headers, start=1):
             cell = worksheet.cell(row=4, column=column, value=header)
@@ -396,13 +398,18 @@ class EnrollmentExcelExportView(EnrollmentListView):
                 enrollment.total_paid,
                 enrollment.total_debt,
                 receipts,
-                "Activa" if enrollment.active else "Inactiva",
             ])
+            if enrollment.total_debt > 0:
+                fill_color = "FFF3CD"
+            else:
+                fill_color = "D1E7DD"
+            for cell in worksheet[worksheet.max_row]:
+                cell.fill = PatternFill("solid", fgColor=fill_color)
 
         if enrollments:
             table = Table(
                 displayName="EnrollmentTable",
-                ref=f"A4:N{worksheet.max_row}",
+                ref=f"A4:M{worksheet.max_row}",
             )
             table.tableStyleInfo = TableStyleInfo(
                 name="TableStyleMedium2",
@@ -415,7 +422,7 @@ class EnrollmentExcelExportView(EnrollmentListView):
         else:
             worksheet["A4"] = "No hay matrículas que coincidan con los filtros."
 
-        widths = [10, 30, 30, 18, 26, 18, 14, 15, 15, 15, 15, 15, 32, 12]
+        widths = [10, 30, 30, 18, 26, 18, 14, 15, 15, 15, 15, 15, 32]
         for column, width in enumerate(widths, start=1):
             worksheet.column_dimensions[get_column_letter(column)].width = width
         worksheet.freeze_panes = "A5"

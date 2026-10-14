@@ -5,7 +5,7 @@ from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 
 from core.campus import get_selected_campus
-from payments.models import Installment, Payment, PaymentAllocation
+from payments.models import Installment, Payment, PaymentAllocation, receipt_number_validator
 from students.models import Enrollment
 
 
@@ -50,7 +50,17 @@ def pending_enrollments_for_campus(campus):
 
 
 class PaymentForm(forms.Form):
-    receipt_number = forms.CharField(label="N.º de recibo", max_length=40)
+    receipt_number = forms.CharField(
+        label="N.º de recibo",
+        max_length=40,
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "100 o D100",
+                "pattern": "[A-Z]?[0-9]+",
+                "title": "Ingrese solo números o una letra mayúscula seguida de números.",
+            }
+        ),
+    )
     enrollment = forms.ModelChoiceField(
         queryset=Enrollment.objects.none(),
         label="Matrícula pendiente",
@@ -61,7 +71,8 @@ class PaymentForm(forms.Form):
     notes = forms.CharField(label="Observaciones (opcional)", required=False, max_length=250, widget=forms.Textarea(attrs={"rows": 2}))
 
     def clean_receipt_number(self):
-        receipt_number = self.cleaned_data["receipt_number"].strip()
+        receipt_number = self.cleaned_data["receipt_number"].strip().upper()
+        receipt_number_validator(receipt_number)
         if Payment.objects.filter(receipt_number=receipt_number).exists():
             raise forms.ValidationError("Este número de recibo ya está registrado.")
         return receipt_number
@@ -116,9 +127,19 @@ class PaymentUpdateForm(forms.ModelForm):
     class Meta:
         model = Payment
         fields = ["receipt_number", "enrollment", "amount", "reference", "notes"]
+        widgets = {
+            "receipt_number": forms.TextInput(
+                attrs={
+                    "placeholder": "100 o D100",
+                    "pattern": "[A-Z]?[0-9]+",
+                    "title": "Ingrese solo números o una letra mayúscula seguida de números.",
+                }
+            ),
+        }
 
     def clean_receipt_number(self):
-        receipt_number = self.cleaned_data["receipt_number"].strip()
+        receipt_number = self.cleaned_data["receipt_number"].strip().upper()
+        receipt_number_validator(receipt_number)
         if Payment.objects.filter(receipt_number=receipt_number).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError("Este número de recibo ya está registrado.")
         return receipt_number

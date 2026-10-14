@@ -8,6 +8,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
     body{background:#f5f7fb}.navbar-brand{font-weight:700}.main{max-width:1200px}.card{border:0;box-shadow:0 2px 12px #1c2a4410}
+    .campus-logo{width:32px;height:32px;object-fit:contain;background:#fff;border-radius:4px;padding:2px}
     @media print {.no-print,nav,.alert,.btn{display:none!important}body{background:#fff}.card{box-shadow:none}}
   </style>
 </head>
@@ -31,7 +32,7 @@
         {% endif %}
         {% if user.is_staff %}<li class="nav-item"><a class="nav-link" href="/admin/">Administración</a></li>{% endif %}
       </ul>
-      <a class="btn btn-outline-light btn-sm me-3" href="{% url 'select-campus' %}">{% if selected_campus %}Sede: {{ selected_campus.name }} · Cambiar{% else %}Seleccionar sede{% endif %}</a>
+      <a class="btn btn-outline-light btn-sm me-3 d-inline-flex align-items-center gap-2" href="{% url 'select-campus' %}">{% if selected_campus %}{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }} · Cambiar</span>{% else %}Seleccionar sede{% endif %}</a>
       <span class="navbar-text me-3">{{ user.get_full_name|default:user.username }}</span>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-outline-light btn-sm">Salir</button></form>
     </div>

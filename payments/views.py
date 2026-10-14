@@ -1,8 +1,10 @@
+import re
 from decimal import Decimal
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
-from django.db.models import Q, Sum, F, Value, DecimalField, ExpressionWrapper
-from django.db.models.functions import Coalesce
+from django.db.models import Q, Sum, F, Value, DecimalField, ExpressionWrapper, Case, When, IntegerField, CharField
+from django.db.models.functions import Cast, Coalesce, Substr
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
@@ -11,7 +13,17 @@ from django.views.generic import FormView, ListView, DetailView, UpdateView, Del
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
 from students.models import Enrollment
 from .forms import PaymentForm, PaymentUpdateForm
-from .models import Payment, PaymentAllocation, Installment
+from .models import Payment, PaymentAllocation, Installment, receipt_number_validator
+
+
+MAX_RECEIPT_CHECK_RANGE = 10_000
+
+
+def parse_receipt_code(value):
+    receipt_number = value.strip().upper()
+    receipt_number_validator(receipt_number)
+    match = re.fullmatch(r"([A-Z]?)(\d+)", receipt_number)
+    return match.group(1), int(match.group(2))
 
 
 class SelectedCampusViewMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
@@ -51,15 +63,80 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
 
         sort = self.request.GET.get("sort", "date")
         direction = self.request.GET.get("direction", "desc")
-        sort_field = self.sortable_fields.get(sort, "created_at")
         if direction not in {"asc", "desc"}:
             direction = "desc"
+        if sort == "receipt":
+            numeric_receipt = Q(receipt_number__regex=r"^\d+$")
+            lettered_receipt = Q(receipt_number__regex=r"^[A-Z]\d+$")
+            qs = qs.annotate(
+                receipt_type=Case(
+                    When(numeric_receipt, then=Value(0)),
+                    When(lettered_receipt, then=Value(1)),
+                    default=Value(2),
+                    output_field=IntegerField(),
+                ),
+                receipt_letter=Case(
+                    When(numeric_receipt, then=Value("")),
+                    When(lettered_receipt, then=Substr("receipt_number", 1, 1)),
+                    default=F("receipt_number"),
+                    output_field=CharField(),
+                ),
+                receipt_sequence=Case(
+                    When(numeric_receipt, then=Cast("receipt_number", IntegerField())),
+                    When(lettered_receipt, then=Cast(Substr("receipt_number", 2), IntegerField())),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                ),
+            )
+            receipt_order = ["receipt_type", "receipt_letter", "receipt_sequence", "pk"]
+            if direction == "desc":
+                receipt_order = [f"-{field}" for field in receipt_order]
+            return qs.order_by(*receipt_order)
+        sort_field = self.sortable_fields.get(sort, "created_at")
         if direction == "desc":
             sort_field = f"-{sort_field}"
         return qs.order_by(sort_field, "pk")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["missing_receipts"] = None
+        context["receipt_check_error"] = None
+        context["receipt_start"] = self.request.GET.get("receipt_start", "").strip()
+        context["receipt_end"] = self.request.GET.get("receipt_end", "").strip()
+        if self.request.GET.get("check_receipts"):
+            try:
+                start_prefix, start_number = parse_receipt_code(context["receipt_start"])
+                end_prefix, end_number = parse_receipt_code(context["receipt_end"])
+                if start_prefix != end_prefix:
+                    context["receipt_check_error"] = (
+                        "Los dos recibos deben ser numéricos o usar la misma letra."
+                    )
+                else:
+                    first_number, last_number = sorted((start_number, end_number))
+                    if last_number - first_number + 1 > MAX_RECEIPT_CHECK_RANGE:
+                        context["receipt_check_error"] = (
+                            f"El rango no puede superar {MAX_RECEIPT_CHECK_RANGE:,} recibos."
+                        )
+                    else:
+                        expected_receipts = [
+                            f"{start_prefix}{number}"
+                            for number in range(first_number, last_number + 1)
+                        ]
+                        registered_receipts = set(
+                            Payment.objects.filter(
+                                campus=get_selected_campus(self.request),
+                                receipt_number__in=expected_receipts,
+                            ).values_list("receipt_number", flat=True)
+                        )
+                        context["missing_receipts"] = [
+                            receipt
+                            for receipt in expected_receipts
+                            if receipt not in registered_receipts
+                        ]
+            except (ValidationError, ValueError, TypeError):
+                context["receipt_check_error"] = (
+                    "Ingrese solo números o una letra mayúscula seguida de números."
+                )
         query_params = self.request.GET.copy()
         query_params.pop("page", None)
         context["pagination_query"] = query_params.urlencode()

@@ -12,7 +12,7 @@ class Student(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
     full_name = models.CharField("Apellidos y nombres", max_length=180, unique=True)
     document_number = models.CharField("DNI", max_length=20, blank=True)
-    phone = models.CharField("Teléfonos", max_length=120, validators=[phone_validator], blank=True)
+    phone = models.CharField("Teléfonos", max_length=120, validators=[phone_validator])
     active = models.BooleanField("Activo", default=True)
     created_at = models.DateTimeField("Registrado el", auto_now_add=True)
 
@@ -26,8 +26,8 @@ class Student(models.Model):
 class Course(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
     name = models.CharField("Curso", max_length=120)
-    schedule = models.CharField("Horario", max_length=120, blank=True)
-    group = models.CharField("Grupo / aula", max_length=50, blank=True)
+    schedule = models.CharField("Horario", max_length=120)
+    group = models.CharField("Grupo / aula", max_length=50, default="1")
     capacity = models.PositiveIntegerField("Capacidad máxima", default=20)
     start_date = models.DateField("Fecha de inicio", default=timezone.localdate)
     enrollment_fee = models.DecimalField("Costo de matrícula", max_digits=10, decimal_places=2, default=0)
@@ -46,8 +46,21 @@ class Course(models.Model):
         ]
 
     def __str__(self):
-        detail = " · ".join(x for x in [self.schedule, self.group] if x)
+        detail = f"{self.schedule} · Grupo {self.group}"
         return f"{self.name} ({detail})" if detail else self.name
+
+
+class Schedule(models.Model):
+    name = models.CharField("Horario", max_length=120, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "horario"
+        verbose_name_plural = "horarios"
+
+    def __str__(self):
+        return self.name
+
 
 class Promoter(models.Model):
     name = models.CharField("Nombre del promotor", max_length=120, unique=True)

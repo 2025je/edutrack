@@ -14,6 +14,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
 - Reportes por curso exportables a Excel, con una hoja por nombre de curso y una tabla por grupo/horario.
 - La tabla de matrículas se puede exportar a Excel respetando filtros y orden.
 - Administración de sedes, usuarios, cursos y promotores desde Django Admin.
+- Logo opcional por sede, administrable desde Django Admin y visible según la sede seleccionada.
 
 ## Requisitos
 

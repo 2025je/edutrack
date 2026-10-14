@@ -46,7 +46,18 @@
                                 {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
                             </label>
 
-                            {{ field }}
+                            {% if field.name == "phone_numbers" %}
+                                <div id="phone-fields" class="d-grid gap-2">
+                                    <div class="input-group phone-row">
+                                        {{ field }}
+                                        <button type="button" class="btn btn-outline-danger remove-phone" aria-label="Eliminar teléfono">−</button>
+                                    </div>
+                                </div>
+                                <button type="button" id="add-phone" class="btn btn-sm btn-outline-secondary mt-2">+ Agregar teléfono</button>
+                                <div class="form-text">Ingrese celulares peruanos de 9 dígitos.</div>
+                            {% else %}
+                                {{ field }}
+                            {% endif %}
                             {% endif %}
 
                             {% if field.name == "student" and "matriculas" in request.path %}
@@ -121,6 +132,38 @@ document.addEventListener("DOMContentLoaded", function () {
     const studentSelect = document.getElementById("id_student");
     const studentStatus = document.getElementById("student-course-status");
     const isEnrollmentForm = Boolean(courseSelect && studentSelect && studentStatus);
+
+    const phoneFields = document.getElementById("phone-fields");
+    const addPhoneButton = document.getElementById("add-phone");
+    if (phoneFields && addPhoneButton) {
+        const firstPhone = phoneFields.querySelector("input");
+        const initialPhones = (firstPhone.value || "").split(",").map(function (phone) {
+            return phone.trim();
+        }).filter(Boolean);
+        firstPhone.value = initialPhones.shift() || "";
+        initialPhones.forEach(function (phone) {
+            addPhoneRow(phone);
+        });
+
+        function addPhoneRow(value) {
+            const row = document.createElement("div");
+            row.className = "input-group phone-row";
+            row.innerHTML = '<input type="text" name="phone_numbers" class="form-control" placeholder="987654321" inputmode="numeric" pattern="9[0-9]{8}" maxlength="9" required value="' +
+                value.replace(/"/g, "&quot;") +
+                '"><button type="button" class="btn btn-outline-danger remove-phone" aria-label="Eliminar teléfono">−</button>';
+            phoneFields.appendChild(row);
+        }
+
+        addPhoneButton.addEventListener("click", function () {
+            addPhoneRow("");
+        });
+        phoneFields.addEventListener("click", function (event) {
+            if (event.target.classList.contains("remove-phone") &&
+                phoneFields.querySelectorAll(".phone-row").length > 1) {
+                event.target.closest(".phone-row").remove();
+            }
+        });
+    }
 
     if (isEnrollmentForm) {
         const endpoint = "{% url 'course-students-available' %}";
