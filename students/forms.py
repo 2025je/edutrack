@@ -44,7 +44,14 @@ class StudentForm(forms.ModelForm):
 class EnrollmentForm(forms.ModelForm):
     class Meta:
         model = Enrollment
-        fields = ["course", "student", "record_code", "promoter", "enrollment_fee", "monthly_fee", "active"]
+        fields = ["course", "student", "record_code", "promoter", "enrollment_date", "enrollment_fee", "monthly_fee", "active"]
+        widgets = {
+            "promoter": forms.CheckboxSelectMultiple,
+            "enrollment_date": forms.DateInput(
+                attrs={"type": "date"},
+                format="%Y-%m-%d",
+            )
+        }
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -90,9 +97,10 @@ class EnrollmentForm(forms.ModelForm):
             self.fields["student"].queryset = Student.objects.none()
         if selected:
             promoters = Promoter.objects.filter(models.Q(campuses=selected) | models.Q(campuses__isnull=True))
-            if self.instance.pk and self.instance.promoter_id:
+            if self.instance.pk:
+                selected_promoter_ids = self.instance.promoter.values_list("pk", flat=True)
                 promoters = promoters.filter(
-                    models.Q(active=True) | models.Q(pk=self.instance.promoter_id)
+                    models.Q(active=True) | models.Q(pk__in=selected_promoter_ids)
                 )
             else:
                 promoters = promoters.filter(active=True)

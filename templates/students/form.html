@@ -28,12 +28,26 @@
                 <div class="row g-3">
                     {% for field in form %}
                         <div class="col-md-6">
+                            {% if field.name == "promoter" and "matriculas" in request.path %}
+                                <label class="form-label">{{ field.label }}</label>
+                                <div class="border rounded p-3">
+                                    {% for promoter_choice in field %}
+                                        <div class="form-check">
+                                            {{ promoter_choice.tag }}
+                                            <label class="form-check-label" for="{{ promoter_choice.id_for_label }}">{{ promoter_choice.choice_label }}</label>
+                                        </div>
+                                    {% empty %}
+                                        <span class="text-secondary">No hay promotores activos disponibles.</span>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
                             <label class="form-label" for="{{ field.id_for_label }}">
                                 {{ field.label }}
                                 {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
                             </label>
 
                             {{ field }}
+                            {% endif %}
 
                             {% if field.name == "student" and "matriculas" in request.path %}
                                 <div id="student-course-help" class="form-text">Primero selecciona un curso para ver los alumnos que aún no están inscritos.</div>
@@ -84,6 +98,10 @@
 document.addEventListener("DOMContentLoaded", function () {
     // Aplicar clases de Bootstrap a los campos del formulario.
     document.querySelectorAll("input, select, textarea").forEach(function (element) {
+        if (element.type === "checkbox" || element.type === "radio") {
+            element.classList.add("form-check-input");
+            return;
+        }
         if (
             element.type !== "hidden" &&
             !element.classList.contains("form-check-input") &&

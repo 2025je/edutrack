@@ -68,7 +68,13 @@ class Enrollment(models.Model):
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Estudiante")
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Curso")
     record_code = models.CharField("Código de ficha", max_length=50, blank=True)
-    promoter = models.ForeignKey(Promoter, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Promotor", null=True, blank=True)
+    promoter = models.ManyToManyField(
+        Promoter,
+        related_name="enrollments",
+        verbose_name="Promotores",
+        blank=True,
+    )
+    enrollment_date = models.DateField("Fecha de matrícula", default=timezone.localdate)
     enrollment_fee = models.DecimalField("Costo de matrícula", max_digits=10, decimal_places=2, default=0)
     monthly_fee = models.DecimalField("Mensualidad", max_digits=10, decimal_places=2, default=0)
     active = models.BooleanField("Activa", default=True)

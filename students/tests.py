@@ -4,6 +4,7 @@ from io import BytesIO
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Campus, User
@@ -127,7 +128,7 @@ class CourseStudentExportTests(TestCase):
 		header_row = int(math_table.ref.split(":")[0][1:])
 		self.assertEqual(
 			[workbook["Matemáticas"].cell(header_row, column).value for column in range(1, 6)],
-			["N.º fila", "Alumno", "DNI", "Teléfonos", "Fecha de matrícula"],
+			["N.º", "Alumno", "DNI", "Teléfonos", "Fecha de matrícula"],
 		)
 		self.assertEqual(workbook["Matemáticas"].cell(header_row + 1, 1).value, 1)
 		self.assertEqual(workbook["Matemáticas"].cell(header_row + 2, 1).value, 2)
@@ -214,7 +215,8 @@ class StudentEnrollmentCrudTests(TestCase):
 				"course": self.course.pk,
 				"student": self.student.pk,
 				"record_code": "F-2026-01",
-				"promoter": "",
+				"promoter": [],
+				"enrollment_date": self.enrollment.enrollment_date.isoformat(),
 				"enrollment_fee": "40.00",
 				"monthly_fee": "60.00",
 				"active": "on",
@@ -224,6 +226,33 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.enrollment.refresh_from_db()
 		self.assertEqual(self.enrollment.record_code, "F-2026-01")
+
+	def test_enrollment_creation_saves_user_selected_date(self):
+		new_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Alumno con fecha elegida",
+		)
+		response = self.client.get(reverse("enrollment-create"))
+		self.assertContains(response, 'type="date"')
+		self.assertContains(response, f'value="{timezone.localdate():%Y-%m-%d}"')
+		response = self.client.post(
+			reverse("enrollment-create"),
+			{
+				"course": self.course.pk,
+				"student": new_student.pk,
+				"record_code": "F-2026-FECHA",
+				"promoter": [],
+				"enrollment_date": "2026-09-29",
+				"enrollment_fee": "25.00",
+				"monthly_fee": "35.00",
+				"active": "on",
+			},
+			follow=True,
+		)
+		self.assertEqual(response.status_code, 200)
+		created_enrollment = Enrollment.objects.get(student=new_student, course=self.course)
+		self.assertEqual(created_enrollment.enrollment_date, date(2026, 9, 29))
+		self.assertContains(response, "29/09/2026")
 
 	def test_enrollment_edit_preserves_custom_fees_instead_of_course_fees(self):
 		self.enrollment.enrollment_fee = 25
@@ -237,6 +266,34 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertEqual(str(form["enrollment_fee"].value()), "25.00")
 		self.assertEqual(str(form["monthly_fee"].value()), "55.00")
 		self.assertNotContains(response, "updateCourseFees();")
+
+	def test_enrollment_can_have_multiple_promoters(self):
+		first_promoter = Promoter.objects.create(name="Primer promotor", active=True)
+		second_promoter = Promoter.objects.create(name="Segundo promotor", active=True)
+		response = self.client.get(reverse("enrollment-update", args=[self.enrollment.pk]))
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'type="checkbox"')
+		self.assertContains(response, "Primer promotor")
+		self.assertContains(response, "Segundo promotor")
+		response = self.client.post(
+			reverse("enrollment-update", args=[self.enrollment.pk]),
+			{
+				"course": self.course.pk,
+				"student": self.student.pk,
+				"record_code": "F-2026-MULTI",
+				"promoter": [first_promoter.pk, second_promoter.pk],
+				"enrollment_date": self.enrollment.enrollment_date.isoformat(),
+				"enrollment_fee": "40.00",
+				"monthly_fee": "60.00",
+				"active": "on",
+			},
+			follow=True,
+		)
+		self.assertEqual(response.status_code, 200)
+		self.assertSetEqual(
+			set(self.enrollment.promoter.values_list("pk", flat=True)),
+			{first_promoter.pk, second_promoter.pk},
+		)
 
 	def test_deleting_student_deactivates_records_and_voids_receipt(self):
 		installment, payment, allocation = self.add_payment_history()
@@ -284,14 +341,86 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.get(reverse("enrollment-list"))
 		self.assertContains(
 			response,
-			f'href="{reverse("payment-create")}?enrollment={self.enrollment.pk}">Pagar</a>',
+			f'href="{reverse("payment-create")}?enrollment={self.enrollment.pk}"',
 		)
+		self.assertContains(response, 'aria-label="Pagar matrícula"')
+		self.assertContains(response, 'aria-label="Editar matrícula"')
+		self.assertContains(response, 'aria-label="Dar de baja matrícula"')
 		response = self.client.get(reverse("payment-create"), {"student": self.student.pk})
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(
 			str(response.context["form"]["enrollment"].value()),
 			str(self.enrollment.pk),
 		)
+
+	def test_student_name_links_to_only_that_students_enrollments(self):
+		other_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Otra alumna",
+		)
+		other_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=other_student,
+			course=self.course,
+		)
+
+		response = self.client.get(reverse("enrollment-list"))
+		self.assertContains(
+			response,
+			f'href="{reverse("student-enrollment-list", args=[self.student.pk])}">{self.student.full_name}</a>',
+		)
+
+		response = self.client.get(
+			reverse("student-enrollment-list", args=[self.student.pk])
+		)
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, f'name="student" value="{self.student.full_name}"')
+		self.assertEqual(
+			{enrollment.pk for enrollment in response.context["enrollments"]},
+			{self.enrollment.pk},
+		)
+		self.assertNotIn(other_enrollment.pk, {enrollment.pk for enrollment in response.context["enrollments"]})
+
+	def test_course_promoter_and_enrollment_date_links_filter_exactly(self):
+		promoter = Promoter.objects.create(name="Promotor seleccionado", active=True)
+		self.enrollment.enrollment_date = date(2026, 9, 29)
+		self.enrollment.save(update_fields=["enrollment_date"])
+		self.enrollment.promoter.add(promoter)
+		other_student = Student.objects.create(campus=self.campus, full_name="Otra estudiante")
+		other_course = Course.objects.create(
+			campus=self.campus,
+			name=self.course.name,
+			schedule="Miércoles",
+			group="B",
+		)
+		other_promoter = Promoter.objects.create(name="Otro promotor", active=True)
+		other_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=other_student,
+			course=other_course,
+			enrollment_date=date(2026, 10, 1),
+		)
+		other_enrollment.promoter.add(other_promoter)
+
+		response = self.client.get(reverse("enrollment-list"))
+		self.assertContains(response, f'?course_id={self.course.pk}')
+		self.assertContains(response, f'?promoter_id={promoter.pk}')
+		self.assertContains(response, "?enrollment_date=2026-09-29")
+
+		filters = [
+			({"course_id": self.course.pk}, "course", self.course.name),
+			({"promoter_id": promoter.pk}, "promoter", promoter.name),
+			({"enrollment_date": "2026-09-29"}, "enrollment_date", "2026-09-29"),
+		]
+		for query, input_name, expected_value in filters:
+			with self.subTest(query=query):
+				response = self.client.get(reverse("enrollment-list"), query)
+				self.assertEqual(response.status_code, 200)
+				self.assertEqual(
+					{enrollment.pk for enrollment in response.context["enrollments"]},
+					{self.enrollment.pk},
+				)
+				self.assertContains(response, f'name="{input_name}" value="{expected_value}"')
 
 	def test_enrollment_list_shows_costs_and_outstanding_debt(self):
 		self.add_payment_history()
@@ -318,11 +447,86 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertEqual(str(listed_enrollment.total_paid), "40.00")
 		self.assertEqual(str(listed_enrollment.total_debt), "90.00")
 
+	def test_enrollment_excel_export_returns_workbook_and_respects_filters(self):
+		other_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Otro estudiante para exportar",
+		)
+		Enrollment.objects.create(
+			campus=self.campus,
+			student=other_student,
+			course=self.course,
+		)
+		response = self.client.get(
+			reverse("enrollment-excel"),
+			{"student": self.student.full_name},
+		)
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(
+			response["Content-Type"],
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		)
+		self.assertTrue(response.content.startswith(b"PK"))
+		self.assertIn(b"attachment; filename=\"matriculas_", response["Content-Disposition"].encode())
+		workbook = load_workbook(BytesIO(response.content), data_only=True)
+		worksheet = workbook["Matrículas"]
+		rows = list(worksheet.iter_rows(values_only=True))
+		self.assertIn("Estudiante de prueba", [value for row in rows for value in row])
+		self.assertNotIn("Otro estudiante para exportar", [value for row in rows for value in row])
+		self.assertEqual(rows[3][0], "N.º")
+		self.assertEqual(rows[4][0], 1)
+
+	def test_enrollment_row_numbers_follow_oldest_enrollment_date(self):
+		self.enrollment.enrollment_date = date(2026, 9, 15)
+		self.enrollment.save(update_fields=["enrollment_date"])
+		older_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Inscripción más antigua",
+		)
+		older_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=older_student,
+			course=self.course,
+			enrollment_date=date(2026, 8, 1),
+		)
+
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{"sort": "student", "direction": "desc"},
+		)
+		self.assertContains(response, "N.º")
+		self.assertContains(response, "?sort=row_number&amp;direction=asc")
+		ranks = {enrollment.pk: enrollment.row_number for enrollment in response.context["enrollments"]}
+		self.assertEqual(ranks[older_enrollment.pk], 1)
+		self.assertEqual(ranks[self.enrollment.pk], 2)
+
+		ascending = self.client.get(
+			reverse("enrollment-list"),
+			{"sort": "row_number", "direction": "asc"},
+		)
+		descending = self.client.get(
+			reverse("enrollment-list"),
+			{"sort": "row_number", "direction": "desc"},
+		)
+		self.assertEqual(ascending.context["enrollments"][0].pk, older_enrollment.pk)
+		self.assertEqual(descending.context["enrollments"][0].pk, self.enrollment.pk)
+
+		response = self.client.get(reverse("enrollment-excel"))
+		workbook = load_workbook(BytesIO(response.content), data_only=True)
+		worksheet = workbook["Matrículas"]
+		ranks_by_student = {
+			row[1]: row[0]
+			for row in worksheet.iter_rows(min_row=5, values_only=True)
+		}
+		self.assertEqual(ranks_by_student["Inscripción más antigua"], 1)
+		self.assertEqual(ranks_by_student[self.student.full_name], 2)
+
 	def test_enrollment_filters_cover_student_course_record_code_and_promoter(self):
 		promoter = Promoter.objects.create(name="Promotor de prueba", active=True)
 		self.enrollment.record_code = "FICHA-42"
-		self.enrollment.promoter = promoter
-		self.enrollment.save(update_fields=["record_code", "promoter"])
+		self.enrollment.record_code = "FICHA-42"
+		self.enrollment.save(update_fields=["record_code"])
+		self.enrollment.promoter.add(promoter)
 
 		filters = {
 			"student": "Estudiante de",
@@ -381,6 +585,65 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertContains(response, "table-success")
 		self.assertNotContains(response, "<th>Sede</th>")
 
+	def test_enrollment_list_filters_by_debt_status(self):
+		Installment.objects.create(
+			enrollment=self.enrollment,
+			concept="Pendiente",
+			amount=100,
+			due_date=date(2026, 10, 14),
+		)
+		no_debt_student = Student.objects.create(
+			campus=self.campus,
+			full_name="Estudiante sin deuda",
+		)
+		no_debt_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=no_debt_student,
+			course=self.course,
+		)
+
+		with_debt = self.client.get(reverse("enrollment-list"), {"debt_status": "with_debt"})
+		without_debt = self.client.get(reverse("enrollment-list"), {"debt_status": "without_debt"})
+
+		self.assertEqual(
+			{enrollment.pk for enrollment in with_debt.context["enrollments"]},
+			{self.enrollment.pk},
+		)
+		self.assertEqual(
+			{enrollment.pk for enrollment in without_debt.context["enrollments"]},
+			{no_debt_enrollment.pk},
+		)
+		self.assertContains(with_debt, 'value="with_debt" selected')
+		self.assertContains(without_debt, 'value="without_debt" selected')
+
+	def test_enrollment_table_sorts_by_student_and_outstanding_debt(self):
+		other_student = Student.objects.create(campus=self.campus, full_name="Zeta Estudiante")
+		other_enrollment = Enrollment.objects.create(
+			campus=self.campus,
+			student=other_student,
+			course=self.course,
+		)
+
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{"sort": "student", "direction": "desc"},
+		)
+		self.assertEqual(response.context["enrollments"][0].pk, other_enrollment.pk)
+		self.assertContains(response, "?sort=student&amp;direction=asc")
+
+		self.add_payment_history()
+		Installment.objects.create(
+			enrollment=other_enrollment,
+			concept="Deuda menor",
+			amount=30,
+			due_date=date(2026, 10, 14),
+		)
+		response = self.client.get(
+			reverse("enrollment-list"),
+			{"sort": "total_debt", "direction": "desc"},
+		)
+		self.assertEqual(response.context["enrollments"][0].pk, self.enrollment.pk)
+
 	def test_enrollment_filters_are_preserved_in_pagination(self):
 		for index in range(26):
 			student = Student.objects.create(
@@ -398,6 +661,42 @@ class StudentEnrollmentCrudTests(TestCase):
 
 		self.assertTrue(response.context["is_paginated"])
 		self.assertContains(response, "?record_code=PAGINADO&amp;page=2")
+
+	def test_enrollment_list_shows_associated_receipt_numbers_and_void_status(self):
+		confirmed_payment = Payment.objects.create(
+			campus=self.campus,
+			enrollment=self.enrollment,
+			cashier=self.user,
+			receipt_number="RECIBO-ACTIVO-01",
+			amount=20,
+		)
+		void_payment = Payment.objects.create(
+			campus=self.campus,
+			enrollment=self.enrollment,
+			cashier=self.user,
+			receipt_number="RECIBO-ANULADO-02",
+			amount=15,
+			status=Payment.Status.VOID,
+		)
+
+		response = self.client.get(reverse("enrollment-list"))
+
+		self.assertContains(response, "Recibos")
+		self.assertContains(response, "RECIBO-ACTIVO-01")
+		self.assertContains(response, "RECIBO-ANULADO-02")
+		self.assertContains(response, "Anulado")
+		self.assertContains(
+			response,
+			f'href="{reverse("payment-receipt", args=[confirmed_payment.pk])}"',
+		)
+		self.assertContains(
+			response,
+			f'href="{reverse("payment-receipt", args=[void_payment.pk])}"',
+		)
+		self.assertEqual(
+			self.client.get(reverse("payment-receipt", args=[void_payment.pk])).status_code,
+			200,
+		)
 
 	def test_student_form_accepts_multiple_phones_and_labels_document_as_dni(self):
 		response = self.client.get(reverse("student-update", args=[self.student.pk]))

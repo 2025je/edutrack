@@ -1,13 +1,14 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Prefetch, Count, DecimalField, F, OuterRef, Subquery, Sum, Value
+from django.db.models import Case, Count, DecimalField, F, OuterRef, Prefetch, Q, Subquery, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
-from django.shortcuts import redirect
+from django.shortcuts import get_object_or_404, redirect
 from django.http import JsonResponse
 from django.urls import reverse_lazy
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView, View
 from itertools import groupby
 import re
@@ -15,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
+from io import BytesIO
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
 from .models import Student, Enrollment, Course
 from .forms import StudentForm, EnrollmentForm
@@ -123,6 +125,21 @@ class EnrollmentListView(CampusScopedMixin, ListView):
     template_name = "students/enrollment_list.html"
     context_object_name = "enrollments"
     paginate_by = 25
+    sortable_fields = {
+        "row_number": "enrollment_date",
+        "student": "student__full_name",
+        "course": "course__name",
+        "record_code": "record_code",
+        "promoter": "promoter__name",
+        "enrollment_date": "enrollment_date",
+        "start_date": "course__start_date",
+        "enrollment_fee": "enrollment_fee",
+        "monthly_fee": "monthly_fee",
+        "total_enrollment_cost": "total_enrollment_cost",
+        "total_paid": "total_paid",
+        "total_debt": "total_debt",
+        "active": "active",
+    }
 
     def get_queryset(self):
         from decimal import Decimal
@@ -145,9 +162,48 @@ class EnrollmentListView(CampusScopedMixin, ListView):
                 output_field=money_field,
             )
         ).annotate(debt_balance=F("amount") - F("paid_total"))
+        paid_totals = (
+            installments.filter(enrollment_id=OuterRef("pk"))
+            .order_by()
+            .values("enrollment_id")
+            .annotate(total=Sum("paid_total"))
+            .values("total")[:1]
+        )
+        debt_totals = (
+            installments.filter(enrollment_id=OuterRef("pk"))
+            .order_by()
+            .values("enrollment_id")
+            .annotate(
+                total=Sum(
+                    Case(
+                        When(debt_balance__gt=0, then=F("debt_balance")),
+                        default=Value(Decimal("0.00"), output_field=money_field),
+                        output_field=money_field,
+                    )
+                )
+            )
+            .values("total")[:1]
+        )
         qs = self.campus_queryset(
-            Enrollment.objects.select_related("campus", "student", "course", "promoter")
-            .prefetch_related(Prefetch("installments", queryset=installments))
+            Enrollment.objects.select_related("campus", "student", "course")
+            .annotate(
+                total_enrollment_cost=F("enrollment_fee") + F("monthly_fee"),
+                total_paid=Coalesce(
+                    Subquery(paid_totals, output_field=money_field),
+                    Value(Decimal("0.00"), output_field=money_field),
+                    output_field=money_field,
+                ),
+                total_debt=Coalesce(
+                    Subquery(debt_totals, output_field=money_field),
+                    Value(Decimal("0.00"), output_field=money_field),
+                    output_field=money_field,
+                ),
+            )
+            .prefetch_related(
+                Prefetch("installments", queryset=installments),
+                Prefetch("payments", queryset=Payment.objects.order_by("created_at", "pk")),
+                "promoter",
+            )
         )
         filters = {
             "student__full_name__icontains": self.request.GET.get("student", "").strip(),
@@ -158,7 +214,40 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         for field, value in filters.items():
             if value:
                 qs = qs.filter(**{field: value})
-        return qs.order_by("-created_at")
+        for parameter, field in (
+            ("course_id", "course_id"),
+            ("promoter_id", "promoter__pk"),
+            ("student_id", "student_id"),
+        ):
+            value = self.request.GET.get(parameter, "").strip()
+            if value:
+                try:
+                    qs = qs.filter(**{field: int(value)})
+                except ValueError:
+                    qs = qs.none()
+        enrollment_date = self.request.GET.get("enrollment_date", "").strip()
+        if enrollment_date:
+            parsed_date = parse_date(enrollment_date)
+            qs = qs.filter(enrollment_date=parsed_date) if parsed_date else qs.none()
+        debt_status = self.request.GET.get("debt_status", "")
+        if debt_status == "with_debt":
+            qs = qs.filter(total_debt__gt=0)
+        elif debt_status == "without_debt":
+            qs = qs.filter(total_debt=0)
+        qs = qs.distinct()
+        sort = self.request.GET.get("sort", "created_at")
+        direction = self.request.GET.get("direction", "desc")
+        sort_field = self.sortable_fields.get(sort, "created_at")
+        if direction not in {"asc", "desc"}:
+            direction = "desc"
+        if sort == "row_number":
+            chronological_fields = ["enrollment_date", "created_at", "pk"]
+            if direction == "desc":
+                chronological_fields = [f"-{field}" for field in chronological_fields]
+            return qs.order_by(*chronological_fields)
+        if direction == "desc":
+            sort_field = f"-{sort_field}"
+        return qs.order_by(sort_field, "pk")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -166,17 +255,49 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         query_params = self.request.GET.copy()
         query_params.pop("page", None)
         context["pagination_query"] = query_params.urlencode()
+        context["current_sort"] = self.request.GET.get("sort", "created_at")
+        context["current_direction"] = self.request.GET.get("direction", "desc")
+        context["course_filter_value"] = self.request.GET.get("course", "")
+        course_id = self.request.GET.get("course_id", "")
+        if course_id.isdigit():
+            selected_course = Course.objects.filter(
+                pk=course_id, campus=get_selected_campus(self.request)
+            ).first()
+            if selected_course:
+                context["course_filter_value"] = selected_course.name
+        context["promoter_filter_value"] = self.request.GET.get("promoter", "")
+        promoter_id = self.request.GET.get("promoter_id", "")
+        if promoter_id.isdigit():
+            from .models import Promoter
+            selected_promoter = Promoter.objects.filter(
+                Q(campuses=get_selected_campus(self.request)) | Q(campuses__isnull=True),
+                pk=promoter_id,
+            ).first()
+            if selected_promoter:
+                context["promoter_filter_value"] = selected_promoter.name
+        context["enrollment_date_filter_value"] = self.request.GET.get("enrollment_date", "")
+        context["debt_filter_value"] = self.request.GET.get("debt_status", "")
+        context["sort_urls"] = {}
+        for key in self.sortable_fields:
+            sort_params = self.request.GET.copy()
+            sort_params.pop("page", None)
+            if context["current_sort"] == key:
+                next_direction = "desc" if context["current_direction"] == "asc" else "asc"
+            else:
+                next_direction = "asc"
+            sort_params["sort"] = key
+            sort_params["direction"] = next_direction
+            context["sort_urls"][key] = f"?{sort_params.urlencode()}"
+        chronological_ids = self.object_list.order_by(
+            "enrollment_date", "created_at", "pk"
+        ).values_list("pk", flat=True)
+        row_numbers = {
+            enrollment_id: row_number
+            for row_number, enrollment_id in enumerate(chronological_ids, start=1)
+        }
         for enrollment in context["enrollments"]:
-            enrollment.total_enrollment_cost = enrollment.enrollment_fee + enrollment.monthly_fee
+            enrollment.row_number = row_numbers[enrollment.pk]
             installments = enrollment.installments.all()
-            enrollment.total_paid = sum(
-                (installment.paid_total for installment in installments),
-                Decimal("0.00"),
-            )
-            enrollment.total_debt = sum(
-                (max(installment.debt_balance, Decimal("0.00")) for installment in installments),
-                Decimal("0.00"),
-            )
             enrollment.has_outstanding_debt = enrollment.active and enrollment.total_debt > 0
             enrollment.has_no_debt = enrollment.active and enrollment.total_debt == 0
         context["payable_enrollment_ids"] = set()
@@ -187,6 +308,123 @@ class EnrollmentListView(CampusScopedMixin, ListView):
                 .values_list("pk", flat=True)
             )
         return context
+
+
+class StudentEnrollmentListView(EnrollmentListView):
+    def get_student(self):
+        if not hasattr(self, "student"):
+            self.student = get_object_or_404(
+                Student,
+                pk=self.kwargs["student_id"],
+                campus=get_selected_campus(self.request),
+            )
+        return self.student
+
+    def get_queryset(self):
+        self.get_student()
+        return super().get_queryset().filter(student_id=self.student.pk)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["filtered_student"] = self.get_student()
+        return context
+
+
+class EnrollmentExcelExportView(EnrollmentListView):
+    def get(self, request, *args, **kwargs):
+        self.request = request
+        enrollments = list(self.get_queryset())
+        row_numbers = {
+            enrollment.pk: row_number
+            for row_number, enrollment in enumerate(
+                sorted(enrollments, key=lambda item: (item.enrollment_date, item.created_at, item.pk)),
+                start=1,
+            )
+        }
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Matrículas"
+        worksheet.sheet_view.showGridLines = False
+        worksheet.merge_cells("A1:N1")
+        worksheet["A1"] = "Reporte de matrículas"
+        worksheet["A1"].font = Font(bold=True, color="FFFFFF", size=16)
+        worksheet["A1"].fill = PatternFill("solid", fgColor="173A72")
+        worksheet.merge_cells("A2:N2")
+        worksheet["A2"] = (
+            f"Sede: {get_selected_campus(request).name} · "
+            f"Exportado: {timezone.localdate():%d/%m/%Y}"
+        )
+        headers = [
+            "N.º", "Estudiante", "Curso", "Código de ficha", "Promotores", "Fecha de matrícula",
+            "Inicio", "Inscripción", "Mensualidad", "Pago total", "Pagado", "Deuda", "Recibos", "Estado",
+        ]
+        for column, header in enumerate(headers, start=1):
+            cell = worksheet.cell(row=4, column=column, value=header)
+            cell.font = Font(bold=True, color="173A72")
+            cell.fill = PatternFill("solid", fgColor="EAF1FF")
+
+        for enrollment in enrollments:
+            promoters = ", ".join(enrollment.promoter.values_list("name", flat=True)) or "—"
+            receipts = ", ".join(
+                f"{payment.receipt_number} (Anulado)"
+                if payment.status == "ANULADO"
+                else payment.receipt_number
+                for payment in enrollment.payments.all()
+            ) or "—"
+            worksheet.append([
+                row_numbers[enrollment.pk],
+                enrollment.student.full_name,
+                str(enrollment.course),
+                enrollment.record_code or "—",
+                promoters,
+                enrollment.enrollment_date,
+                enrollment.course.start_date,
+                enrollment.enrollment_fee,
+                enrollment.monthly_fee,
+                enrollment.total_enrollment_cost,
+                enrollment.total_paid,
+                enrollment.total_debt,
+                receipts,
+                "Activa" if enrollment.active else "Inactiva",
+            ])
+
+        if enrollments:
+            table = Table(
+                displayName="EnrollmentTable",
+                ref=f"A4:N{worksheet.max_row}",
+            )
+            table.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium2",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False,
+            )
+            worksheet.add_table(table)
+        else:
+            worksheet["A4"] = "No hay matrículas que coincidan con los filtros."
+
+        widths = [10, 30, 30, 18, 26, 18, 14, 15, 15, 15, 15, 15, 32, 12]
+        for column, width in enumerate(widths, start=1):
+            worksheet.column_dimensions[get_column_letter(column)].width = width
+        worksheet.freeze_panes = "A5"
+        for row in worksheet.iter_rows(min_row=5, min_col=6, max_col=7):
+            for cell in row:
+                cell.number_format = "DD/MM/YYYY"
+        for row in worksheet.iter_rows(min_row=5, min_col=8, max_col=12):
+            for cell in row:
+                cell.number_format = '"S/" #,##0.00'
+
+        output = BytesIO()
+        workbook.save(output)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="matriculas_{timezone.localdate():%Y%m%d}.xlsx"'
+        )
+        return response
 
 
 class EnrollmentCreateView(CampusScopedMixin, CreateView):
@@ -236,7 +474,8 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
 
     def get_queryset(self):
         return self.campus_queryset(
-            Enrollment.objects.select_related("campus", "student", "course", "promoter")
+            Enrollment.objects.select_related("campus", "student", "course")
+            .prefetch_related("promoter")
         )
 
     def get_form_kwargs(self):
@@ -378,7 +617,7 @@ class CourseStudentExportView(CampusScopedMixin, View):
                 section.font = Font(bold=True, color="FFFFFF")
                 section.fill = PatternFill("solid", fgColor="1E9E6A")
 
-                headers = ["N.º fila", "Alumno", "DNI", "Teléfonos", "Fecha de matrícula"]
+                headers = ["N.º", "Alumno", "DNI", "Teléfonos", "Fecha de matrícula"]
                 header_row = section_row + 1
                 for column, header in enumerate(headers, start=1):
                     cell = worksheet.cell(row=header_row, column=column, value=header)
@@ -392,7 +631,7 @@ class CourseStudentExportView(CampusScopedMixin, View):
                         enrollment.student.full_name,
                         enrollment.student.document_number,
                         enrollment.student.phone,
-                        enrollment.created_at.date(),
+                        enrollment.enrollment_date,
                     ])
 
                 table = Table(
