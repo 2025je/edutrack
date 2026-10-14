@@ -1,34 +1,34 @@
 {% extends "base.html" %}{% block title %}Panel principal · EduTrack{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <div><h1 class="h3 mb-1">Panel principal</h1><p class="text-secondary mb-0">Resumen de la operación</p></div>
-  {% if user.is_superuser or user.can_register_payments %}<a class="btn btn-primary" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}
+<div class="flex between items-center wrap gap mb">
+  <div><h1>Panel principal</h1><p class="muted mb-0">Resumen de la operación</p></div>
+  {% if user.is_superuser or user.can_register_payments %}<a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}
 </div>
-<div class="row g-3">
+<div class="row">
   {% if user.is_superuser or user.can_manage_students %}
-  <div class="col-md-6 col-xl-3"><div class="card p-3"><div class="text-secondary">Estudiantes</div><div class="display-6">{{ student_count }}</div></div></div>
-  <div class="col-md-6 col-xl-3"><div class="card p-3"><div class="text-secondary">Matrículas activas</div><div class="display-6">{{ enrollment_count }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Estudiantes</div><div class="stat">{{ student_count }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Matrículas activas</div><div class="stat">{{ enrollment_count }}</div></div></div>
   {% endif %}
   {% if user.is_superuser or user.can_register_payments %}
-  <div class="col-md-6 col-xl-3"><div class="card p-3"><div class="text-secondary">Pagos confirmados</div><div class="h2 mt-2">S/ {{ payments_total|floatformat:2 }}</div><small class="text-secondary">Acumulado histórico</small></div></div>
-  <div class="col-md-6 col-xl-3"><div class="card p-3"><div class="text-secondary">Saldo pendiente</div><div class="h2 mt-2">S/ {{ pending_total|floatformat:2 }}</div><small class="text-secondary">Cuotas activas</small></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Pagos confirmados</div><div class="stat-md">S/ {{ payments_total|floatformat:2 }}</div><small class="muted">Acumulado histórico</small></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Saldo pendiente</div><div class="stat-md">S/ {{ pending_total|floatformat:2 }}</div><small class="muted">Cuotas activas</small></div></div>
   {% endif %}
 </div>
-<div class="card p-4 mt-4"><h2 class="h5">Accesos rápidos</h2><div class="d-flex flex-wrap gap-2">
+<div class="card card-pad"><h2>Accesos rápidos</h2><div class="flex wrap gap">
   {% if user.is_superuser or user.can_manage_students %}
-  <a class="btn btn-outline-primary" href="{% url 'student-create' %}">Registrar estudiante</a>
-  <a class="btn btn-outline-primary" href="{% url 'enrollment-create' %}">Registrar matrícula</a>
-  <a class="btn btn-outline-primary" href="{% url 'student-list' %}">Consultar estudiantes</a>
-  <a class="btn btn-outline-primary" href="{% url 'enrollment-list' %}">Consultar matrículas</a>
-  <a class="btn btn-outline-primary" href="{% url 'course-student-tables' %}">Alumnos por curso</a>
+  <a class="btn-flat blue-text" href="{% url 'student-create' %}">Registrar estudiante</a>
+  <a class="btn-flat blue-text" href="{% url 'enrollment-create' %}">Registrar matrícula</a>
+  <a class="btn-flat blue-text" href="{% url 'student-list' %}">Consultar estudiantes</a>
+  <a class="btn-flat blue-text" href="{% url 'enrollment-list' %}">Consultar matrículas</a>
+  <a class="btn-flat blue-text" href="{% url 'course-student-tables' %}">Alumnos por curso</a>
   {% endif %}
   {% if user.is_superuser or user.can_register_payments %}
-  <a class="btn btn-outline-primary" href="{% url 'payment-create' %}">Registrar pago</a>
-  <a class="btn btn-outline-primary" href="{% url 'payment-list' %}">Consultar recibos</a>
-  <a class="btn btn-outline-primary" href="{% url 'installment-list' %}">Ver cuotas pendientes</a>
-  <a class="btn btn-outline-primary" href="{% url 'pending-debts' %}">Consultar deudas</a>
+  <a class="btn-flat blue-text" href="{% url 'payment-create' %}">Registrar pago</a>
+  <a class="btn-flat blue-text" href="{% url 'payment-list' %}">Consultar recibos</a>
+  <a class="btn-flat blue-text" href="{% url 'installment-list' %}">Ver cuotas pendientes</a>
+  <a class="btn-flat blue-text" href="{% url 'pending-debts' %}">Consultar deudas</a>
   {% endif %}
-  {% if not user.is_superuser and not user.can_manage_students and not user.can_register_payments %}<p class="text-secondary mb-0">Tu usuario no tiene permisos operativos asignados. Contacta al administrador.</p>{% endif %}
+  {% if not user.is_superuser and not user.can_manage_students and not user.can_register_payments %}<p class="muted mb-0">Tu usuario no tiene permisos operativos asignados. Contacta al administrador.</p>{% endif %}
 </div></div>
-<div class="card p-4 mt-3"><h2 class="h5">Sedes habilitadas</h2>{% if campuses %}<ul class="mb-0">{% for campus in campuses %}<li>{{ campus.name }}</li>{% endfor %}</ul>{% else %}<p class="text-secondary mb-0">Tu usuario aún no tiene sedes asignadas. Solicita al administrador que configure tus permisos.</p>{% endif %}</div>
+<div class="card card-pad"><h2>Sedes habilitadas</h2>{% if campuses %}<ul class="browser-default mb-0" style="padding-left:1.5rem;list-style:disc">{% for campus in campuses %}<li>{{ campus.name }}</li>{% endfor %}</ul>{% else %}<p class="muted mb-0">Tu usuario aún no tiene sedes asignadas. Solicita al administrador que configure tus permisos.</p>{% endif %}</div>
 {% endblock %}

@@ -1,30 +1,30 @@
 {% extends "base.html" %}{% block title %}Pagos · EduTrack{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h3">Pagos y recibos</h1><a class="btn btn-primary" href="{% url 'payment-create' %}">+ Registrar pago</a></div>
-<form method="get" class="row g-2 mb-3">
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="receipt" value="{{ request.GET.receipt }}" placeholder="Filtrar por recibo"></div>
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="student" value="{{ request.GET.student }}" placeholder="Filtrar por estudiante"></div>
-	<div class="col-sm-6 col-lg-2"><label class="form-label" for="payment-date-from">Fecha de pago - Desde</label><input class="form-control" id="payment-date-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
-	<div class="col-sm-6 col-lg-2"><label class="form-label" for="payment-date-to">Fecha de pago - Hasta</label><input class="form-control" id="payment-date-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
-	<div class="col-sm-6 col-lg-2"><select class="form-select" name="status" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option value="CONFIRMADO" {% if request.GET.status == "CONFIRMADO" %}selected{% endif %}>Confirmado</option><option value="ANULADO" {% if request.GET.status == "ANULADO" %}selected{% endif %}>Anulado</option></select></div>
-	<div class="col-auto"><button class="btn btn-primary" type="submit">Filtrar</button> <a class="btn btn-outline-secondary" href="{% url 'payment-list' %}">Limpiar</a></div>
+<div class="flex between items-center wrap gap mb"><h1 class="mb-0">Pagos y recibos</h1><a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a></div>
+<form method="get" class="row">
+	<div class="col s12 m6 l3"><label for="payment-receipt">Recibo</label><input id="payment-receipt" name="receipt" value="{{ request.GET.receipt }}" placeholder="Filtrar por recibo"></div>
+	<div class="col s12 m6 l3"><label for="payment-student">Estudiante</label><input id="payment-student" name="student" value="{{ request.GET.student }}" placeholder="Filtrar por estudiante"></div>
+	<div class="col s12 m6 l2"><label for="payment-date-from">Fecha de pago - Desde</label><input id="payment-date-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+	<div class="col s12 m6 l2"><label for="payment-date-to">Fecha de pago - Hasta</label><input id="payment-date-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+	<div class="col s12 m6 l2"><label for="payment-status">Estado</label><select id="payment-status" name="status" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option value="CONFIRMADO" {% if request.GET.status == "CONFIRMADO" %}selected{% endif %}>Confirmado</option><option value="ANULADO" {% if request.GET.status == "ANULADO" %}selected{% endif %}>Anulado</option></select></div>
+	<div class="col s12"><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Limpiar</a></div>
 </form>
-<div class="card card-body mb-3">
-	<h2 class="h5">Verificar recibos faltantes</h2>
-	<p class="text-secondary mb-2">Indique los extremos del rango. Ambos recibos deben ser numéricos o usar la misma letra.</p>
-	<form method="get" class="row g-2 align-items-end">
-		<div class="col-sm-4"><label class="form-label" for="receipt-start">Desde</label><input class="form-control" id="receipt-start" name="receipt_start" value="{{ receipt_start }}" placeholder="1 o D1" pattern="[A-Z]?[0-9]+"></div>
-		<div class="col-sm-4"><label class="form-label" for="receipt-end">Hasta</label><input class="form-control" id="receipt-end" name="receipt_end" value="{{ receipt_end }}" placeholder="7 o D7" pattern="[A-Z]?[0-9]+"></div>
-		<div class="col-auto"><button class="btn btn-outline-primary" type="submit" name="check_receipts" value="1">Verificar</button></div>
+<div class="card card-pad">
+	<h2>Verificar recibos faltantes</h2>
+	<p class="muted">Indique los extremos del rango. Ambos recibos deben ser numéricos o usar la misma letra.</p>
+	<form method="get" class="row mb-0">
+		<div class="col s12 m4"><label for="receipt-start">Desde</label><input id="receipt-start" name="receipt_start" value="{{ receipt_start }}" placeholder="1 o D1" pattern="[A-Z]?[0-9]+"></div>
+		<div class="col s12 m4"><label for="receipt-end">Hasta</label><input id="receipt-end" name="receipt_end" value="{{ receipt_end }}" placeholder="7 o D7" pattern="[A-Z]?[0-9]+"></div>
+		<div class="col s12 m4"><button class="btn-flat blue-text" type="submit" name="check_receipts" value="1">Verificar</button></div>
 	</form>
-	{% if receipt_check_error %}<div class="alert alert-warning mt-3 mb-0">{{ receipt_check_error }}</div>{% elif missing_receipts is not None %}<div class="mt-3">{% if missing_receipts %}<strong>Recibos no registrados:</strong> {{ missing_receipts|join:", " }}{% else %}<span class="text-success">Todos los recibos del rango están registrados.</span>{% endif %}</div>{% endif %}
+	{% if receipt_check_error %}<div class="note note-warning mb-0">{{ receipt_check_error }}</div>{% elif missing_receipts is not None %}<div class="mt">{% if missing_receipts %}<strong>Recibos no registrados:</strong> {{ missing_receipts|join:", " }}{% else %}<span class="success">Todos los recibos del rango están registrados.</span>{% endif %}</div>{% endif %}
 </div>
-<div class="card table-responsive"><table class="table table-hover mb-0"><thead><tr>
+<div class="card table-wrap"><table class="highlight"><thead><tr>
 <th>N.º</th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.receipt }}">Recibo{% if current_sort == "receipt" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.date }}">Fecha{% if current_sort == "date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th>Cajero</th><th>Importe</th><th>Estado</th><th class="text-end">Acciones</th></tr></thead><tbody>
-{% for p in payments %}<tr><td>{{ p.row_number }}</td><td><a href="{% url 'payment-receipt' p.pk %}">{{ p.receipt_number }}</a></td><td>{{ p.created_at|date:"d/m/Y H:i" }}</td><td>{{ p.enrollment.student.full_name }}</td><td>{{ p.cashier.username }}</td><td>S/ {{ p.amount|floatformat:2 }}</td><td>{{ p.get_status_display }}</td><td class="text-end">{% if p.status == "CONFIRMADO" %}<div class="btn-group btn-group-sm"><a class="btn btn-outline-primary" href="{% url 'payment-update' p.pk %}">Editar</a><a class="btn btn-outline-danger" href="{% url 'payment-delete' p.pk %}">Anular</a></div>{% else %}<span class="text-secondary">—</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="8" class="text-center text-secondary py-4">Todavía no hay pagos registrados.</td></tr>{% endfor %}
+<th><a href="{{ sort_urls.receipt }}">Recibo{% if current_sort == "receipt" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.date }}">Fecha{% if current_sort == "date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th>Cajero</th><th>Importe</th><th>Estado</th><th class="right-align">Acciones</th></tr></thead><tbody>
+{% for p in payments %}<tr><td>{{ p.row_number }}</td><td><a href="{% url 'payment-receipt' p.pk %}">{{ p.receipt_number }}</a></td><td>{{ p.created_at|date:"d/m/Y H:i" }}</td><td>{{ p.enrollment.student.full_name }}</td><td>{{ p.cashier.username }}</td><td>S/ {{ p.amount|floatformat:2 }}</td><td>{{ p.get_status_display }}</td><td class="right-align">{% if p.status == "CONFIRMADO" %}<div class="flex gap" style="justify-content:flex-end"><a class="btn-small icon-only blue darken-2" href="{% url 'payment-update' p.pk %}" aria-label="Editar pago" title="Editar pago"><i class="material-icons" aria-hidden="true">edit</i></a><a class="btn-small icon-only red darken-1" href="{% url 'payment-delete' p.pk %}" aria-label="Anular pago" title="Anular pago"><i class="material-icons" aria-hidden="true">block</i></a></div>{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="8" class="center-align muted">Todavía no hay pagos registrados.</td></tr>{% endfor %}
 </tbody></table></div>{% include "shared/pagination.html" %}
 {% endblock %}

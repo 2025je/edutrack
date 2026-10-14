@@ -390,8 +390,10 @@ class StudentEnrollmentCrudTests(TestCase):
 		response = self.client.get(reverse("student-list"))
 		self.assertContains(
 			response,
-			f'href="{reverse("payment-create")}?student={self.student.pk}">Pagar</a>',
+			f'href="{reverse("payment-create")}?student={self.student.pk}"',
 		)
+		self.assertContains(response, 'aria-label="Editar estudiante"')
+		self.assertContains(response, 'aria-label="Dar de baja estudiante"')
 		response = self.client.get(reverse("enrollment-list"))
 		self.assertContains(
 			response,
@@ -427,7 +429,7 @@ class StudentEnrollmentCrudTests(TestCase):
 		self.assertEqual(students[self.student.pk].row_number, 1)
 		self.assertContains(response, "Cursos matriculados")
 		self.assertContains(response, ">N.º</a>")
-		self.assertContains(response, "text-bg-danger")
+		self.assertContains(response, "chip red darken-1")
 		self.assertNotContains(response, "<th>Sede</th>")
 
 		by_name = self.client.get(
@@ -806,8 +808,8 @@ class StudentEnrollmentCrudTests(TestCase):
 
 		response = self.client.get(reverse("enrollment-list"))
 
-		self.assertContains(response, "table-warning")
-		self.assertContains(response, "table-success")
+		self.assertContains(response, "row-warning")
+		self.assertContains(response, "row-success")
 		self.assertNotContains(response, "<th>Sede</th>")
 
 	def test_enrollment_list_filters_by_debt_status(self):

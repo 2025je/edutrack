@@ -3,10 +3,10 @@
 {% block title %}Formulario · EduTrack{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-8">
-        <div class="card p-4 shadow-sm">
-            <h1 class="h3 mb-3">
+<div class="row">
+    <div class="col s12 l8 offset-l2">
+        <div class="card card-pad">
+            <h1>
                 {% if object %}
                     {% if "matriculas" in request.path %}Editar matrícula{% else %}Editar estudiante{% endif %}
                 {% else %}
@@ -18,87 +18,89 @@
                 {% csrf_token %}
 
                 {% if form.non_field_errors %}
-                    <div class="alert alert-danger" role="alert">
+                    <div class="note note-danger" role="alert">
                         {% for error in form.non_field_errors %}
                             <div>{{ error }}</div>
                         {% endfor %}
                     </div>
                 {% endif %}
 
-                <div class="row g-3">
+                <div class="row">
                     {% for field in form %}
-                        <div class="col-md-6">
+                        <div class="col s12 m6 field">
                             {% if field.name == "promoter" and "matriculas" in request.path %}
-                                <label class="form-label">{{ field.label }}</label>
-                                <div class="border rounded p-3">
+                                <label>{{ field.label }}</label>
+                                <div class="check-list">
                                     {% for promoter_choice in field %}
-                                        <div class="form-check">
-                                            {{ promoter_choice.tag }}
-                                            <label class="form-check-label" for="{{ promoter_choice.id_for_label }}">{{ promoter_choice.choice_label }}</label>
-                                        </div>
+                                        <p>
+                                            <label for="{{ promoter_choice.id_for_label }}">
+                                                {{ promoter_choice.tag }}
+                                                <span>{{ promoter_choice.choice_label }}</span>
+                                            </label>
+                                        </p>
                                     {% empty %}
-                                        <span class="text-secondary">No hay promotores activos disponibles.</span>
+                                        <span class="muted">No hay promotores activos disponibles.</span>
                                     {% endfor %}
                                 </div>
                             {% else %}
-                            <label class="form-label" for="{{ field.id_for_label }}">
+                            <label for="{{ field.id_for_label }}">
                                 {{ field.label }}
-                                {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
+                                {% if field.field.required %}<span class="danger">*</span>{% endif %}
                             </label>
 
                             {% if field.name == "phone_numbers" %}
-                                <div id="phone-fields" class="d-grid gap-2">
-                                    <div class="input-group phone-row">
+                                <div id="phone-fields">
+                                    <div class="phone-row">
                                         {{ field }}
-                                        <button type="button" class="btn btn-outline-danger remove-phone" aria-label="Eliminar teléfono">−</button>
+                                        <button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>
                                     </div>
                                 </div>
-                                <button type="button" id="add-phone" class="btn btn-sm btn-outline-secondary mt-2">+ Agregar teléfono</button>
-                                <div class="form-text">Ingrese celulares peruanos de 9 dígitos.</div>
+                                <button type="button" id="add-phone" class="btn-flat btn-small grey-text text-darken-2">+ Agregar teléfono</button>
+                                <div class="help">Ingrese celulares peruanos de 9 dígitos.</div>
                             {% else %}
                                 {{ field }}
                             {% endif %}
                             {% endif %}
 
                             {% if field.name == "student" and "matriculas" in request.path %}
-                                <div id="student-course-help" class="form-text">Primero selecciona un curso para ver los alumnos que aún no están inscritos.</div>
-                                <div id="student-course-status" class="form-text" role="status" aria-live="polite"></div>
+                                <div id="student-course-help" class="help">Primero selecciona un curso para ver los alumnos que aún no están inscritos.</div>
+                                <div id="student-course-status" class="help" role="status" aria-live="polite"></div>
                             {% endif %}
 
                             {% if field.name == "course" %}
                                 {% if field.field.queryset.count == 0 %}
-                                    <div class="form-text text-danger">
+                                    <div class="help danger">
                                         No hay cursos activos disponibles en la sede seleccionada.
                                         Verifica que haya cursos activos asignados a esta sede.
                                     </div>
                                 {% else %}
-                                    <div class="form-text">
+                                    <div class="help">
                                         Selecciona el curso al que se matriculará el estudiante. La capacidad es informativa; si se supera, se mostrará una alerta sin impedir la matrícula.
                                     </div>
-                                    <div id="course-capacity-alert" class="alert alert-warning mt-2 d-none" role="status" aria-live="polite"></div>
+                                    <div id="course-capacity-alert" class="note note-warning hide" role="status" aria-live="polite"></div>
                                 {% endif %}
                             {% endif %}
 
                             {% if field.help_text %}
-                                <div class="form-text">{{ field.help_text }}</div>
+                                <div class="help">{{ field.help_text }}</div>
                             {% endif %}
 
                             {% for error in field.errors %}
-                                <div class="text-danger small mt-1">{{ error }}</div>
+                                <div class="field-error">{{ error }}</div>
                             {% endfor %}
                         </div>
                     {% endfor %}
                 </div>
 
-                <div class="mt-4 d-flex gap-2">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-save me-1" aria-hidden="true"></i>Guardar
+                <div class="flex gap mt">
+                    <button type="submit" class="btn">
+                        <i class="material-icons left" aria-hidden="true">save</i>Guardar
                     </button>
-                    <a class="btn btn-outline-secondary" href="javascript:history.back()">Cancelar</a>
+                    <a class="btn-flat grey-text text-darken-2" href="javascript:history.back()">Cancelar</a>
                 </div>
 
-                <div class="form-text mt-3">
-                    <span class="text-danger">*</span> Campos obligatorios.
+                <div class="help mt">
+                    <span class="danger">*</span> Campos obligatorios.
                 </div>
             </form>
         </div>
@@ -107,23 +109,6 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-    // Aplicar clases de Bootstrap a los campos del formulario.
-    document.querySelectorAll("input, select, textarea").forEach(function (element) {
-        if (element.type === "checkbox" || element.type === "radio") {
-            element.classList.add("form-check-input");
-            return;
-        }
-        if (
-            element.type !== "hidden" &&
-            !element.classList.contains("form-check-input") &&
-            !element.classList.contains("btn")
-        ) {
-            element.classList.add(
-                element.tagName === "SELECT" ? "form-select" : "form-control"
-            );
-        }
-    });
-
     const courseSelect = document.getElementById("id_course");
     const enrollmentFee = document.getElementById("id_enrollment_fee");
     const monthlyFee = document.getElementById("id_monthly_fee");
@@ -147,10 +132,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function addPhoneRow(value) {
             const row = document.createElement("div");
-            row.className = "input-group phone-row";
-            row.innerHTML = '<input type="text" name="phone_numbers" class="form-control" placeholder="987654321" inputmode="numeric" pattern="9[0-9]{8}" maxlength="9" required value="' +
+            row.className = "phone-row";
+            row.innerHTML = '<input type="text" name="phone_numbers" placeholder="987654321" inputmode="numeric" pattern="9[0-9]{8}" maxlength="9" required value="' +
                 value.replace(/"/g, "&quot;") +
-                '"><button type="button" class="btn btn-outline-danger remove-phone" aria-label="Eliminar teléfono">−</button>';
+                '"><button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>';
             phoneFields.appendChild(row);
         }
 
@@ -235,7 +220,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!option || !option.value) {
                 if (capacityAlert) {
                     capacityAlert.textContent = "";
-                    capacityAlert.classList.add("d-none");
+                    capacityAlert.classList.add("hide");
                 }
                 return;
             }
@@ -252,13 +237,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 const projected = enrolled + 1;
                 if (capacity > 0 && projected > capacity) {
                     capacityAlert.textContent = `Atención: este curso tiene ${enrolled} estudiante(s) matriculado(s) y una capacidad informativa de ${capacity}. Con esta matrícula tendrá ${projected}, es decir, ${projected - capacity} por encima de la capacidad. Puedes continuar con la inscripción.`;
-                    capacityAlert.classList.remove("d-none");
+                    capacityAlert.classList.remove("hide");
                 } else if (capacity > 0 && projected === capacity) {
                     capacityAlert.textContent = `Aviso: con esta matrícula el curso llegará a su capacidad informativa de ${capacity} estudiante(s). La inscripción puede continuar.`;
-                    capacityAlert.classList.remove("d-none");
+                    capacityAlert.classList.remove("hide");
                 } else {
                     capacityAlert.textContent = "";
-                    capacityAlert.classList.add("d-none");
+                    capacityAlert.classList.add("hide");
                 }
             }
         }

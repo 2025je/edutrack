@@ -1,47 +1,47 @@
 {% extends "base.html" %}{% block title %}Matrículas · EduTrack{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><div><h1 class="h3 mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1></div><div class="d-flex gap-2"><a class="btn btn-outline-success" href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="bi bi-file-earmark-spreadsheet me-1" aria-hidden="true"></i>Exportar Excel</a><a class="btn btn-primary" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a></div></div>
-<form method="get" class="row g-2 mb-3">
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
+<div class="flex between items-center wrap gap mb"><h1 class="mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1><div class="flex gap wrap"><a class="btn green" href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a><a class="btn" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a></div></div>
+<form method="get" class="row">
+	<div class="col s12 m6 l3"><label for="f-student">Estudiante</label><input id="f-student" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
 	{% if request.GET.course_id %}<input type="hidden" name="course_id" value="{{ request.GET.course_id }}">{% endif %}
 	{% if request.GET.promoter_id %}<input type="hidden" name="promoter_id" value="{{ request.GET.promoter_id }}">{% endif %}
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="record_code" value="{{ request.GET.record_code }}" placeholder="Filtrar por código de ficha"></div>
-	<div class="col-sm-6 col-lg-3"><input class="form-control" name="promoter" value="{{ promoter_filter_value }}" placeholder="Filtrar por promotor"></div>
-	<div class="col-sm-6 col-lg-3"><label class="form-label" for="enrollment-date-from">Fecha de matrícula - Desde</label><input class="form-control" id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
-	<div class="col-sm-6 col-lg-3"><label class="form-label" for="enrollment-date-to">Fecha de matrícula - Hasta</label><input class="form-control" id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
-	<div class="col-sm-6 col-lg-3"><select class="form-select" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
-	<div class="col-auto"><button class="btn btn-primary" type="submit">Filtrar</button> <a class="btn btn-outline-secondary" href="{% url 'enrollment-list' %}">Limpiar</a></div>
+	<div class="col s12 m6 l3"><label for="f-course">Curso</label><input id="f-course" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
+	<div class="col s12 m6 l3"><label for="f-record">Código de ficha</label><input id="f-record" name="record_code" value="{{ request.GET.record_code }}" placeholder="Filtrar por código de ficha"></div>
+	<div class="col s12 m6 l3"><label for="f-promoter">Promotor</label><input id="f-promoter" name="promoter" value="{{ promoter_filter_value }}" placeholder="Filtrar por promotor"></div>
+	<div class="col s12 m6 l3"><label for="enrollment-date-from">Fecha de matrícula - Desde</label><input id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
+	<div class="col s12 m6 l3"><label for="enrollment-date-to">Fecha de matrícula - Hasta</label><input id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
+	<div class="col s12 m6 l3"><label for="f-debt">Deuda</label><select id="f-debt" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
+	<div class="col s12"><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Limpiar</a></div>
 </form>
-<div class="card card-body mb-3">
-	<h2 class="h5">Verificar códigos de ficha faltantes</h2>
-	<p class="text-secondary mb-2">Seleccione una fecha de matrícula e indique el rango numérico de códigos que desea comprobar.</p>
-	<form method="get" class="row g-2 align-items-end">
-		<div class="col-sm-4"><label class="form-label" for="record-code-check-date">Fecha de matrícula</label><input class="form-control" id="record-code-check-date" type="date" name="record_code_check_date" value="{{ record_code_check_date }}" required></div>
-		<div class="col-sm-3"><label class="form-label" for="record-code-start">Desde</label><input class="form-control" id="record-code-start" type="number" name="record_code_start" value="{{ record_code_start }}" min="0" step="1" required></div>
-		<div class="col-sm-3"><label class="form-label" for="record-code-end">Hasta</label><input class="form-control" id="record-code-end" type="number" name="record_code_end" value="{{ record_code_end }}" min="0" step="1" required></div>
-		<div class="col-auto"><button class="btn btn-outline-primary" type="submit" name="check_record_codes" value="1">Verificar</button></div>
+<div class="card card-pad">
+	<h2>Verificar códigos de ficha faltantes</h2>
+	<p class="muted">Seleccione una fecha de matrícula e indique el rango numérico de códigos que desea comprobar.</p>
+	<form method="get" class="row mb-0">
+		<div class="col s12 m4"><label for="record-code-check-date">Fecha de matrícula</label><input id="record-code-check-date" type="date" name="record_code_check_date" value="{{ record_code_check_date }}" required></div>
+		<div class="col s12 m3"><label for="record-code-start">Desde</label><input id="record-code-start" type="number" name="record_code_start" value="{{ record_code_start }}" min="0" step="1" required></div>
+		<div class="col s12 m3"><label for="record-code-end">Hasta</label><input id="record-code-end" type="number" name="record_code_end" value="{{ record_code_end }}" min="0" step="1" required></div>
+		<div class="col s12 m2"><button class="btn-flat blue-text" type="submit" name="check_record_codes" value="1">Verificar</button></div>
 	</form>
-	{% if record_code_check_error %}<div class="alert alert-warning mt-3 mb-0">{{ record_code_check_error }}</div>{% elif missing_record_codes is not None %}<div class="mt-3">{% if missing_record_codes %}<strong>Códigos de ficha no registrados:</strong> {{ missing_record_codes|join:", " }}{% else %}<span class="text-success">Todos los códigos del rango están registrados.</span>{% endif %}</div>{% endif %}
+	{% if record_code_check_error %}<div class="note note-warning mb-0">{{ record_code_check_error }}</div>{% elif missing_record_codes is not None %}<div class="mt">{% if missing_record_codes %}<strong>Códigos de ficha no registrados:</strong> {{ missing_record_codes|join:", " }}{% else %}<span class="success">Todos los códigos del rango están registrados.</span>{% endif %}</div>{% endif %}
 </div>
-<div class="card table-responsive"><table class="table table-hover mb-0"><thead><tr>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.row_number }}">N.º{% if current_sort == "row_number" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.course }}">Curso{% if current_sort == "course" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.record_code }}">Código de ficha{% if current_sort == "record_code" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.promoter }}">Promotor{% if current_sort == "promoter" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.enrollment_date }}">Fecha de matrícula{% if current_sort == "enrollment_date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.start_date }}">Inicio{% if current_sort == "start_date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.enrollment_fee }}">Costo de inscripción{% if current_sort == "enrollment_fee" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.monthly_fee }}">Mensualidad{% if current_sort == "monthly_fee" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.total_enrollment_cost }}">Pago total{% if current_sort == "total_enrollment_cost" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.total_paid }}">Pagado{% if current_sort == "total_paid" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.total_debt }}">Deuda{% if current_sort == "total_debt" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<div class="card table-wrap"><table class="highlight"><thead><tr>
+<th><a href="{{ sort_urls.row_number }}">N.º{% if current_sort == "row_number" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.course }}">Curso{% if current_sort == "course" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.record_code }}">Código de ficha{% if current_sort == "record_code" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.promoter }}">Promotor{% if current_sort == "promoter" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.enrollment_date }}">Fecha de matrícula{% if current_sort == "enrollment_date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.start_date }}">Inicio{% if current_sort == "start_date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.enrollment_fee }}">Costo de inscripción{% if current_sort == "enrollment_fee" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.monthly_fee }}">Mensualidad{% if current_sort == "monthly_fee" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.total_enrollment_cost }}">Pago total{% if current_sort == "total_enrollment_cost" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.total_paid }}">Pagado{% if current_sort == "total_paid" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.total_debt }}">Deuda{% if current_sort == "total_debt" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th>Recibos</th>
-<th><a class="link-dark text-decoration-none" href="{{ sort_urls.active }}">Estado{% if current_sort == "active" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th class="text-end">Acciones</th></tr></thead><tbody>
+<th><a href="{{ sort_urls.active }}">Estado{% if current_sort == "active" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th class="right-align">Acciones</th></tr></thead><tbody>
 {% for e in enrollments %}
-<tr class="{% if e.has_outstanding_debt %}table-warning{% elif e.has_no_debt %}table-success{% endif %}">
+<tr class="{% if e.has_outstanding_debt %}row-warning{% elif e.has_no_debt %}row-success{% endif %}">
 	<td>{{ e.row_number }}</td>
 	<td><a href="{% url 'student-enrollment-list' e.student.pk %}">{{ e.student.full_name }}</a></td>
 	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course }}</a></td>
@@ -51,34 +51,33 @@
 	<td>{{ e.course.start_date|date:"d/m/Y" }}</td>
 	<td>S/ {{ e.enrollment_fee|floatformat:2 }}</td>
 	<td>S/ {{ e.monthly_fee|floatformat:2 }}</td>
-	<td class="fw-semibold">S/ {{ e.total_enrollment_cost|floatformat:2 }}</td>
+	<td class="strong">S/ {{ e.total_enrollment_cost|floatformat:2 }}</td>
 	<td>S/ {{ e.total_paid|floatformat:2 }}</td>
-	<td class="fw-semibold">S/ {{ e.total_debt|floatformat:2 }}</td>
+	<td class="strong">S/ {{ e.total_debt|floatformat:2 }}</td>
 	<td>
 		{% for receipt in e.payments.all %}
 			{% if user.is_superuser or user.can_register_payments %}
-			<a class="badge text-decoration-none {% if receipt.status == 'ANULADO' %}text-bg-secondary{% else %}text-bg-primary{% endif %}" href="{% url 'payment-receipt' receipt.pk %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</a>
+			<a class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}" href="{% url 'payment-receipt' receipt.pk %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</a>
 			{% else %}
-			<span class="badge {% if receipt.status == 'ANULADO' %}text-bg-secondary{% else %}text-bg-primary{% endif %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</span>
+			<span class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</span>
 			{% endif %}
-			{% if not forloop.last %} {% endif %}
 		{% empty %}
-		<span class="text-secondary">Sin recibos</span>
+		<span class="muted">Sin recibos</span>
 		{% endfor %}
 	</td>
 	<td>{% if e.active %}Activa{% else %}Inactiva{% endif %}</td>
-	<td class="text-end">
-		<div class="btn-group btn-group-sm">
+	<td class="right-align">
+		<div class="flex gap" style="justify-content:flex-end">
 			{% if user.is_superuser or user.can_register_payments %}
 				{% if e.pk in payable_enrollment_ids %}
-				<a class="btn btn-outline-success px-2" href="{% url 'payment-create' %}?enrollment={{ e.pk }}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="bi bi-cash-coin" aria-hidden="true"></i></a>
+				<a class="btn-small icon-only green darken-1" href="{% url 'payment-create' %}?enrollment={{ e.pk }}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i></a>
 				{% endif %}
 			{% endif %}
-			<a class="btn btn-outline-primary px-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula"><i class="bi bi-pencil-square" aria-hidden="true"></i></a>
-			{% if e.active %}<a class="btn btn-outline-danger px-2" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="bi bi-person-dash" aria-hidden="true"></i></a>{% endif %}
+			<a class="btn-small icon-only blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula"><i class="material-icons" aria-hidden="true">edit</i></a>
+			{% if e.active %}<a class="btn-small icon-only red darken-1" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="material-icons" aria-hidden="true">person_remove</i></a>{% endif %}
 		</div>
 	</td>
 </tr>
-{% empty %}<tr><td colspan="15" class="text-center text-secondary py-4">No hay matrículas registradas.</td></tr>{% endfor %}
+{% empty %}<tr><td colspan="15" class="center-align muted">No hay matrículas registradas.</td></tr>{% endfor %}
 </tbody></table></div>{% include "shared/pagination.html" %}
 {% endblock %}

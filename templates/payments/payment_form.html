@@ -1,32 +1,31 @@
 {% extends "base.html" %}{% block title %}{% if object %}Editar pago{% else %}Registrar pago{% endif %} · EduTrack{% endblock %}
-{% block content %}<div class="row justify-content-center"><div class="col-lg-7"><div class="card p-4">
-<h1 class="h3">{% if object %}Editar pago{% else %}Registrar pago{% endif %}</h1><p class="text-secondary">Solo se muestran matrículas con deuda pendiente. Busca por nombre del alumno o curso.</p>
-<form method="get" class="mb-4">
-  <label class="form-label" for="payment-search">Buscar matrícula pendiente</label>
-  <div class="input-group">
-    <input id="payment-search" class="form-control" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso">
-    <button class="btn btn-outline-primary" type="submit">Buscar</button>
-    {% if request.GET.q %}<a class="btn btn-outline-secondary" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
+{% block content %}<div class="row"><div class="col s12 xl10 offset-xl1"><div class="card card-pad">
+<h1>{% if object %}Editar pago{% else %}Registrar pago{% endif %}</h1><p class="muted">Solo se muestran matrículas con deuda pendiente. Busca por nombre del alumno o curso.</p>
+<form method="get" class="mb">
+  <label for="payment-search">Buscar matrícula pendiente</label>
+  <div class="flex gap items-center">
+    <input id="payment-search" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso" style="margin:0">
+    <button class="btn" type="submit">Buscar</button>
+    {% if request.GET.q %}<a class="btn-flat grey-text text-darken-2" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
   </div>
 </form>
-{% if not form.fields.enrollment.queryset.exists %}<div class="alert alert-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}
+{% if not form.fields.enrollment.queryset.exists %}<div class="note note-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}
 <form method="post">{% csrf_token %}
-{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
-{% for field in form %}<div class="mb-3">
+{% if form.non_field_errors %}<div class="note note-danger">{{ form.non_field_errors }}</div>{% endif %}
+{% for field in form %}<div class="field">
 {% if field.name == "enrollment" %}
-<label class="form-label">{{ field.label }}</label>
-<div class="table-responsive border rounded">
-<table class="table table-hover table-sm align-middle mb-0">
-<thead><tr><th class="text-center" scope="col">Seleccionar</th><th scope="col">Estudiante</th><th scope="col">Curso</th><th class="text-end" scope="col">Costo matrícula</th><th class="text-end" scope="col">Mensualidad</th><th class="text-end" scope="col">Deuda</th></tr></thead>
+<label>{{ field.label }}</label>
+<div class="table-wrap" style="border:1px solid #e0e0e0;border-radius:4px">
+<table class="highlight">
+<thead><tr><th class="center-align" scope="col">Seleccionar</th><th scope="col">Estudiante</th><th scope="col">Curso</th><th class="right-align" scope="col">Costo matrícula</th><th class="right-align" scope="col">Mensualidad</th><th class="right-align" scope="col">Deuda</th></tr></thead>
 <tbody>
-{% for enrollment in field.field.queryset %}<tr><td class="text-center"><div class="form-check d-flex justify-content-center mb-0"><input class="form-check-input" type="radio" name="{{ field.html_name }}" id="id_{{ field.html_name }}_{{ enrollment.pk }}" value="{{ enrollment.pk }}" {% if field.field.required %}required{% endif %} {% if field.value|stringformat:"s" == enrollment.pk|stringformat:"s" %}checked{% endif %}></div></td><td><label class="form-check-label d-block mb-0" for="id_{{ field.html_name }}_{{ enrollment.pk }}">{{ enrollment.student.full_name }}</label></td><td>{{ enrollment.course.name }}</td><td class="text-end">S/ {{ enrollment.enrollment_fee|floatformat:2 }}</td><td class="text-end">S/ {{ enrollment.monthly_fee|floatformat:2 }}</td><td class="text-end fw-semibold">S/ {{ enrollment.pending_balance|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="6" class="text-center text-secondary py-3">No hay matrículas pendientes disponibles.</td></tr>{% endfor %}
+{% for enrollment in field.field.queryset %}<tr><td class="center-align"><label><input type="radio" name="{{ field.html_name }}" id="id_{{ field.html_name }}_{{ enrollment.pk }}" value="{{ enrollment.pk }}" {% if field.field.required %}required{% endif %} {% if field.value|stringformat:"s" == enrollment.pk|stringformat:"s" %}checked{% endif %}><span aria-label="Seleccionar {{ enrollment.student.full_name }}"></span></label></td><td>{{ enrollment.student.full_name }}</td><td>{{ enrollment.course.name }}</td><td class="right-align">S/ {{ enrollment.enrollment_fee|floatformat:2 }}</td><td class="right-align">S/ {{ enrollment.monthly_fee|floatformat:2 }}</td><td class="right-align strong">S/ {{ enrollment.pending_balance|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas pendientes disponibles.</td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}
-<label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+<label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
 {% endif %}
-{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}
-<div class="alert alert-warning small">Verifica la matrícula y el importe antes de confirmar. Los recibos quedan auditados.</div>
-<button class="btn btn-primary">{% if object %}Guardar cambios{% else %}Confirmar pago y registrar recibo{% endif %}</button> <a class="btn btn-outline-secondary" href="{% url 'payment-list' %}">Cancelar</a>
+{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>{% endfor %}
+<div class="note note-warning small">Verifica la matrícula y el importe antes de confirmar. Los recibos quedan auditados.</div>
+<button class="btn">{% if object %}Guardar cambios{% else %}Confirmar pago y registrar recibo{% endif %}</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Cancelar</a>
 </form></div></div></div>
-<script>document.querySelectorAll('input,select,textarea').forEach(function (element) { if (element.type === 'radio' || element.type === 'checkbox') { element.classList.add('form-check-input'); } else if (element.tagName === 'SELECT') { element.classList.add('form-select'); } else { element.classList.add('form-control'); } });</script>
 {% endblock %}
