@@ -26,12 +26,19 @@ class StudentForm(forms.ModelForm):
     class Meta:
         model = Student
         fields = ["full_name", "document_number", "phone", "active"]
-        widgets = {"full_name": forms.TextInput(attrs={"autofocus": True})}
+        widgets = {
+            "full_name": forms.TextInput(attrs={"autofocus": True}),
+            "phone": forms.TextInput(attrs={"placeholder": "987654321, 912345678"}),
+        }
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
         # La sede proviene de la sesión, nunca del formulario enviado por el navegador.
         self.selected_campus = get_selected_campus(request) if request and user else None
+
+    def clean_phone(self):
+        phone_numbers = self.cleaned_data["phone"].split(",")
+        return ", ".join(number.strip() for number in phone_numbers if number.strip())
 
 
 class EnrollmentForm(forms.ModelForm):
@@ -45,7 +52,14 @@ class EnrollmentForm(forms.ModelForm):
         self.selected_campus = get_selected_campus(request) if request and user else None
         selected = self.selected_campus
         if selected:
-            self.fields["course"].queryset = Course.objects.filter(campus=selected, active=True)
+            course_queryset = Course.objects.filter(campus=selected)
+            if self.instance.pk:
+                course_queryset = course_queryset.filter(
+                    models.Q(active=True) | models.Q(pk=self.instance.course_id)
+                )
+            else:
+                course_queryset = course_queryset.filter(active=True)
+            self.fields["course"].queryset = course_queryset
         else:
             self.fields["course"].queryset = Course.objects.none()
 
@@ -62,14 +76,27 @@ class EnrollmentForm(forms.ModelForm):
         if selected_course:
             already_enrolled_ids = Enrollment.objects.filter(
                 course=selected_course
-            ).values_list("student_id", flat=True)
-            self.fields["student"].queryset = Student.objects.filter(
-                campus=selected, active=True
-            ).exclude(pk__in=already_enrolled_ids)
+            )
+            if self.instance.pk:
+                already_enrolled_ids = already_enrolled_ids.exclude(pk=self.instance.pk)
+            already_enrolled_ids = already_enrolled_ids.values_list("student_id", flat=True)
+            eligible_students = Student.objects.filter(campus=selected, active=True)
+            if self.instance.pk and self.instance.student_id:
+                eligible_students = Student.objects.filter(campus=selected).filter(
+                    models.Q(active=True) | models.Q(pk=self.instance.student_id)
+                )
+            self.fields["student"].queryset = eligible_students.exclude(pk__in=already_enrolled_ids)
         else:
             self.fields["student"].queryset = Student.objects.none()
         if selected:
-            self.fields["promoter"].queryset = Promoter.objects.filter(active=True).filter(models.Q(campuses=selected) | models.Q(campuses__isnull=True)).distinct()
+            promoters = Promoter.objects.filter(models.Q(campuses=selected) | models.Q(campuses__isnull=True))
+            if self.instance.pk and self.instance.promoter_id:
+                promoters = promoters.filter(
+                    models.Q(active=True) | models.Q(pk=self.instance.promoter_id)
+                )
+            else:
+                promoters = promoters.filter(active=True)
+            self.fields["promoter"].queryset = promoters.distinct()
         else:
             self.fields["promoter"].queryset = Promoter.objects.none()
 
@@ -80,8 +107,12 @@ class EnrollmentForm(forms.ModelForm):
             course_info[str(course.pk)] = (
                 course.enrollment_fee, course.monthly_fee, course.capacity, enrolled_count
             )
-        self.fields["course"].widget = CourseSelectWidget(course_info)
-        if selected_course:
+        self.fields["course"].widget = CourseSelectWidget(
+            course_prices=course_info,
+            choices=self.fields["course"].choices,
+        )
+        # self.fields["course"].widget = CourseSelectWidget(course_info)
+        if selected_course and not self.instance.pk:
             self.fields["enrollment_fee"].initial = selected_course.enrollment_fee
             self.fields["monthly_fee"].initial = selected_course.monthly_fee
 

@@ -6,9 +6,10 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
-from django.views.generic import FormView, ListView, DetailView
+from django.views.generic import FormView, ListView, DetailView, UpdateView, DeleteView
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
-from .forms import PaymentForm
+from students.models import Enrollment
+from .forms import PaymentForm, PaymentUpdateForm
 from .models import Payment, PaymentAllocation, Installment
 
 
@@ -79,6 +80,106 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
             return self.form_invalid(form)
         messages.success(self.request, f"Pago registrado. Recibo {payment.receipt_number}.")
         return redirect("payment-receipt", pk=payment.pk)
+
+
+class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
+    model = Payment
+    form_class = PaymentUpdateForm
+    template_name = "payments/payment_form.html"
+    success_url = reverse_lazy("payment-list")
+
+    def get_queryset(self):
+        return Payment.objects.filter(
+            campus=get_selected_campus(self.request), status=Payment.Status.CONFIRMED
+        ).select_related("enrollment__student", "enrollment__course")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        kwargs["request"] = self.request
+        return kwargs
+
+    def form_valid(self, form):
+        campus = get_selected_campus(self.request)
+        selected_enrollment = form.cleaned_data["enrollment"]
+        amount = form.cleaned_data["amount"]
+        with transaction.atomic():
+            payment = Payment.objects.select_for_update().get(
+                pk=self.object.pk, campus=campus, status=Payment.Status.CONFIRMED
+            )
+            enrollment = Enrollment.objects.select_for_update().filter(
+                pk=selected_enrollment.pk, campus=campus, active=True
+            ).first()
+            if enrollment is None:
+                form.add_error("enrollment", "Selecciona una matrícula activa de esta sede.")
+                return self.form_invalid(form)
+
+            installments = list(
+                Installment.objects.select_for_update()
+                .filter(enrollment=enrollment, active=True)
+                .order_by("due_date", "pk")
+            )
+            outstanding = []
+            for installment in installments:
+                paid_by_other_payments = PaymentAllocation.objects.filter(
+                    installment=installment,
+                    payment__status=Payment.Status.CONFIRMED,
+                ).exclude(payment=payment).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+                balance = installment.amount - paid_by_other_payments
+                if balance > 0:
+                    outstanding.append((installment, balance))
+
+            total_due = sum((balance for _, balance in outstanding), Decimal("0.00"))
+            has_other_confirmed_payments = Payment.objects.filter(
+                enrollment=enrollment, status=Payment.Status.CONFIRMED
+            ).exclude(pk=payment.pk).exists()
+            if not has_other_confirmed_payments and amount < enrollment.enrollment_fee:
+                form.add_error(
+                    "amount",
+                    f"El primer pago debe ser como mínimo el valor de la matrícula: S/ {enrollment.enrollment_fee:.2f}.",
+                )
+                return self.form_invalid(form)
+            if total_due <= 0 or amount > total_due:
+                form.add_error("amount", f"El importe no puede superar la deuda pendiente (S/ {total_due:.2f}).")
+                return self.form_invalid(form)
+
+            payment.receipt_number = form.cleaned_data["receipt_number"]
+            payment.enrollment = enrollment
+            payment.amount = amount
+            payment.reference = form.cleaned_data["reference"]
+            payment.notes = form.cleaned_data["notes"]
+            payment.save(update_fields=["receipt_number", "enrollment", "amount", "reference", "notes"])
+            PaymentAllocation.objects.filter(payment=payment).delete()
+            remaining = amount
+            for installment, balance in outstanding:
+                if remaining <= 0:
+                    break
+                applied = min(remaining, balance)
+                PaymentAllocation.objects.create(payment=payment, installment=installment, amount=applied)
+                remaining -= applied
+
+        self.object = payment
+        messages.success(self.request, "Pago actualizado correctamente y sus cuotas fueron recalculadas.")
+        return redirect(self.get_success_url())
+
+
+class PaymentDeleteView(SelectedCampusViewMixin, DeleteView):
+    model = Payment
+    template_name = "payments/payment_confirm_delete.html"
+    success_url = reverse_lazy("payment-list")
+
+    def get_queryset(self):
+        return Payment.objects.filter(
+            campus=get_selected_campus(self.request), status=Payment.Status.CONFIRMED
+        ).select_related("enrollment__student", "enrollment__course")
+
+    def post(self, request, *args, **kwargs):
+        payment = self.get_object()
+        self.object = payment
+        payment.status = Payment.Status.VOID
+        payment.save(update_fields=["status"])
+        messages.success(self.request, "Recibo anulado y conservado en el historial.")
+        return redirect(self.get_success_url())
 
 
 class PaymentReceiptView(SelectedCampusViewMixin, DetailView):

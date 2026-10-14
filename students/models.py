@@ -3,13 +3,16 @@ from django.core.validators import RegexValidator
 from django.utils import timezone
 from core.models import Campus
 
-phone_validator = RegexValidator(r"^9\d{8}$", "Ingrese un celular peruano de 9 dígitos que empiece con 9.")
+phone_validator = RegexValidator(
+    r"^\s*9\d{8}(?:\s*,\s*9\d{8})*\s*$",
+    "Ingrese uno o más celulares peruanos de 9 dígitos, separados por comas.",
+)
 
 class Student(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
     full_name = models.CharField("Apellidos y nombres", max_length=180, unique=True)
-    document_number = models.CharField("Documento", max_length=20, blank=True)
-    phone = models.CharField("Celular", max_length=9, validators=[phone_validator], blank=True)
+    document_number = models.CharField("DNI", max_length=20, blank=True)
+    phone = models.CharField("Teléfonos", max_length=120, validators=[phone_validator], blank=True)
     active = models.BooleanField("Activo", default=True)
     created_at = models.DateTimeField("Registrado el", auto_now_add=True)
 
@@ -35,6 +38,12 @@ class Course(models.Model):
         ordering = ["name", "schedule", "group"]
         verbose_name = "curso"
         verbose_name_plural = "cursos"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "name", "schedule", "group"],
+                name="unique_course_name_schedule_group_per_campus",
+            ),
+        ]
 
     def __str__(self):
         detail = " · ".join(x for x in [self.schedule, self.group] if x)

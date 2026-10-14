@@ -7,10 +7,10 @@
     <div class="col-lg-8">
         <div class="card p-4 shadow-sm">
             <h1 class="h3 mb-3">
-                {% if "matriculas" in request.path %}
-                    Registrar matrícula
+                {% if object %}
+                    {% if "matriculas" in request.path %}Editar matrícula{% else %}Editar estudiante{% endif %}
                 {% else %}
-                    Registrar estudiante
+                    {% if "matriculas" in request.path %}Registrar matrícula{% else %}Registrar estudiante{% endif %}
                 {% endif %}
             </h1>
 
@@ -107,6 +107,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (isEnrollmentForm) {
         const endpoint = "{% url 'course-students-available' %}";
         const initialStudent = studentSelect.value;
+        const currentEnrollmentId = "{{ object.pk|default:'' }}";
 
         async function loadAvailableStudents(keepSelection) {
             const courseId = courseSelect.value;
@@ -124,7 +125,9 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             try {
-                const response = await fetch(`${endpoint}?course_id=${encodeURIComponent(courseId)}`, {
+                const params = new URLSearchParams({course_id: courseId});
+                if (currentEnrollmentId) params.set("enrollment_id", currentEnrollmentId);
+                const response = await fetch(`${endpoint}?${params.toString()}`, {
                     headers: {"X-Requested-With": "XMLHttpRequest"}
                 });
                 const data = await response.json();
@@ -200,8 +203,6 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         courseSelect.addEventListener("change", updateCourseFees);
-        // Actualiza importes y alerta al cargar o volver a mostrar el formulario.
-        updateCourseFees();
 
         // Diagnóstico: permite verificar en la consola si el servidor envió cursos.
         console.log("Opciones de cursos disponibles:", Math.max(0, courseSelect.options.length - 1));

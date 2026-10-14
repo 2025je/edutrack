@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Dar de baja matrícula · EduTrack{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-6"><div class="card p-4">
+	<h1 class="h3 mb-3">Dar de baja matrícula</h1>
+	<p>¿Deseas dar de baja la matrícula de <strong>{{ object.student.full_name }}</strong> en <strong>{{ object.course.name }}</strong>?</p>
+	<p class="text-secondary">Las cuotas quedarán inactivas; los recibos confirmados se anularán y el historial se conservará.</p>
+	<form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Confirmar baja</button> <a class="btn btn-outline-secondary" href="{% url 'enrollment-list' %}">Cancelar</a></form>
+</div></div></div>
+{% endblock %}

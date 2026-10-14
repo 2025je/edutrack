@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Dar de baja estudiante · EduTrack{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-6"><div class="card p-4">
+	<h1 class="h3 mb-3">Dar de baja estudiante</h1>
+	<p>¿Deseas dar de baja a <strong>{{ object.full_name }}</strong>?</p>
+	<p class="text-secondary">Sus matrículas quedarán inactivas y sus recibos confirmados se anularán. El historial se conservará.</p>
+	<form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Confirmar baja</button> <a class="btn btn-outline-secondary" href="{% url 'student-list' %}">Cancelar</a></form>
+</div></div></div>
+{% endblock %}

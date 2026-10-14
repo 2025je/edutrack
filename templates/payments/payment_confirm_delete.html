@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Anular recibo · EduTrack{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-6"><div class="card p-4">
+	<h1 class="h3 mb-3">Anular recibo</h1>
+	<p>¿Deseas anular el recibo <strong>{{ object.receipt_number }}</strong> de <strong>{{ object.enrollment.student.full_name }}</strong>?</p>
+	<p class="text-secondary">El recibo no se borrará; quedará marcado como anulado y se conservará en el historial.</p>
+	<form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Anular recibo</button> <a class="btn btn-outline-secondary" href="{% url 'payment-list' %}">Cancelar</a></form>
+</div></div></div>
+{% endblock %}
