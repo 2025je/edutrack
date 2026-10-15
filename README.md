@@ -59,7 +59,16 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8080/> e inicia sesión. Grafana está disponible en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`) con Loki ya configurado como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`. Alloy recoge los logs de los contenedores de este proyecto y Loki los conserva durante 30 días. Nginx sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia; Redis proporciona la caché compartida de Django y solo es accesible dentro de Compose. Para consultar logs de arranque usa `docker compose logs -f web nginx redis grafana loki alloy`; para detener los servicios sin borrar los datos, `docker compose down`.
+5. Para acceder desde otros equipos de la red local, agrega la IP LAN de este equipo a `DJANGO_ALLOWED_HOSTS` y su origen a `DJANGO_CSRF_TRUSTED_ORIGINS` en `.env`. Por ejemplo, para `192.168.0.107`:
+
+   ```dotenv
+   DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,192.168.0.107
+   DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://192.168.0.107:8080
+   ```
+
+   Recrea los servicios para aplicar la configuración: `docker compose up -d --build`. Luego, desde los otros equipos, abre <http://192.168.0.107:8080/>. Si no conecta, permite el tráfico TCP entrante por el puerto 8080 en el Firewall de Windows para redes privadas y confirma que todos los equipos estén en la misma red. La dirección debe ser la IP actual del equipo que ejecuta Docker.
+
+   También puedes abrir <http://localhost:8080/> en el equipo servidor. Grafana está disponible solo localmente en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`) con Loki ya configurado como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`. Alloy recoge los logs de los contenedores de este proyecto y Loki los conserva durante 30 días. Nginx sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia; Redis proporciona la caché compartida de Django y solo es accesible dentro de Compose. Para consultar logs de arranque usa `docker compose logs -f web nginx redis grafana loki alloy`; para detener los servicios sin borrar los datos, `docker compose down`.
 
 Si ya tienes un `.env`, agrega `DJANGO_CSRF_TRUSTED_ORIGINS` y `GRAFANA_ADMIN_PASSWORD` como arriba, y recrea los servicios: `docker compose up -d --build`.
 

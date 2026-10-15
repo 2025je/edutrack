@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Sum
 from django.shortcuts import render, redirect
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import TemplateView
 from .campus import available_campuses, get_selected_campus
 from students.models import Student, Enrollment
@@ -20,6 +21,11 @@ def select_campus(request):
         else:
             request.session["selected_campus_id"] = campus.pk
             messages.success(request, f"Sede seleccionada: {campus.name}.")
+            next_url = request.POST.get("next", "")
+            if next_url and url_has_allowed_host_and_scheme(
+                next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+            ):
+                return redirect(next_url)
             return redirect("dashboard")
     return render(
         request,

@@ -41,11 +41,13 @@ def pending_enrollments_for_campus(campus):
         .annotate(total=Sum("pending_balance"))
         .values("total")[:1]
     )
-    return Enrollment.objects.filter(
-        campus=campus,
-        active=True,
-    ).annotate(pending_balance=Subquery(pending_totals, output_field=money_field)).filter(
-        pending_balance__gt=0
+    return (
+        Enrollment.objects.filter(
+            campus=campus,
+            active=True,
+        )
+        .annotate(pending_balance=Subquery(pending_totals, output_field=money_field))
+        .filter(pending_balance__gt=0)
     )
 
 
@@ -66,9 +68,16 @@ class PaymentForm(forms.Form):
         label="Matrícula pendiente",
         widget=forms.RadioSelect,
     )
-    amount = forms.DecimalField(label="Importe recibido", min_value=0.01, max_digits=10, decimal_places=2)
+    amount = forms.DecimalField(
+        label="Importe recibido", min_value=0.01, max_digits=10, decimal_places=2
+    )
     reference = forms.CharField(label="Referencia (opcional)", required=False, max_length=100)
-    notes = forms.CharField(label="Observaciones (opcional)", required=False, max_length=250, widget=forms.Textarea(attrs={"rows": 2}))
+    notes = forms.CharField(
+        label="Observaciones (opcional)",
+        required=False,
+        max_length=250,
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
 
     def clean_receipt_number(self):
         receipt_number = self.cleaned_data["receipt_number"].strip().upper()
@@ -91,20 +100,26 @@ class PaymentForm(forms.Form):
         query = request.GET.get("q", "").strip() if request and request.method == "GET" else ""
         if query:
             qs = qs.filter(
-                Q(student__full_name__icontains=query)
-                | Q(course__name__icontains=query)
+                Q(student__full_name__unaccent__icontains=query)
+                | Q(course__name__unaccent__icontains=query)
             )
-        student_id = request.GET.get("student", "").strip() if request and request.method == "GET" else ""
+        student_id = (
+            request.GET.get("student", "").strip() if request and request.method == "GET" else ""
+        )
         if student_id:
             try:
                 qs = qs.filter(student_id=int(student_id))
             except ValueError:
                 qs = qs.none()
 
-        self.fields["enrollment"].queryset = qs.select_related("student", "course", "campus").order_by("student__full_name", "course__name")
+        self.fields["enrollment"].queryset = qs.select_related(
+            "student", "course", "campus"
+        ).order_by("student__full_name", "course__name")
         self.fields["enrollment"].label_from_instance = self.enrollment_label
 
-        enrollment_id = request.GET.get("enrollment", "").strip() if request and request.method == "GET" else ""
+        enrollment_id = (
+            request.GET.get("enrollment", "").strip() if request and request.method == "GET" else ""
+        )
         selected_enrollment = None
         if enrollment_id:
             try:
@@ -119,8 +134,12 @@ class PaymentForm(forms.Form):
 
     @staticmethod
     def enrollment_label(enrollment):
-        pending = sum((item.balance for item in enrollment.installments.filter(active=True)), Decimal("0.00"))
-        return f"{enrollment.student.full_name} — {enrollment.course.name} (deuda: S/ {pending:.2f})"
+        pending = sum(
+            (item.balance for item in enrollment.installments.filter(active=True)), Decimal("0.00")
+        )
+        return (
+            f"{enrollment.student.full_name} — {enrollment.course.name} (deuda: S/ {pending:.2f})"
+        )
 
 
 class PaymentUpdateForm(forms.ModelForm):
@@ -140,7 +159,11 @@ class PaymentUpdateForm(forms.ModelForm):
     def clean_receipt_number(self):
         receipt_number = self.cleaned_data["receipt_number"].strip().upper()
         receipt_number_validator(receipt_number)
-        if Payment.objects.filter(receipt_number=receipt_number).exclude(pk=self.instance.pk).exists():
+        if (
+            Payment.objects.filter(receipt_number=receipt_number)
+            .exclude(pk=self.instance.pk)
+            .exists()
+        ):
             raise forms.ValidationError("Este número de recibo ya está registrado.")
         return receipt_number
 
@@ -148,10 +171,10 @@ class PaymentUpdateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         campus = get_selected_campus(request) if request and user else None
         if campus:
-            self.fields["enrollment"].queryset = Enrollment.objects.filter(
-                campus=campus
-            ).filter(Q(active=True) | Q(pk=self.instance.enrollment_id)).select_related(
-                "student", "course"
+            self.fields["enrollment"].queryset = (
+                Enrollment.objects.filter(campus=campus)
+                .filter(Q(active=True) | Q(pk=self.instance.enrollment_id))
+                .select_related("student", "course")
             )
         else:
             self.fields["enrollment"].queryset = Enrollment.objects.none()

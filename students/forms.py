@@ -67,8 +67,7 @@ class StudentForm(forms.ModelForm):
 
     def clean_phone_numbers(self):
         phone_numbers = [
-            number.strip()
-            for number in self.cleaned_data.get("phone_numbers", "").split(",")
+            number.strip() for number in self.cleaned_data.get("phone_numbers", "").split(",")
         ]
         if not phone_numbers or any(not number for number in phone_numbers):
             raise ValidationError("Ingrese al menos un teléfono y complete todos los campos.")
@@ -115,7 +114,16 @@ class StudentForm(forms.ModelForm):
 class EnrollmentForm(forms.ModelForm):
     class Meta:
         model = Enrollment
-        fields = ["course", "student", "record_code", "promoter", "enrollment_date", "enrollment_fee", "monthly_fee", "active"]
+        fields = [
+            "course",
+            "student",
+            "record_code",
+            "promoter",
+            "enrollment_date",
+            "enrollment_fee",
+            "monthly_fee",
+            "active",
+        ]
         widgets = {
             "promoter": forms.CheckboxSelectMultiple,
             "record_code": forms.TextInput(
@@ -127,11 +135,12 @@ class EnrollmentForm(forms.ModelForm):
             "enrollment_date": forms.DateInput(
                 attrs={"type": "date"},
                 format="%Y-%m-%d",
-            )
+            ),
         }
 
-    def __init__(self, *args, user=None, request=None, **kwargs):
+    def __init__(self, *args, user=None, request=None, locked_student=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.locked_student = locked_student
         # La sede se obtiene de la sesión del usuario y no se muestra como campo.
         self.selected_campus = get_selected_campus(request) if request and user else None
         selected = self.selected_campus
@@ -143,13 +152,21 @@ class EnrollmentForm(forms.ModelForm):
                 )
             else:
                 course_queryset = course_queryset.filter(active=True)
+            if locked_student:
+                course_queryset = course_queryset.exclude(
+                    pk__in=Enrollment.objects.filter(student=locked_student).values_list(
+                        "course_id", flat=True
+                    )
+                )
             self.fields["course"].queryset = course_queryset
         else:
             self.fields["course"].queryset = Course.objects.none()
 
         # No mostrar alumnos hasta que se elija un curso. Si el formulario
         # se envía o vuelve con errores, validar solo alumnos elegibles para ese curso.
-        selected_course_id = (self.data.get("course") if self.is_bound else self.initial.get("course"))
+        selected_course_id = (
+            self.data.get("course") if self.is_bound else self.initial.get("course")
+        )
         selected_course = None
         if selected and selected_course_id:
             try:
@@ -158,9 +175,7 @@ class EnrollmentForm(forms.ModelForm):
                 selected_course = None
 
         if selected_course:
-            already_enrolled_ids = Enrollment.objects.filter(
-                course=selected_course
-            )
+            already_enrolled_ids = Enrollment.objects.filter(course=selected_course)
             if self.instance.pk:
                 already_enrolled_ids = already_enrolled_ids.exclude(pk=self.instance.pk)
             already_enrolled_ids = already_enrolled_ids.values_list("student_id", flat=True)
@@ -172,8 +187,13 @@ class EnrollmentForm(forms.ModelForm):
             self.fields["student"].queryset = eligible_students.exclude(pk__in=already_enrolled_ids)
         else:
             self.fields["student"].queryset = Student.objects.none()
+        if locked_student:
+            self.fields["student"].queryset = Student.objects.filter(pk=locked_student.pk)
+            self.fields["student"].widget = forms.HiddenInput()
         if selected:
-            promoters = Promoter.objects.filter(models.Q(campuses=selected) | models.Q(campuses__isnull=True))
+            promoters = Promoter.objects.filter(
+                models.Q(campuses=selected) | models.Q(campuses__isnull=True)
+            )
             if self.instance.pk:
                 selected_promoter_ids = self.instance.promoter.values_list("pk", flat=True)
                 promoters = promoters.filter(
@@ -190,7 +210,10 @@ class EnrollmentForm(forms.ModelForm):
         for course in courses:
             enrolled_count = Enrollment.objects.filter(course=course, active=True).count()
             course_info[str(course.pk)] = (
-                course.enrollment_fee, course.monthly_fee, course.capacity, enrolled_count
+                course.enrollment_fee,
+                course.monthly_fee,
+                course.capacity,
+                enrolled_count,
             )
         self.fields["course"].widget = CourseSelectWidget(
             course_prices=course_info,
@@ -210,7 +233,9 @@ class EnrollmentForm(forms.ModelForm):
             raise ValidationError("Primero debes seleccionar una sede.")
         if student and course:
             if student.campus_id != campus.pk or course.campus_id != campus.pk:
-                raise ValidationError("El estudiante y el curso deben pertenecer a la sede seleccionada.")
+                raise ValidationError(
+                    "El estudiante y el curso deben pertenecer a la sede seleccionada."
+                )
             duplicate = Enrollment.objects.filter(student=student, course=course)
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)

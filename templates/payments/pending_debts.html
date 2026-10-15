@@ -6,11 +6,13 @@
   <button class="btn-flat grey-text text-darken-2 no-print" onclick="window.print()">Imprimir reporte</button>
 </div>
 <div class="row">
-  <div class="col s12 m4"><div class="card card-pad"><div class="muted small">Saldo pendiente total (filtros aplicados)</div><div class="stat-md danger">S/ {{ pending_grand_total|floatformat:2 }}</div></div></div>
+  <div data-live-region="total" class="col s12 m4"><div class="card card-pad"><div class="muted small">Saldo pendiente total (filtros aplicados)</div><div class="stat-md danger">S/ {{ pending_grand_total|floatformat:2 }}</div></div></div>
 </div>
-<form method="get" class="row no-print"><div class="col s12 m6"><input type="search" name="q" value="{{ search_query }}" placeholder="Buscar alumno, curso o concepto"></div><div class="col s12 m6"><button class="btn">Buscar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'pending-debts' %}">Limpiar</a></div></form>
+<form method="get" data-live-filter class="row no-print"><div class="col s12 m6"><input type="search" name="q" value="{{ search_query }}" placeholder="Buscar alumno, curso o concepto" autocomplete="off"></div><div class="col s12 m6"><button class="btn">Buscar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'pending-debts' %}">Limpiar</a></div></form>
+<div data-live-region="results">
 <div class="card table-wrap"><table class="highlight striped"><thead><tr><th>Estudiante</th><th>Celular</th><th>Curso / grupo</th><th>Concepto</th><th>Vencimiento</th><th class="right-align">Importe</th><th class="right-align">Pagado</th><th class="right-align">Saldo pendiente</th></tr></thead><tbody>
 {% for debt in debts %}<tr><td class="strong">{{ debt.enrollment.student.full_name }}</td><td>{{ debt.enrollment.student.phone|default:"—" }}</td><td>{{ debt.enrollment.course.name }}{% if debt.enrollment.course.group %}<div class="small muted">{{ debt.enrollment.course.group }}{% if debt.enrollment.course.schedule %} · {{ debt.enrollment.course.schedule }}{% endif %}</div>{% endif %}</td><td>{{ debt.concept }}</td><td>{% if debt.due_date %}{{ debt.due_date|date:"d/m/Y" }}{% else %}—{% endif %}</td><td class="right-align">S/ {{ debt.amount|floatformat:2 }}</td><td class="right-align">S/ {{ debt.paid_total|floatformat:2 }}</td><td class="right-align danger strong">S/ {{ debt.pending_balance|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="8" class="center-align muted">No hay cuotas pendientes con estos criterios.</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="mt">{% include "shared/pagination.html" %}</div>
+</div>
 {% endblock %}

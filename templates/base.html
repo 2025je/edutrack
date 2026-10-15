@@ -403,7 +403,7 @@
       border-radius:50%;
       background:rgba(255,255,255,.16)
     }
-    header nav .sidenav-trigger i{color:inherit;font-size:1.6rem;line-height:1}
+    header nav .sidenav-trigger i{display:block;height:auto;width:auto;color:inherit;font-size:1.6rem;line-height:1}
     header nav .theme-toggle{
       display:flex;
       align-items:center;
@@ -418,8 +418,37 @@
       border-radius:50%;
       transition:background-color .15s ease
     }
+    header nav ul.right>li.header-user{margin:0 .5rem 0 1rem;color:#fff;font-weight:500}
+    header nav ul.right>li.header-user span{display:inline-flex;align-items:center;gap:.4rem;line-height:1}
+    header nav ul.right>li>a{display:inline-flex;align-items:center;line-height:1;height:64px}
+    header nav ul.right>li>a .campus-logo{margin-right:.5rem;vertical-align:middle}
+    header nav .theme-toggle{position:static;float:none;vertical-align:middle}
+    .sidenav li.sidenav-spacer{height:8px}
+    .sidenav .subheader{padding:8px 32px 4px;font-size:.75rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#78849a;line-height:1.4}
     header nav .theme-toggle:hover{background:rgba(255,255,255,.13)}
-    header nav .theme-toggle i{line-height:1;font-size:1.35rem}
+    header nav ul.right>li.header-logout{height:64px;line-height:64px}
+    header nav ul.right>li.header-campus{height:64px;line-height:64px;padding:0 .5rem}
+    header nav .header-campus form{display:block;margin:0;height:64px}
+    header nav .campus-menu{position:relative;height:64px}
+    header nav .campus-menu>summary{list-style:none;display:flex;align-items:center;gap:.35rem;height:40px;margin-top:12px;padding:0 .4rem 0 .5rem;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.35);border-radius:6px;color:#fff;font-weight:500;cursor:pointer;line-height:1;white-space:nowrap}
+    header nav .campus-menu>summary::-webkit-details-marker{display:none}
+    header nav .campus-menu>summary:hover,header nav .campus-menu[open]>summary{background:rgba(255,255,255,.22)}
+    header nav .campus-menu .campus-logo{width:26px;height:26px;margin:0}
+    header nav .campus-menu .campus-logo-empty{display:inline-block;width:26px;height:26px}
+    header nav .campus-options{position:absolute;right:0;top:56px;min-width:100%;margin:0;padding:.3rem 0;background:#fff;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.28);z-index:1000;    max-height:60vh;overflow-y:auto;overflow-x:hidden}
+        header nav .campus-options li{float:none;display:block;height:auto;line-height:normal;padding:0}
+        header nav .campus-options button{box-sizing:border-box;display:flex;align-items:center;gap:.6rem;width:100%;height:auto;padding:.55rem .9rem;background:transparent;border:0;color:#212121;font:inherit;text-align:left;cursor:pointer;white-space:nowrap}
+    header nav .campus-options button:hover{background:#e3f2fd}
+    header nav .campus-options button.active{font-weight:700;background:#f1f6fb}
+    html[data-theme=dark] header nav .campus-options{background:#1e2128}
+    html[data-theme=dark] header nav .campus-options button{color:#e8eaed}
+    html[data-theme=dark] header nav .campus-options button:hover,html[data-theme=dark] header nav .campus-options button.active{background:#2a2f3a}
+    header nav ul.right>li.header-logout form{display:inline;margin:0}
+    header nav .logout-btn{display:inline-flex;align-items:center;vertical-align:middle;gap:.35rem;background:transparent;border:0;border-radius:24px;color:#fff;cursor:pointer;font:inherit;font-weight:500;line-height:1;margin:0;padding:0 .9rem;height:48px;transition:background-color .15s ease}
+    header nav .logout-btn:hover{background:rgba(255,255,255,.13)}
+    header nav .logout-btn i{font-size:1.3rem}
+    header nav .theme-toggle i{display:block;height:auto;width:auto;line-height:1;font-size:1.35rem}
+    header nav ul.right>li.header-user i{height:auto;line-height:1;font-size:1.4rem}
     @media only screen and (min-width:993px){
       body.has-side header .sidenav-trigger{display:none}
       body.has-side .sidenav.sidenav-fixed{top:64px;height:calc(100% - 64px)}
@@ -483,6 +512,25 @@
     main .btn-small{min-height:32px;padding:0 10px;font-size:.82rem}
     main .btn-small.icon-only{width:34px;height:34px;min-height:34px;padding:0;border-radius:4px}
     main .btn-small.icon-only i.material-icons{font-size:1.15rem}
+    main .btn-small.action-btn{display:inline-flex;align-items:center;gap:.3rem;height:34px;line-height:1;padding:0 10px;border-radius:4px;white-space:nowrap}
+    tr.row-warning>td{background:#fdecea}
+    tr.row-success>td{background:#eaf6ec}
+    tr.row-warning>td:first-child{box-shadow:inset 4px 0 0 #d32f2f}
+    tr.row-success>td:first-child{box-shadow:inset 4px 0 0 #2e7d32}
+    tr.row-warning>td.debt-cell{color:#b71c1c}
+    tr.row-success>td.debt-cell{color:#1b5e20}
+    tr.row-warning:hover>td{background:#fadbd8}
+    tr.row-success:hover>td{background:#d9eedc}
+    html[data-theme=dark] tr.row-warning>td{background:#3b1f22}
+    html[data-theme=dark] tr.row-success>td{background:#17301d}
+    html[data-theme=dark] tr.row-warning>td:first-child{box-shadow:inset 4px 0 0 #ef5350}
+    html[data-theme=dark] tr.row-success>td:first-child{box-shadow:inset 4px 0 0 #66bb6a}
+    html[data-theme=dark] tr.row-warning>td.debt-cell{color:#ef9a9a}
+    html[data-theme=dark] tr.row-success>td.debt-cell{color:#a5d6a7}
+    html[data-theme=dark] tr.row-warning:hover>td{background:#4a272b}
+    html[data-theme=dark] tr.row-success:hover>td{background:#1f3d26}
+    main .btn-small.action-btn i.material-icons{margin:0;color:#fff;font-size:1.15rem;line-height:1;height:auto}
+    td .flex.gap{flex-wrap:wrap}
     main .btn-flat.btn-small{min-height:32px;height:auto}
     html[data-theme=dark] header nav.blue,html[data-theme=dark] header .sidenav .user-view{background:#252d56!important}
     html[data-theme=dark] header nav ul.right>li>a,
@@ -526,29 +574,47 @@
       {% if user.is_authenticated %}<a href="#" data-target="slide-out" class="sidenav-trigger" aria-label="Abrir menú"><i class="material-icons">menu</i></a>{% endif %}
       <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}">EduTrack Pagos</a>
       <ul class="right">
-      {% if user.is_authenticated and selected_campus %}<li class="hide-on-small-only"><a href="{% url 'select-campus' %}">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}Sede: {{ selected_campus.name }}</a></li>{% endif %}
-      <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
+      {% if user.is_authenticated and selected_campus %}<li class="header-campus hide-on-small-only"><form method="post" action="{% url 'select-campus' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><details class="campus-menu"><summary aria-label="Cambiar de sede">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }}</span><i class="material-icons" aria-hidden="true">arrow_drop_down</i></summary><ul class="campus-options">{% for campus in available_campuses %}<li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{% if campus.logo %}<img class="campus-logo" src="{{ campus.logo.url }}" alt="">{% else %}<span class="campus-logo-empty"></span>{% endif %}{{ campus.name }}</button></li>{% endfor %}</ul></details></form></li>{% endif %}
+            {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
+            <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
+            {% if user.is_authenticated %}<li class="header-logout"><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="logout-btn" title="Cerrar sesión"><i class="material-icons" aria-hidden="true">logout</i><span class="hide-on-small-only">Salir</span></button></form></li>{% endif %}
       </ul>
     </div>
   </nav>
   {% if user.is_authenticated %}
   <ul id="slide-out" class="sidenav sidenav-fixed">
-    <li><div class="user-view"><span class="name">{{ user.get_full_name|default:user.username }}</span></div></li>
+    <li class="sidenav-spacer" aria-hidden="true"></li>
     {% if user.is_superuser or user.can_manage_students %}
+    <li><div class="subheader">Académico</div></li>
     <li><a href="{% url 'student-list' %}"><i class="material-icons">school</i>Estudiantes</a></li>
     <li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>
     <li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>
+    <li><div class="divider"></div></li>
     {% endif %}
     {% if user.is_superuser or user.can_register_payments %}
+    <li><div class="subheader">Pagos</div></li>
     <li><a href="{% url 'payment-list' %}"><i class="material-icons">receipt_long</i>Pagos</a></li>
     <li><a href="{% url 'installment-list' %}"><i class="material-icons">event_note</i>Cuotas</a></li>
     <li><a href="{% url 'pending-debts' %}"><i class="material-icons">money_off</i>Deudas pendientes</a></li>
-    {% endif %}
-    {% if user.is_staff %}<li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>{% endif %}
     <li><div class="divider"></div></li>
-    <li><a href="{% url 'select-campus' %}" title="{% if selected_campus %}Sede: {{ selected_campus.name }}{% endif %}"><i class="material-icons">location_city</i>{% if selected_campus %}{{ selected_campus.name }} · Cambiar{% else %}Seleccionar sede{% endif %}</a></li>
-    <li><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="nav-btn">Salir</button></form></li>
-  </ul>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_promoters %}
+    <li><div class="subheader">Catálogo</div></li>
+    <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
+    <li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_students or user.can_register_payments %}
+    <li><div class="subheader">Herramientas</div></li>
+    <li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
+    {% if user.is_staff %}
+    <li><div class="subheader">Administración</div></li>
+    <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
+      </ul>
   {% endif %}
 </header>
 <main>
@@ -581,6 +647,97 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!next || next.tagName !== "SPAN") el.classList.add("browser-default");
   });
   document.querySelectorAll("textarea").forEach(function (el) { el.classList.add("materialize-textarea"); });
+});
+</script>
+<script>
+// Filtrado en vivo: el formulario con data-live-filter actualiza las zonas data-live-region sin recargar.
+document.addEventListener("DOMContentLoaded", function () {
+  var form = document.querySelector("form[data-live-filter]");
+  if (!form) return;
+  var controller = null;
+  var timer = null;
+
+  function queryString() {
+    var params = new URLSearchParams();
+    var current = new URLSearchParams(location.search);
+    ["sort", "direction"].forEach(function (key) {
+      if (current.has(key) && !form.elements[key]) params.set(key, current.get(key));
+    });
+    new FormData(form).forEach(function (value, key) {
+      if (value !== "" && key !== "page") params.append(key, value);
+    });
+    return params.toString();
+  }
+
+  function syncExports(url) {
+    var params = new URL(url, location.href).searchParams;
+    params.delete("page");
+    document.querySelectorAll("[data-live-export]").forEach(function (link) {
+      var parts = [params.toString(), link.dataset.liveExtra].filter(Boolean);
+      link.href = link.dataset.liveExport + (parts.length ? "?" + parts.join("&") : "");
+    });
+  }
+
+  function load(url) {
+    if (controller) controller.abort();
+    controller = new AbortController();
+    fetch(url, {signal: controller.signal, headers: {"X-Requested-With": "XMLHttpRequest"}})
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.text();
+      })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        document.querySelectorAll("[data-live-region]").forEach(function (region) {
+          var fresh = doc.querySelector('[data-live-region="' + region.dataset.liveRegion + '"]');
+          if (!fresh) return;
+          var checked = region.querySelector("input[type=radio]:checked");
+          var checkedValue = checked ? checked.value : null;
+          region.innerHTML = fresh.innerHTML;
+          if (checkedValue !== null) {
+            region.querySelectorAll("input[type=radio]").forEach(function (radio) {
+              if (radio.value === checkedValue) radio.checked = true;
+            });
+          }
+        });
+        history.replaceState(null, "", url);
+        syncExports(url);
+      })
+      .catch(function (error) {
+        if (error.name !== "AbortError") console.error(error);
+      });
+  }
+
+  function run() {
+    clearTimeout(timer);
+    var qs = queryString();
+    load(location.pathname + (qs ? "?" + qs : ""));
+  }
+
+  form.addEventListener("input", function (event) {
+    if (event.target.matches("select, input[type=date]")) return;
+    clearTimeout(timer);
+    timer = setTimeout(run, 300);
+  });
+  form.addEventListener("change", function (event) {
+    if (event.target.matches("select, input[type=date]")) run();
+  });
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    run();
+  });
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest("a");
+    if (!link || !link.closest("[data-live-region]")) return;
+    if (!link.closest(".pager, thead")) return;
+    event.preventDefault();
+    load(link.href);
+  });
+});
+</script>
+<script>
+document.addEventListener("click", function (e) {
+  document.querySelectorAll("details.campus-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
 });
 </script>
 </body></html>

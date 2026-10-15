@@ -25,8 +25,14 @@
                     </div>
                 {% endif %}
 
+                {% if locked_student %}
+                    <div class="note mb"><strong>Estudiante:</strong> {{ locked_student.full_name }}
+                        <a class="blue-text" href="{% url 'enrollment-create' %}">Cambiar</a></div>
+                {% endif %}
+
                 <div class="row">
                     {% for field in form %}
+                        {% if field.is_hidden %}{{ field }}{% else %}
                         <div class="col s12 m6 field">
                             {% if field.name == "promoter" and "matriculas" in request.path %}
                                 <label>{{ field.label }}</label>
@@ -89,6 +95,7 @@
                                 <div class="field-error">{{ error }}</div>
                             {% endfor %}
                         </div>
+                        {% endif %}
                     {% endfor %}
                 </div>
 

@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import (
     Case,
@@ -16,12 +17,12 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.http import JsonResponse
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from django.views.generic import ListView, CreateView, UpdateView, DeleteView, View
+from django.views.generic import ListView, CreateView, UpdateView, DeleteView, TemplateView, View
 from itertools import groupby
 import re
 from openpyxl import Workbook
@@ -70,12 +71,12 @@ class StudentListView(CampusScopedMixin, ListView):
         )
         q = self.request.GET.get("q", "").strip()
         if q:
-            qs = qs.filter(Q(full_name__icontains=q) | Q(document_number__icontains=q))
-        sort = self.request.GET.get("sort", "name")
-        direction = self.request.GET.get("direction", "asc")
+            qs = qs.filter(Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q))
+        sort = self.request.GET.get("sort", "row_number")
+        direction = self.request.GET.get("direction", "desc")
         sort_field = self.sortable_fields.get(sort, "full_name")
         if direction not in {"asc", "desc"}:
-            direction = "asc"
+            direction = "desc"
         if sort == "row_number":
             chronological_fields = ["created_at", "pk"]
             if direction == "desc":
@@ -96,8 +97,8 @@ class StudentListView(CampusScopedMixin, ListView):
                     "student_id", flat=True
                 )
             )
-        context["current_sort"] = self.request.GET.get("sort", "name")
-        context["current_direction"] = self.request.GET.get("direction", "asc")
+        context["current_sort"] = self.request.GET.get("sort", "row_number")
+        context["current_direction"] = self.request.GET.get("direction", "desc")
         context["sort_urls"] = {}
         for key in self.sortable_fields:
             sort_params = self.request.GET.copy()
@@ -105,7 +106,7 @@ class StudentListView(CampusScopedMixin, ListView):
             if context["current_sort"] == key:
                 next_direction = "desc" if context["current_direction"] == "asc" else "asc"
             else:
-                next_direction = "asc"
+                next_direction = "desc" if key == "row_number" else "asc"
             sort_params["sort"] = key
             sort_params["direction"] = next_direction
             context["sort_urls"][key] = f"?{sort_params.urlencode()}"
@@ -277,10 +278,10 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             )
         )
         filters = {
-            "student__full_name__icontains": self.request.GET.get("student", "").strip(),
-            "course__name__icontains": self.request.GET.get("course", "").strip(),
+            "student__full_name__unaccent__icontains": self.request.GET.get("student", "").strip(),
+            "course__name__unaccent__icontains": self.request.GET.get("course", "").strip(),
             "record_code__icontains": self.request.GET.get("record_code", "").strip(),
-            "promoter__name__icontains": self.request.GET.get("promoter", "").strip(),
+            "promoter__name__unaccent__icontains": self.request.GET.get("promoter", "").strip(),
         }
         for field, value in filters.items():
             if value:
@@ -330,43 +331,6 @@ class EnrollmentListView(CampusScopedMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["missing_record_codes"] = None
-        context["record_code_check_error"] = None
-        context["record_code_check_date"] = self.request.GET.get(
-            "record_code_check_date", ""
-        ).strip()
-        context["record_code_start"] = self.request.GET.get("record_code_start", "").strip()
-        context["record_code_end"] = self.request.GET.get("record_code_end", "").strip()
-        if self.request.GET.get("check_record_codes"):
-            enrollment_date = parse_date(context["record_code_check_date"])
-            if enrollment_date is None:
-                context["record_code_check_error"] = "Seleccione una fecha de matrícula válida."
-            elif not (
-                context["record_code_start"].isdigit() and context["record_code_end"].isdigit()
-            ):
-                context["record_code_check_error"] = (
-                    "Ingrese un rango numérico válido de códigos de ficha."
-                )
-            else:
-                first_code, last_code = sorted(
-                    (int(context["record_code_start"]), int(context["record_code_end"]))
-                )
-                if last_code - first_code + 1 > MAX_RECORD_CODE_CHECK_RANGE:
-                    context["record_code_check_error"] = (
-                        f"El rango no puede superar {MAX_RECORD_CODE_CHECK_RANGE:,} códigos."
-                    )
-                else:
-                    expected_codes = [str(code) for code in range(first_code, last_code + 1)]
-                    registered_codes = set(
-                        Enrollment.objects.filter(
-                            campus=get_selected_campus(self.request),
-                            enrollment_date=enrollment_date,
-                            record_code__in=expected_codes,
-                        ).values_list("record_code", flat=True)
-                    )
-                    context["missing_record_codes"] = [
-                        code for code in expected_codes if code not in registered_codes
-                    ]
         query_params = self.request.GET.copy()
         query_params.pop("page", None)
         context["pagination_query"] = query_params.urlencode()
@@ -431,6 +395,108 @@ class EnrollmentListView(CampusScopedMixin, ListView):
                     "pk", flat=True
                 )
             )
+        return context
+
+
+class ToolsView(
+    FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin, TemplateView
+):
+    template_name = "utils/tools.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        user = request.user
+        if user.is_authenticated and not (
+            user.is_superuser or user.can_manage_students or user.can_register_payments
+        ):
+            from django.core.exceptions import PermissionDenied
+
+            raise PermissionDenied("No tienes permiso para acceder a esta sección.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        context["can_check_record_codes"] = user.is_superuser or user.can_manage_students
+        context["missing_record_codes"] = None
+        context["record_code_check_error"] = None
+        context["record_code_check_date"] = self.request.GET.get(
+            "record_code_check_date", ""
+        ).strip()
+        context["record_code_start"] = self.request.GET.get("record_code_start", "").strip()
+        context["record_code_end"] = self.request.GET.get("record_code_end", "").strip()
+        if context["can_check_record_codes"] and self.request.GET.get("check_record_codes"):
+            enrollment_date = parse_date(context["record_code_check_date"])
+            if enrollment_date is None:
+                context["record_code_check_error"] = "Seleccione una fecha de matrícula válida."
+            elif not (
+                context["record_code_start"].isdigit() and context["record_code_end"].isdigit()
+            ):
+                context["record_code_check_error"] = (
+                    "Ingrese un rango numérico válido de códigos de ficha."
+                )
+            else:
+                first_code, last_code = sorted(
+                    (int(context["record_code_start"]), int(context["record_code_end"]))
+                )
+                if last_code - first_code + 1 > MAX_RECORD_CODE_CHECK_RANGE:
+                    context["record_code_check_error"] = (
+                        f"El rango no puede superar {MAX_RECORD_CODE_CHECK_RANGE:,} códigos."
+                    )
+                else:
+                    expected_codes = [str(code) for code in range(first_code, last_code + 1)]
+                    registered_codes = set(
+                        Enrollment.objects.filter(
+                            campus=get_selected_campus(self.request),
+                            enrollment_date=enrollment_date,
+                            record_code__in=expected_codes,
+                        ).values_list("record_code", flat=True)
+                    )
+                    context["missing_record_codes"] = [
+                        code for code in expected_codes if code not in registered_codes
+                    ]
+        context["can_check_receipts"] = user.is_superuser or user.can_register_payments
+        context["missing_receipts"] = None
+        context["receipt_check_error"] = None
+        context["receipt_start"] = self.request.GET.get("receipt_start", "").strip()
+        context["receipt_end"] = self.request.GET.get("receipt_end", "").strip()
+        if context["can_check_receipts"] and self.request.GET.get("check_receipts"):
+            from django.core.exceptions import ValidationError
+            from payments.models import Payment
+            from payments.views import MAX_RECEIPT_CHECK_RANGE, parse_receipt_code
+
+            try:
+                start_prefix, start_number = parse_receipt_code(context["receipt_start"])
+                end_prefix, end_number = parse_receipt_code(context["receipt_end"])
+                if start_prefix != end_prefix:
+                    context["receipt_check_error"] = (
+                        "Los dos recibos deben ser numéricos o usar la misma letra."
+                    )
+                else:
+                    first_number, last_number = sorted((start_number, end_number))
+                    if last_number - first_number + 1 > MAX_RECEIPT_CHECK_RANGE:
+                        context["receipt_check_error"] = (
+                            f"El rango no puede superar {MAX_RECEIPT_CHECK_RANGE:,} recibos."
+                        )
+                    else:
+                        expected_receipts = [
+                            f"{start_prefix}{number}"
+                            for number in range(first_number, last_number + 1)
+                        ]
+                        registered_receipts = set(
+                            Payment.objects.filter(
+                                campus=get_selected_campus(self.request),
+                                receipt_number__in=expected_receipts,
+                            ).values_list("receipt_number", flat=True)
+                        )
+                        context["missing_receipts"] = [
+                            receipt
+                            for receipt in expected_receipts
+                            if receipt not in registered_receipts
+                        ]
+            except (ValidationError, ValueError, TypeError):
+                context["receipt_check_error"] = (
+                    "Ingrese solo números o una letra mayúscula seguida de números."
+                )
         return context
 
 
@@ -578,12 +644,72 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
     model = Enrollment
     form_class = EnrollmentForm
     template_name = "students/form.html"
+    selection_template_name = "students/enrollment_student_select.html"
     success_url = reverse_lazy("enrollment-list")
+    students_per_page = 25
+
+    def get_locked_student(self):
+        if not hasattr(self, "_locked_student"):
+            raw = self.request.POST.get("student") or self.request.GET.get("student")
+            student = None
+            if raw and raw.isdigit():
+                student = Student.objects.filter(
+                    pk=int(raw), campus=get_selected_campus(self.request), active=True
+                ).first()
+            self._locked_student = student
+        return self._locked_student
+
+    def get(self, request, *args, **kwargs):
+        if self.get_locked_student() is None:
+            return self.render_student_selection()
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if self.get_locked_student() is None:
+            messages.error(request, "Primero selecciona un estudiante válido de la tabla.")
+            return redirect("enrollment-create")
+        return super().post(request, *args, **kwargs)
+
+    def render_student_selection(self):
+        students = Student.objects.filter(
+            campus=get_selected_campus(self.request), active=True
+        ).order_by("full_name", "pk")
+        q = self.request.GET.get("q", "").strip()
+        if q:
+            students = students.filter(
+                Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q)
+            )
+        paginator = Paginator(students, self.students_per_page)
+        page_obj = paginator.get_page(self.request.GET.get("page"))
+        pagination_query = self.request.GET.copy()
+        pagination_query.pop("page", None)
+        return render(
+            self.request,
+            self.selection_template_name,
+            {
+                "students": page_obj.object_list,
+                "page_obj": page_obj,
+                "is_paginated": page_obj.has_other_pages(),
+                "pagination_query": pagination_query.urlencode(),
+                "q": q,
+            },
+        )
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["student"] = self.get_locked_student()
+        return initial
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["locked_student"] = self.get_locked_student()
+        return context
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         kwargs["request"] = self.request
+        kwargs["locked_student"] = self.get_locked_student()
         return kwargs
 
     def form_valid(self, form):
@@ -704,7 +830,9 @@ def course_students_queryset(request):
     query = request.GET.get("q", "").strip()
     if query:
         qs = qs.filter(
-            Q(name__icontains=query) | Q(schedule__icontains=query) | Q(group__icontains=query)
+            Q(name__unaccent__icontains=query)
+            | Q(schedule__unaccent__icontains=query)
+            | Q(group__unaccent__icontains=query)
         )
     return qs
 

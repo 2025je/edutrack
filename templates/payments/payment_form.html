@@ -1,21 +1,21 @@
 {% extends "base.html" %}{% block title %}{% if object %}Editar pago{% else %}Registrar pago{% endif %} · EduTrack{% endblock %}
 {% block content %}<div class="row"><div class="col s12 xl10 offset-xl1"><div class="card card-pad">
 <h1>{% if object %}Editar pago{% else %}Registrar pago{% endif %}</h1><p class="muted">Solo se muestran matrículas con deuda pendiente. Busca por nombre del alumno o curso.</p>
-<form method="get" class="mb">
+<form method="get" class="mb" data-live-filter>
   <label for="payment-search">Buscar matrícula pendiente</label>
   <div class="flex gap items-center">
-    <input id="payment-search" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso" style="margin:0">
+    <input id="payment-search" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso" style="margin:0" autocomplete="off">
     <button class="btn" type="submit">Buscar</button>
     {% if request.GET.q %}<a class="btn-flat grey-text text-darken-2" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
   </div>
 </form>
-{% if not form.fields.enrollment.queryset.exists %}<div class="note note-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}
+<div data-live-region="empty-note">{% if not form.fields.enrollment.queryset.exists %}<div class="note note-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}</div>
 <form method="post">{% csrf_token %}
 {% if form.non_field_errors %}<div class="note note-danger">{{ form.non_field_errors }}</div>{% endif %}
 {% for field in form %}<div class="field">
 {% if field.name == "enrollment" %}
 <label>{{ field.label }}</label>
-<div class="table-wrap" style="border:1px solid #e0e0e0;border-radius:4px">
+<div data-live-region="enrollment-table" class="table-wrap" style="border:1px solid #e0e0e0;border-radius:4px">
 <table class="highlight">
 <thead><tr><th class="center-align" scope="col">Seleccionar</th><th scope="col">Estudiante</th><th scope="col">Curso</th><th class="right-align" scope="col">Costo matrícula</th><th class="right-align" scope="col">Mensualidad</th><th class="right-align" scope="col">Deuda</th></tr></thead>
 <tbody>
