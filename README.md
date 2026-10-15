@@ -106,7 +106,7 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `uv run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `uv.lock`. Al cambiar dependencias, usa `uv add paquete` o `uv remove paquete` para actualizar ambos archivos. Para dependencias de desarrollo, usa `uv add --dev paquete`. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con uv, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.11 y 3.12 en cada push y pull request.
+Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar las comprobaciones localmente, usa `uv run ruff check .` y `uv run pyright`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `uv.lock`. Al cambiar dependencias, usa `uv add paquete` o `uv remove paquete` para actualizar ambos archivos. Para dependencias de desarrollo, usa `uv add --dev paquete`. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con uv, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.11 y 3.12 en cada push y pull request.
 
 ## Respaldos y producción
 
