@@ -4,13 +4,19 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "solo-desarrollo-cambiar-en-produccion")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
-ALLOWED_HOSTS = [h.strip() for h in os.getenv(
-    "DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost"
-).split(",") if h.strip()]
-CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv(
-    "DJANGO_CSRF_TRUSTED_ORIGINS",
-    "http://localhost:8080,http://127.0.0.1:8080",
-).split(",") if origin.strip()]
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+    if h.strip()
+]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        "http://localhost:8080,http://127.0.0.1:8080",
+    ).split(",")
+    if origin.strip()
+]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -24,8 +30,12 @@ INSTALLED_APPS = [
     "students",
     "payments",
 ]
+if DEBUG:
+    INSTALLED_APPS.append("debug_toolbar")
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    *(["debug_toolbar.middleware.DebugToolbarMiddleware"] if DEBUG else []),
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -33,18 +43,25 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+if DEBUG:
+    INTERNAL_IPS = ["127.0.0.1"]
+
 ROOT_URLCONF = "config.urls"
-TEMPLATES = [{
-    "BACKEND": "django.template.backends.django.DjangoTemplates",
-    "DIRS": [BASE_DIR / "templates"],
-    "APP_DIRS": True,
-    "OPTIONS": {"context_processors": [
-        "django.template.context_processors.request",
-        "django.contrib.auth.context_processors.auth",
-        "django.contrib.messages.context_processors.messages",
-        "core.context_processors.selected_campus_context",
-    ]},
-}]
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+                "core.context_processors.selected_campus_context",
+            ]
+        },
+    }
+]
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
@@ -58,6 +75,19 @@ DATABASES = {
         "HOST": os.getenv("DB_HOST", "127.0.0.1"),
         "PORT": os.getenv("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,
+    }
+}
+CACHES = {
+    "default": {
+        "BACKEND": (
+            "django_redis.cache.RedisCache"
+            if os.getenv("REDIS_URL")
+            else "django.core.cache.backends.locmem.LocMemCache"
+        ),
+        "LOCATION": os.getenv("REDIS_URL") or "edutrack-local-cache",
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"}
+        if os.getenv("REDIS_URL")
+        else {},
     }
 }
 AUTH_USER_MODEL = "core.User"

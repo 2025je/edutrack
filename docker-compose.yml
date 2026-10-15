@@ -19,6 +19,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Cache compartida de Django; su contenido es efímero.
+  redis:
+    image: redis:7-alpine
+    container_name: edutrack_redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Instancia 2: Aplicación Django
   web:
     build: .
@@ -26,6 +37,8 @@ services:
     command: sh -c "python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -"
     env_file:
       - .env
+    environment:
+      REDIS_URL: redis://redis:6379/1
     expose:
       - "8000"
     volumes:
@@ -34,6 +47,8 @@ services:
       - django_static:/app/staticfiles
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # Instancia 3: Proxy inverso y servidor de archivos estáticos

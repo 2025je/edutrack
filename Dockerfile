@@ -1,7 +1,10 @@
+# syntax=docker/dockerfile:1.7
+
 # Genera la lista de instalación desde el lockfile de Poetry
 FROM python:3.11-slim AS dependencies
 
-RUN pip install --no-cache-dir poetry==2.4.1 poetry-plugin-export==1.10.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install poetry==2.4.1 poetry-plugin-export==1.10.0
 WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
 RUN poetry export --only main --format requirements.txt --without-hashes --output /requirements.txt
@@ -19,7 +22,8 @@ WORKDIR /app
 
 # Instala las versiones resueltas por Poetry sin incluir Poetry en runtime
 COPY --from=dependencies /requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Copia el resto del código del proyecto al contenedor
 COPY . /app/

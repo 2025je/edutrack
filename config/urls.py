@@ -7,7 +7,11 @@ from django.contrib.auth import views as auth_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("cuentas/ingresar/", auth_views.LoginView.as_view(template_name="registration/login.html"), name="login"),
+    path(
+        "cuentas/ingresar/",
+        auth_views.LoginView.as_view(template_name="registration/login.html"),
+        name="login",
+    ),
     path("cuentas/salir/", auth_views.LogoutView.as_view(), name="logout"),
     path("sedes/seleccionar/", select_campus, name="select-campus"),
     path("", DashboardView.as_view(), name="dashboard"),
@@ -16,4 +20,5 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    urlpatterns += [path("__debug__/", include("debug_toolbar.urls"))]
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

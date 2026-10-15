@@ -18,7 +18,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
 
 ## Requisitos
 
-- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12, Poetry 2.4 y PostgreSQL 15 o posterior.
+- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12, Poetry 2.4, PostgreSQL 15 o posterior y Redis para caché en producción.
 - Navegador moderno.
 
 ## Inicio con Docker
@@ -49,6 +49,8 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose up --build -d
    ```
 
+   La compilación usa BuildKit y conserva en caché los paquetes de pip para acelerar compilaciones posteriores.
+
 4. Aplica las migraciones y crea el usuario administrador:
 
    ```powershell
@@ -56,7 +58,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8080/> e inicia sesión. Docker sirve la aplicación mediante Gunicorn y Nginx; Nginx publica el puerto 8080 del equipo y entrega los archivos estáticos y multimedia. Para revisar los logs usa `docker compose logs -f web nginx`; para detener los servicios sin borrar los datos, `docker compose down`.
+5. Abre <http://localhost:8080/> e inicia sesión. Docker sirve la aplicación mediante Gunicorn, Redis proporciona la caché compartida de Django y Nginx publica el puerto 8080 del equipo y entrega los archivos estáticos y multimedia. Redis solo es accesible dentro de la red de Compose y su caché es efímera. Para revisar los logs usa `docker compose logs -f web nginx redis`; para detener los servicios sin borrar los datos, `docker compose down`.
 
 Si ya tienes un `.env`, agrega la variable `DJANGO_CSRF_TRUSTED_ORIGINS` como arriba y recrea el servicio para que cargue la configuración: `docker compose up -d --build web`.
 
@@ -92,6 +94,7 @@ poetry run python manage.py runserver_plus 127.0.0.1:8000
 ```
 
 El depurador de `runserver_plus` permite inspeccionar errores durante el desarrollo. No lo uses con datos reales ni en producción.
+Con `DEBUG=True`, Django Debug Toolbar aparece automáticamente en el entorno local en las páginas HTML. Solo está instalado en el grupo de desarrollo y no se habilita cuando `DEBUG=False`.
 
 ## Pruebas y migraciones
 
@@ -103,7 +106,7 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `poetry run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. GitHub Actions instala con Poetry, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 con Python 3.11 y 3.12 en cada push y pull request.
+Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `poetry run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con Poetry, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.11 y 3.12 en cada push y pull request.
 
 ## Respaldos y producción
 
@@ -113,6 +116,6 @@ Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Eje
 docker compose exec -T db pg_dump -U edutrack_user -d edutrack_pagos > backup_edutrack.sql
 ```
 
-En Docker, Gunicorn sirve Django y Nginx actúa como proxy inverso y sirve los archivos estáticos y multimedia. Antes de exponer el servicio a Internet, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración. El puerto 8080 del host se asigna al puerto 80 de Nginx; el servicio Django no publica directamente su puerto.
+En Docker, Gunicorn sirve Django, Redis proporciona la caché y Nginx actúa como proxy inverso y sirve los archivos estáticos y multimedia. Antes de exponer el servicio a Internet, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración. El puerto 8080 del host se asigna al puerto 80 de Nginx; los servicios Django y Redis no publican directamente sus puertos.
 
 Los recibos emitidos por la aplicación son comprobantes internos; no son comprobantes electrónicos tributarios autorizados por SUNAT.
