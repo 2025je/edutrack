@@ -61,29 +61,30 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: poetry
-          cache-dependency-path: poetry.lock
 
-      - name: Install Poetry
-        run: pipx install poetry==2.4.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: poetry sync --no-root
+        run: uv sync --locked
 
       - name: Lint with Ruff
-        run: poetry run ruff check .
+        run: uv run --locked ruff check .
 
       - name: Check Django configuration
-        run: poetry run python manage.py check
+        run: uv run --locked python manage.py check
 
       - name: Verify runserver_plus command
-        run: poetry run python manage.py help runserver_plus
+        run: uv run --locked python manage.py help runserver_plus
 
       - name: Check migrations
-        run: poetry run python manage.py makemigrations --check --dry-run
+        run: uv run --locked python manage.py makemigrations --check --dry-run
 
       - name: Apply migrations
-        run: poetry run python manage.py migrate --noinput
+        run: uv run --locked python manage.py migrate --noinput
 
       - name: Run tests
-        run: poetry run python manage.py test
+        run: uv run --locked python manage.py test

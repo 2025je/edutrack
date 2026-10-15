@@ -18,7 +18,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
 
 ## Requisitos
 
-- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12, Poetry 2.4, PostgreSQL 15 o posterior y Redis para caché en producción.
+- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12, uv, PostgreSQL 15 o posterior y Redis para caché en producción.
 - Navegador moderno.
 
 ## Inicio con Docker
@@ -36,6 +36,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    DJANGO_DEBUG=False
    DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
    DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+   GRAFANA_ADMIN_PASSWORD=una-contrasena-segura
    DB_NAME=edutrack_pagos
    DB_USER=edutrack_user
    DB_PASSWORD=una-contrasena-segura
@@ -49,7 +50,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose up --build -d
    ```
 
-   La compilación usa BuildKit y conserva en caché los paquetes de pip para acelerar compilaciones posteriores.
+   La compilación usa BuildKit y conserva en caché los paquetes de uv para acelerar compilaciones posteriores.
 
 4. Aplica las migraciones y crea el usuario administrador:
 
@@ -58,9 +59,9 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8080/> e inicia sesión. Docker sirve la aplicación mediante Gunicorn, Redis proporciona la caché compartida de Django y Nginx publica el puerto 8080 del equipo y entrega los archivos estáticos y multimedia. Redis solo es accesible dentro de la red de Compose y su caché es efímera. Para revisar los logs usa `docker compose logs -f web nginx redis`; para detener los servicios sin borrar los datos, `docker compose down`.
+5. Abre <http://localhost:8080/> e inicia sesión. Grafana está disponible en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`) con Loki ya configurado como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`. Alloy recoge los logs de los contenedores de este proyecto y Loki los conserva durante 30 días. Nginx sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia; Redis proporciona la caché compartida de Django y solo es accesible dentro de Compose. Para consultar logs de arranque usa `docker compose logs -f web nginx redis grafana loki alloy`; para detener los servicios sin borrar los datos, `docker compose down`.
 
-Si ya tienes un `.env`, agrega la variable `DJANGO_CSRF_TRUSTED_ORIGINS` como arriba y recrea el servicio para que cargue la configuración: `docker compose up -d --build web`.
+Si ya tienes un `.env`, agrega `DJANGO_CSRF_TRUSTED_ORIGINS` y `GRAFANA_ADMIN_PASSWORD` como arriba, y recrea los servicios: `docker compose up -d --build`.
 
 > `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo únicamente cuando quieras borrar la base por completo.
 
@@ -77,20 +78,19 @@ La sede de la matrícula se determina en el servidor a partir de la sede selecci
 
 ## Desarrollo local sin Docker
 
-Con PostgreSQL instalado y ejecutándose, instala Poetry si aún no lo tienes y prepara las dependencias:
+Con PostgreSQL instalado y ejecutándose, instala uv si aún no lo tienes y prepara las dependencias:
 
 ```powershell
-pipx install "poetry==2.4.1"
-poetry install
-poetry run pre-commit install
+uv sync
+uv run pre-commit install
 ```
 
 Configura las variables de `.env.example` en el entorno de PowerShell: Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker. Usa `DB_HOST=127.0.0.1` para PostgreSQL local. Después ejecuta:
 
 ```powershell
-poetry run python manage.py migrate
-poetry run python manage.py createsuperuser
-poetry run python manage.py runserver_plus 127.0.0.1:8000
+uv run python manage.py migrate
+uv run python manage.py createsuperuser
+uv run python manage.py runserver_plus 127.0.0.1:8000
 ```
 
 El depurador de `runserver_plus` permite inspeccionar errores durante el desarrollo. No lo uses con datos reales ni en producción.
@@ -106,7 +106,7 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `poetry run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con Poetry, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.11 y 3.12 en cada push y pull request.
+Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `uv run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `uv.lock`. Al cambiar dependencias, usa `uv add paquete` o `uv remove paquete` para actualizar ambos archivos. Para dependencias de desarrollo, usa `uv add --dev paquete`. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con uv, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.11 y 3.12 en cada push y pull request.
 
 ## Respaldos y producción
 
@@ -116,6 +116,6 @@ Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Eje
 docker compose exec -T db pg_dump -U edutrack_user -d edutrack_pagos > backup_edutrack.sql
 ```
 
-En Docker, Gunicorn sirve Django, Redis proporciona la caché y Nginx actúa como proxy inverso y sirve los archivos estáticos y multimedia. Antes de exponer el servicio a Internet, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración. El puerto 8080 del host se asigna al puerto 80 de Nginx; los servicios Django y Redis no publican directamente sus puertos.
+En Docker, Gunicorn sirve Django, Redis proporciona la caché, Alloy envía los logs de Docker a Loki y Grafana permite explorarlos. Grafana y Nginx solo publican puertos en loopback; Loki, Alloy, Django y Redis no publican puertos al host. Alloy necesita acceso al socket de Docker para descubrir contenedores y leer sus logs: protege el host y no expongas el daemon de Docker. Antes de exponer el servicio a Internet, cambia `GRAFANA_ADMIN_PASSWORD`, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración.
 
 Los recibos emitidos por la aplicación son comprobantes internos; no son comprobantes electrónicos tributarios autorizados por SUNAT.

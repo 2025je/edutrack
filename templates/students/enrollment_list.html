@@ -24,7 +24,8 @@
 	</form>
 	{% if record_code_check_error %}<div class="note note-warning mb-0">{{ record_code_check_error }}</div>{% elif missing_record_codes is not None %}<div class="mt">{% if missing_record_codes %}<strong>Códigos de ficha no registrados:</strong> {{ missing_record_codes|join:", " }}{% else %}<span class="success">Todos los códigos del rango están registrados.</span>{% endif %}</div>{% endif %}
 </div>
-<div class="card table-wrap"><table class="highlight"><thead><tr>
+<p class="table-scroll-hint muted">Desliza la tabla horizontalmente para ver todas las columnas.</p>
+<div class="card table-wrap" role="region" aria-label="Tabla de matrículas; desplázate horizontalmente para ver todas las columnas" tabindex="0"><table class="highlight"><thead><tr>
 <th><a href="{{ sort_urls.row_number }}">N.º{% if current_sort == "row_number" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.course }}">Curso{% if current_sort == "course" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>

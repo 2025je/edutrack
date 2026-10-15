@@ -293,7 +293,7 @@
       box-shadow:0 1px 3px rgba(38,50,56,.08)
     }
     main .card.card-pad{padding:1.5rem 1.75rem}
-    main .card.table-wrap{box-shadow:none}
+    main .card.table-wrap{box-shadow:none;overflow-x:auto}
     main .row{margin-bottom:1rem}
     main .row .col{padding-left:.75rem;padding-right:.75rem}
     main .btn,main .btn-small{border-radius:3px;box-shadow:none;font-weight:600}
@@ -330,6 +330,7 @@
     main table td{padding:11px 10px;vertical-align:middle}
     main table th a{color:inherit!important}
     main table td a:not(.btn):not(.btn-small):not(.chip){font-weight:500}
+    .table-scroll-hint{display:none}
     main .chip{font-size:.82rem;line-height:28px;height:28px}
     main .stat{font-size:2.5rem;color:var(--md-primary)}
     main .stat-md{font-size:1.65rem}
@@ -507,6 +508,9 @@
       main .card.card-pad{padding:1.1rem}
       main .container-wide> .flex.between.items-center.wrap.gap.mb,
       main .container-wide> .flex.wrap.between.items-center.gap.mb{align-items:flex-start}
+    }
+    @media only screen and (max-width:992px){
+      .table-scroll-hint{display:block;margin:.5rem 0;font-size:.85rem}
     }
     @media print{
       .no-print,nav,.sidenav,.msg,.btn,.btn-small,.btn-flat{display:none!important}

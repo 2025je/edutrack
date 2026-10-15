@@ -1,3 +1,5 @@
+name: edutrack
+
 services:
   # Instancia 1: Base de datos PostgreSQL
   db:
@@ -64,7 +66,50 @@ services:
     depends_on:
       - web
 
+  loki:
+    image: grafana/loki:latest
+    container_name: edutrack_loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml", "-target=all"]
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: edutrack_alloy
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: edutrack_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - loki
+
 volumes:
   postgres_data:
   django_media:
   django_static:
+  loki_data:
+  alloy_data:
+  grafana_data:
