@@ -2,7 +2,6 @@
 {% block content %}
 <div class="flex between items-center wrap gap mb">
   <div><h1>Panel principal</h1><p class="muted mb-0">Resumen de la operación</p></div>
-  {% if user.is_superuser or user.can_register_payments %}<a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}
 </div>
 <div class="row">
   {% if user.is_superuser or user.can_manage_students %}
