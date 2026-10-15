@@ -15,3 +15,17 @@ dependencies = [
 
 [tool.poetry]
 package-mode = false
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.17.0,<0.18.0)",
+    "pre-commit (>=4.7.0,<5.0.0)"
+]

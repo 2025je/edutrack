@@ -1,4 +1,3 @@
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 from .models import Campus
 
@@ -24,6 +23,7 @@ def get_selected_campus(request):
 
 class SelectedCampusRequiredMixin:
     """Exige que el usuario haya elegido una sede y valida su autorización."""
+
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect("login")
@@ -38,12 +38,18 @@ class SelectedCampusRequiredMixin:
 
 class FeaturePermissionMixin:
     """Bloquea vistas según permisos operativos del usuario."""
+
     permission_field = None
 
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect("login")
-        if not request.user.is_superuser and self.permission_field and not getattr(request.user, self.permission_field, False):
+        if (
+            not request.user.is_superuser
+            and self.permission_field
+            and not getattr(request.user, self.permission_field, False)
+        ):
             from django.core.exceptions import PermissionDenied
+
             raise PermissionDenied("No tienes permiso para acceder a esta sección.")
         return super().dispatch(request, *args, **kwargs)

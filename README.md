@@ -80,6 +80,7 @@ Con PostgreSQL instalado y ejecutándose, instala Poetry si aún no lo tienes y 
 ```powershell
 pipx install "poetry==2.4.1"
 poetry install
+poetry run pre-commit install
 ```
 
 Configura las variables de `.env.example` en el entorno de PowerShell: Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker. Usa `DB_HOST=127.0.0.1` para PostgreSQL local. Después ejecuta:
@@ -102,7 +103,7 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. GitHub Actions instala con Poetry y ejecuta los controles y la suite de pruebas en PostgreSQL 15 con Python 3.11 y 3.12 en cada push y pull request.
+Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar el lint manualmente, usa `poetry run ruff check .`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. GitHub Actions instala con Poetry, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 con Python 3.11 y 3.12 en cada push y pull request.
 
 ## Respaldos y producción
 

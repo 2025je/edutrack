@@ -5,7 +5,6 @@ from django.db.models import Sum
 from django.shortcuts import render, redirect
 from django.views.generic import TemplateView
 from .campus import available_campuses, get_selected_campus
-from .models import Campus
 from students.models import Student, Enrollment
 from payments.models import Payment, Installment
 
@@ -22,10 +21,14 @@ def select_campus(request):
             request.session["selected_campus_id"] = campus.pk
             messages.success(request, f"Sede seleccionada: {campus.name}.")
             return redirect("dashboard")
-    return render(request, "core/select_campus.html", {
-        "campuses": campuses,
-        "selected_campus": get_selected_campus(request),
-    })
+    return render(
+        request,
+        "core/select_campus.html",
+        {
+            "campuses": campuses,
+            "selected_campus": get_selected_campus(request),
+        },
+    )
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):
@@ -41,12 +44,29 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         campus = get_selected_campus(self.request)
         ctx["selected_campus"] = campus
         ctx["campuses"] = available_campuses(self.request.user)
-        can_manage_students = self.request.user.is_superuser or self.request.user.can_manage_students
-        can_register_payments = self.request.user.is_superuser or self.request.user.can_register_payments
+        can_manage_students = (
+            self.request.user.is_superuser or self.request.user.can_manage_students
+        )
+        can_register_payments = (
+            self.request.user.is_superuser or self.request.user.can_register_payments
+        )
         if can_manage_students:
             ctx["student_count"] = Student.objects.filter(campus=campus).count()
             ctx["enrollment_count"] = Enrollment.objects.filter(campus=campus, active=True).count()
         if can_register_payments:
-            ctx["payments_total"] = Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED).aggregate(total=Sum("amount"))["total"] or 0
-            ctx["pending_total"] = sum((i.balance for i in Installment.objects.filter(enrollment__campus=campus, active=True, enrollment__active=True)), start=0)
+            ctx["payments_total"] = (
+                Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED).aggregate(
+                    total=Sum("amount")
+                )["total"]
+                or 0
+            )
+            ctx["pending_total"] = sum(
+                (
+                    i.balance
+                    for i in Installment.objects.filter(
+                        enrollment__campus=campus, active=True, enrollment__active=True
+                    )
+                ),
+                start=0,
+            )
         return ctx
