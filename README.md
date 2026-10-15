@@ -18,7 +18,7 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
 
 ## Requisitos
 
-- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12 y PostgreSQL 15 o posterior.
+- Docker Desktop con Docker Compose (recomendado), o Python 3.11/3.12, Poetry 2.4 y PostgreSQL 15 o posterior.
 - Navegador moderno.
 
 ## Inicio con Docker
@@ -75,20 +75,19 @@ La sede de la matrícula se determina en el servidor a partir de la sede selecci
 
 ## Desarrollo local sin Docker
 
-Con PostgreSQL instalado y ejecutándose, crea y activa un entorno virtual, e instala las dependencias:
+Con PostgreSQL instalado y ejecutándose, instala Poetry si aún no lo tienes y prepara las dependencias:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pipx install "poetry==2.4.1"
+poetry install
 ```
 
 Configura las variables de `.env.example` en el entorno de PowerShell: Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker. Usa `DB_HOST=127.0.0.1` para PostgreSQL local. Después ejecuta:
 
 ```powershell
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver_plus 127.0.0.1:8000
+poetry run python manage.py migrate
+poetry run python manage.py createsuperuser
+poetry run python manage.py runserver_plus 127.0.0.1:8000
 ```
 
 El depurador de `runserver_plus` permite inspeccionar errores durante el desarrollo. No lo uses con datos reales ni en producción.
@@ -103,7 +102,7 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-GitHub Actions ejecuta estos controles y la suite de pruebas en PostgreSQL 15 con Python 3.11 y 3.12 en cada push y pull request.
+Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `poetry.lock`. Al cambiar dependencias, usa `poetry add paquete` o `poetry remove paquete` para actualizar ambos archivos. GitHub Actions instala con Poetry y ejecuta los controles y la suite de pruebas en PostgreSQL 15 con Python 3.11 y 3.12 en cada push y pull request.
 
 ## Respaldos y producción
 

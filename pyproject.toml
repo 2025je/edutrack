@@ -1,0 +1,17 @@
+[project]
+name = "edutrack"
+version = "0.1.0"
+description = "Sistema web para administrar estudiantes, matrículas y pagos"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "Django>=5.2,<5.3",
+    "gunicorn>=23,<24",
+    "psycopg[binary]>=3.2,<4",
+    "openpyxl>=3.1,<4",
+    "django-extensions>=3.2.3,<5",
+    "Werkzeug>=3.0,<4",
+    "Pillow>=10.4,<13",
+]
+
+[tool.poetry]
+package-mode = false

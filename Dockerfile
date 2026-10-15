@@ -1,4 +1,12 @@
-# Usamos una imagen oficial de Python en su versión ligera
+# Genera la lista de instalación desde el lockfile de Poetry
+FROM python:3.11-slim AS dependencies
+
+RUN pip install --no-cache-dir poetry==2.4.1 poetry-plugin-export==1.10.0
+WORKDIR /app
+COPY pyproject.toml poetry.lock /app/
+RUN poetry export --only main --format requirements.txt --without-hashes --output /requirements.txt
+
+# La imagen final solo contiene las dependencias de ejecución
 FROM python:3.11-slim
 
 # Evita que Python escriba archivos .pyc en el disco
@@ -9,9 +17,9 @@ ENV PYTHONUNBUFFERED=1
 # Establece el directorio de trabajo dentro del contenedor
 WORKDIR /app
 
-# Copia e instala las dependencias de Python
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Instala las versiones resueltas por Poetry sin incluir Poetry en runtime
+COPY --from=dependencies /requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Copia el resto del código del proyecto al contenedor
 COPY . /app/
