@@ -28,6 +28,30 @@
                 {% if locked_student %}
                     <div class="note mb"><strong>Estudiante:</strong> {{ locked_student.full_name }}
                         <a class="blue-text" href="{% url 'enrollment-create' %}">Cambiar</a></div>
+                    {% if current_enrollments %}
+                        <details class="note mb" id="current-enrollments">
+                            <summary><strong>Cursos en los que ya está matriculado:</strong> ({{ current_enrollments|length }})</summary>
+                            <div class="table-wrap">
+                                <table class="highlight">
+                                    <thead>
+                                        <tr><th>#</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Fecha de matrícula</th><th>Estado</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for enrollment in current_enrollments %}
+                                            <tr>
+                                                <td>{{ forloop.counter }}</td>
+                                                <td>{{ enrollment.course.name }}</td>
+                                                <td>{{ enrollment.course.schedule }}</td>
+                                                <td>{{ enrollment.course.group }}</td>
+                                                <td>{{ enrollment.enrollment_date|date:"d/m/Y" }}</td>
+                                                <td>{% if enrollment.active %}Activa{% else %}Inactiva{% endif %}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    {% endif %}
                 {% endif %}
 
                 <div class="row">
@@ -48,6 +72,13 @@
                                         <span class="muted">No hay promotores activos disponibles.</span>
                                     {% endfor %}
                                 </div>
+                            {% elif field.field.widget.input_type == "checkbox" %}
+                                <p>
+                                    <label for="{{ field.id_for_label }}">
+                                        {{ field }}
+                                        <span>{{ field.label }}</span>
+                                    </label>
+                                </p>
                             {% else %}
                             <label for="{{ field.id_for_label }}">
                                 {{ field.label }}
@@ -261,5 +292,61 @@ document.addEventListener("DOMContentLoaded", function () {
         console.log("Opciones de cursos disponibles:", Math.max(0, courseSelect.options.length - 1));
     }
 });
+</script>
+<script>
+(() => {
+    const hasRecord = document.getElementById("id_has_record");
+    const recordCode = document.getElementById("id_record_code");
+    if (!hasRecord || !recordCode) return;
+    const sync = () => {
+        recordCode.disabled = !hasRecord.checked;
+        recordCode.required = hasRecord.checked;
+        if (!hasRecord.checked) recordCode.value = "";
+    };
+    hasRecord.addEventListener("change", sync);
+    sync();
+})();
+{% if not object %}
+(() => {
+    const hasRecord = document.getElementById("id_has_record");
+    const dateInput = document.getElementById("id_enrollment_date");
+    if (!hasRecord || !dateInput) return;
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const defaultDate = () => {
+        const date = new Date();
+        if (hasRecord.checked) date.setDate(date.getDate() - ((date.getDay() + 1) % 7));
+        return iso(date);
+    };
+    let edited = false;
+    dateInput.addEventListener("input", () => { edited = true; });
+    hasRecord.addEventListener("change", () => {
+        if (!edited) dateInput.value = defaultDate();
+    });
+    if (hasRecord.checked && !edited && !dateInput.value) dateInput.value = defaultDate();
+})();
+{% endif %}
+(() => {
+    const exclusiveNames = ["PARTICULAR", "NN"];
+    const boxes = Array.from(document.querySelectorAll('input[name="promoter"][type="checkbox"]'));
+    if (!boxes.length) return;
+    const nameOf = (box) => (box.parentElement.querySelector("span")?.textContent || "").trim().toUpperCase();
+    const sync = (changed) => {
+        if (changed && changed.checked) {
+            if (exclusiveNames.includes(nameOf(changed))) {
+                boxes.forEach((box) => { if (box !== changed) box.checked = false; });
+            } else {
+                boxes.forEach((box) => { if (exclusiveNames.includes(nameOf(box))) box.checked = false; });
+            }
+        }
+        const active = boxes.find((box) => box.checked && exclusiveNames.includes(nameOf(box)));
+        const common = boxes.some((box) => box.checked && !exclusiveNames.includes(nameOf(box)));
+        boxes.forEach((box) => {
+            const isDefault = exclusiveNames.includes(nameOf(box));
+            box.disabled = active ? box !== active : (common && isDefault);
+        });
+    };
+    boxes.forEach((box) => box.addEventListener("change", () => sync(box)));
+    sync();
+})();
 </script>
 {% endblock %}

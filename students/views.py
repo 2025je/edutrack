@@ -7,6 +7,7 @@ from django.db.models import (
     Count,
     DecimalField,
     F,
+    IntegerField,
     OuterRef,
     Prefetch,
     Q,
@@ -31,7 +32,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
-from .models import Student, Enrollment, Course
+from .models import UNASSIGNED_COURSE_NAME, UNASSIGNED_SCHEDULE_NAME, Student, Enrollment, Course
 from .forms import StudentForm, EnrollmentForm
 
 
@@ -201,6 +202,8 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         "row_number": "enrollment_date",
         "student": "student__full_name",
         "course": "course__name",
+        "schedule": "course__schedule",
+        "group": "course__group",
         "record_code": "record_code",
         "promoter": "promoter__name",
         "enrollment_date": "enrollment_date",
@@ -585,7 +588,7 @@ class EnrollmentExcelExportView(EnrollmentListView):
                     enrollment.record_code or "—",
                     promoters,
                     enrollment.enrollment_date,
-                    enrollment.course.start_date,
+                    enrollment.course.start_date or UNASSIGNED_SCHEDULE_NAME,
                     enrollment.enrollment_fee,
                     enrollment.monthly_fee,
                     enrollment.total_enrollment_cost,
@@ -703,6 +706,14 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["locked_student"] = self.get_locked_student()
+        if context["locked_student"]:
+            context["current_enrollments"] = (
+                Enrollment.objects.filter(
+                    student=context["locked_student"], campus=get_selected_campus(self.request)
+                )
+                .select_related("course")
+                .order_by("-enrollment_date", "pk")
+            )
         return context
 
     def get_form_kwargs(self):
@@ -722,19 +733,20 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
                 self.object = form.save()
                 from payments.models import Installment
 
+                due_date = self.object.course.start_date or self.object.enrollment_date
                 if self.object.enrollment_fee > 0:
                     Installment.objects.create(
                         enrollment=self.object,
                         concept="Matrícula",
                         amount=self.object.enrollment_fee,
-                        due_date=self.object.course.start_date,
+                        due_date=due_date,
                     )
                 if self.object.monthly_fee > 0:
                     Installment.objects.create(
                         enrollment=self.object,
-                        concept=f"Mensualidad inicial ({self.object.course.start_date:%Y-%m})",
+                        concept=f"Mensualidad inicial ({due_date:%Y-%m})",
                         amount=self.object.monthly_fee,
-                        due_date=self.object.course.start_date,
+                        due_date=due_date,
                     )
         except IntegrityError:
             form.add_error("course", "Este estudiante ya está matriculado en este curso.")
@@ -824,8 +836,15 @@ def course_students_queryset(request):
                 filter=Q(enrollments__active=True, enrollments__student__active=True),
             )
         )
+        .annotate(
+            unassigned_first=Case(
+                When(name=UNASSIGNED_COURSE_NAME, schedule=UNASSIGNED_SCHEDULE_NAME, then=0),
+                default=1,
+                output_field=IntegerField(),
+            )
+        )
         .prefetch_related(Prefetch("enrollments", queryset=enrollments))
-        .order_by("name", "schedule", "group")
+        .order_by("unassigned_first", "name", "schedule", "group")
     )
     query = request.GET.get("q", "").strip()
     if query:
@@ -911,8 +930,8 @@ class CourseStudentExportView(CampusScopedMixin, View):
                 ]
                 section_details.extend(
                     [
-                        f"Capacidad: {course.capacity}",
-                        f"Inicio: {course.start_date:%d/%m/%Y}",
+                        f"Capacidad: {course.capacity_display()}",
+                        f"Inicio: {course.start_date_display()}",
                     ]
                 )
                 worksheet.merge_cells(
@@ -985,6 +1004,8 @@ class AvailableStudentsForCourseView(CampusScopedMixin, ListView):
         if course is None:
             return JsonResponse({"students": []}, status=400)
         enrollments = Enrollment.objects.filter(course=course)
+        if course.is_unassigned():
+            enrollments = enrollments.none()
         current_enrollment = None
         enrollment_id = request.GET.get("enrollment_id")
         if enrollment_id:

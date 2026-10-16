@@ -1,12 +1,14 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Campus, User
+from payments.forms import PaymentForm, PaymentUpdateForm
 from payments.models import Installment, Payment, PaymentAllocation
 from students.models import Course, Enrollment, Student
 
@@ -65,7 +67,8 @@ class PaymentCrudTests(TestCase):
         response = self.client.post(
             reverse("payment-update", args=[self.payment.pk]),
             {
-                "receipt_number": "D2",
+                "receipt_number_0": "D",
+                "receipt_number_1": "2",
                 "enrollment": self.enrollment.pk,
                 "amount": "70.00",
                 "reference": "Transferencia",
@@ -83,6 +86,107 @@ class PaymentCrudTests(TestCase):
             ],
             Decimal("70.00"),
         )
+
+    def test_payment_receipt_is_saved_with_uppercase_prefix(self):
+        payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="d100",
+            amount=10,
+        )
+
+        self.assertEqual(payment.receipt_number, "D100")
+        payment.refresh_from_db()
+        self.assertEqual(payment.receipt_number, "D100")
+
+    def test_receipt_form_uses_optional_letter_and_positive_integer_inputs(self):
+        response = self.client.get(reverse("payment-create"))
+        self.assertContains(response, 'name="receipt_number_0"')
+        self.assertContains(response, 'name="receipt_number_1"')
+        self.assertContains(response, "data-uppercase")
+
+        request = RequestFactory().get(reverse("payment-create"))
+        request.session = {"selected_campus_id": self.campus.pk}
+        request.user = self.user
+        cases = [
+            ({"receipt_number_0": "", "receipt_number_1": "55"}, "55"),
+            ({"receipt_number_0": "d", "receipt_number_1": "100"}, "D100"),
+            ({"receipt_number_0": "AB", "receipt_number_1": "5"}, None),
+            ({"receipt_number_0": "1", "receipt_number_1": "5"}, None),
+            ({"receipt_number_0": "D", "receipt_number_1": "12a"}, None),
+            ({"receipt_number_0": "D", "receipt_number_1": "-5"}, None),
+            ({"receipt_number_0": "D", "receipt_number_1": "0"}, None),
+            ({"receipt_number_0": "D", "receipt_number_1": ""}, None),
+        ]
+        for data, expected in cases:
+            with self.subTest(data=data):
+                form = PaymentForm(data=data, user=self.user, request=request)
+                form.is_valid()
+                if expected is None:
+                    self.assertIn("receipt_number", form.errors)
+                else:
+                    self.assertNotIn("receipt_number", form.errors)
+                    self.assertEqual(form.cleaned_data["receipt_number"], expected)
+
+    def test_receipt_number_must_be_unique_within_campus_only(self):
+        request = RequestFactory().get(reverse("payment-create"))
+        request.session = {"selected_campus_id": self.campus.pk}
+        request.user = self.user
+        same_campus_form = PaymentForm(
+            data={"receipt_number_0": "D", "receipt_number_1": "1"},
+            user=self.user,
+            request=request,
+        )
+        self.assertFalse(same_campus_form.is_valid())
+        self.assertIn("receipt_number", same_campus_form.errors)
+
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        self.user.campuses.add(other_campus)
+        request = RequestFactory().get(reverse("payment-create"))
+        request.session = {"selected_campus_id": other_campus.pk}
+        request.user = self.user
+        other_campus_form = PaymentForm(
+            data={"receipt_number_0": "D", "receipt_number_1": "1"},
+            user=self.user,
+            request=request,
+        )
+        self.assertFalse(other_campus_form.is_valid())
+        self.assertNotIn("receipt_number", other_campus_form.errors)
+
+        other_payment = Payment.objects.create(
+            campus=other_campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="D1",
+            amount=10,
+        )
+        self.assertEqual(other_payment.receipt_number, self.payment.receipt_number)
+
+        request = RequestFactory().get(reverse("payment-update", args=[self.payment.pk]))
+        request.session = {"selected_campus_id": self.campus.pk}
+        request.user = self.user
+        update_form = PaymentUpdateForm(
+            data={
+                "receipt_number_0": "D",
+                "receipt_number_1": "1",
+                "enrollment": self.enrollment.pk,
+                "amount": "40.00",
+            },
+            instance=self.payment,
+            user=self.user,
+            request=request,
+        )
+        self.assertTrue(update_form.is_valid(), update_form.errors)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Payment.objects.create(
+                campus=self.campus,
+                enrollment=self.enrollment,
+                cashier=self.user,
+                receipt_number="D1",
+                amount=10,
+            )
 
     def test_payment_list_filters_and_sorts_receipts_students_and_dates(self):
         other_student = Student.objects.create(

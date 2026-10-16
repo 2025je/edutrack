@@ -19,6 +19,8 @@
 <th><a href="{{ sort_urls.row_number }}">N.º{% if current_sort == "row_number" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.student }}">Estudiante{% if current_sort == "student" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.course }}">Curso{% if current_sort == "course" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.schedule }}">Horario{% if current_sort == "schedule" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
+<th><a href="{{ sort_urls.group }}">Grupo{% if current_sort == "group" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.record_code }}">Código de ficha{% if current_sort == "record_code" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.promoter }}">Promotor{% if current_sort == "promoter" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th><a href="{{ sort_urls.enrollment_date }}">Fecha de matrícula{% if current_sort == "enrollment_date" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
@@ -35,11 +37,13 @@
 <tr class="{% if e.has_outstanding_debt %}row-warning{% elif e.has_no_debt %}row-success{% endif %}">
 	<td>{{ e.row_number }}</td>
 	<td><a href="{% url 'student-enrollment-list' e.student.pk %}">{{ e.student.full_name }}</a></td>
-	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course }}</a></td>
+	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course.name }}</a></td>
+	<td>{{ e.course.schedule }}</td>
+	<td>{{ e.course.group }}</td>
 	<td>{{ e.record_code|default:"—" }}</td>
 	<td>{% for promoter in e.promoter.all %}<a href="{% url 'enrollment-list' %}?promoter_id={{ promoter.pk }}">{{ promoter.name }}</a>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
 	<td><a href="{% url 'enrollment-list' %}?enrollment_date={{ e.enrollment_date|date:'Y-m-d' }}">{{ e.enrollment_date|date:"d/m/Y" }}</a></td>
-	<td>{{ e.course.start_date|date:"d/m/Y" }}</td>
+	<td>{{ e.course.start_date_display }}</td>
 	<td>S/ {{ e.enrollment_fee|floatformat:2 }}</td>
 	<td>S/ {{ e.monthly_fee|floatformat:2 }}</td>
 	<td class="strong">S/ {{ e.total_enrollment_cost|floatformat:2 }}</td>
@@ -69,7 +73,7 @@
 		</div>
 	</td>
 </tr>
-{% empty %}<tr><td colspan="15" class="center-align muted">No hay matrículas registradas.</td></tr>{% endfor %}
+{% empty %}<tr><td colspan="17" class="center-align muted">No hay matrículas registradas.</td></tr>{% endfor %}
 </tbody></table></div>{% include "shared/pagination.html" %}
 </div>
 {% endblock %}

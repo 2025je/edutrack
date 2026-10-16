@@ -1,7 +1,16 @@
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db import models
-from .models import Student, Enrollment, Course, Promoter, phone_validator
+from .models import (
+    DEFAULT_PROMOTER_NAMES,
+    UNASSIGNED_COURSE_NAME,
+    UNASSIGNED_SCHEDULE_NAME,
+    Student,
+    Enrollment,
+    Course,
+    Promoter,
+    phone_validator,
+)
 from core.campus import get_selected_campus
 
 
@@ -15,9 +24,11 @@ class CourseSelectWidget(forms.Select):
         key = str(value)
         if key in self.course_prices:
             registration, monthly, capacity, enrolled_count = self.course_prices[key]
-            option["attrs"]["data-registration-fee"] = str(registration)
-            option["attrs"]["data-monthly-fee"] = str(monthly)
-            option["attrs"]["data-capacity"] = str(capacity)
+            option["attrs"]["data-registration-fee"] = (
+                "" if registration is None else str(registration)
+            )
+            option["attrs"]["data-monthly-fee"] = "" if monthly is None else str(monthly)
+            option["attrs"]["data-capacity"] = "" if capacity is None else str(capacity)
             option["attrs"]["data-enrolled-count"] = str(enrolled_count)
         return option
 
@@ -37,9 +48,15 @@ class StudentForm(forms.ModelForm):
     last_name = forms.CharField(
         label="Apellidos",
         max_length=120,
-        widget=forms.TextInput(attrs={"autofocus": True}),
+        widget=forms.TextInput(
+            attrs={"autofocus": True, "data-uppercase": True, "style": "text-transform:uppercase"}
+        ),
     )
-    first_name = forms.CharField(label="Nombres", max_length=120)
+    first_name = forms.CharField(
+        label="Nombres",
+        max_length=120,
+        widget=forms.TextInput(attrs={"data-uppercase": True, "style": "text-transform:uppercase"}),
+    )
     phone_numbers = forms.CharField(
         label="Teléfonos",
         required=True,
@@ -80,6 +97,12 @@ class StudentForm(forms.ModelForm):
                 )
         return ", ".join(phone_numbers)
 
+    def clean_last_name(self):
+        return self.cleaned_data["last_name"].strip().upper()
+
+    def clean_first_name(self):
+        return self.cleaned_data["first_name"].strip().upper()
+
     def clean(self):
         cleaned_data = super().clean()
         full_name = " ".join(
@@ -90,8 +113,9 @@ class StudentForm(forms.ModelForm):
             )
             if part.strip()
         )
+        full_name = full_name.upper()
         if full_name:
-            duplicate = Student.objects.filter(full_name=full_name)
+            duplicate = Student.objects.filter(full_name__iexact=full_name)
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
@@ -117,6 +141,7 @@ class EnrollmentForm(forms.ModelForm):
         fields = [
             "course",
             "student",
+            "has_record",
             "record_code",
             "promoter",
             "enrollment_date",
@@ -154,9 +179,12 @@ class EnrollmentForm(forms.ModelForm):
                 course_queryset = course_queryset.filter(active=True)
             if locked_student:
                 course_queryset = course_queryset.exclude(
-                    pk__in=Enrollment.objects.filter(student=locked_student).values_list(
-                        "course_id", flat=True
+                    pk__in=Enrollment.objects.filter(student=locked_student)
+                    .exclude(
+                        course__name=UNASSIGNED_COURSE_NAME,
+                        course__schedule=UNASSIGNED_SCHEDULE_NAME,
                     )
+                    .values_list("course_id", flat=True)
                 )
             self.fields["course"].queryset = course_queryset
         else:
@@ -176,6 +204,8 @@ class EnrollmentForm(forms.ModelForm):
 
         if selected_course:
             already_enrolled_ids = Enrollment.objects.filter(course=selected_course)
+            if selected_course.is_unassigned():
+                already_enrolled_ids = already_enrolled_ids.none()
             if self.instance.pk:
                 already_enrolled_ids = already_enrolled_ids.exclude(pk=self.instance.pk)
             already_enrolled_ids = already_enrolled_ids.values_list("student_id", flat=True)
@@ -201,7 +231,14 @@ class EnrollmentForm(forms.ModelForm):
                 )
             else:
                 promoters = promoters.filter(active=True)
-            self.fields["promoter"].queryset = promoters.distinct()
+            promoters = promoters.distinct().annotate(
+                is_default=models.Case(
+                    models.When(name__in=DEFAULT_PROMOTER_NAMES, then=1),
+                    default=0,
+                    output_field=models.IntegerField(),
+                )
+            )
+            self.fields["promoter"].queryset = promoters.order_by("is_default", "name")
         else:
             self.fields["promoter"].queryset = Promoter.objects.none()
 
@@ -229,6 +266,13 @@ class EnrollmentForm(forms.ModelForm):
         student = cleaned.get("student")
         course = cleaned.get("course")
         campus = self.selected_campus
+        promoters = cleaned.get("promoter")
+        if promoters and len(promoters) > 1:
+            if any(p.name in DEFAULT_PROMOTER_NAMES for p in promoters):
+                self.add_error(
+                    "promoter",
+                    "PARTICULAR y NN no se pueden combinar con otros promotores.",
+                )
         if not campus:
             raise ValidationError("Primero debes seleccionar una sede.")
         if student and course:
@@ -239,6 +283,6 @@ class EnrollmentForm(forms.ModelForm):
             duplicate = Enrollment.objects.filter(student=student, course=course)
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
-            if duplicate.exists():
+            if duplicate.exists() and not course.is_unassigned():
                 self.add_error("course", "Este estudiante ya está matriculado en este curso.")
         return cleaned

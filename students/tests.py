@@ -113,14 +113,14 @@ class CourseStudentExportTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         workbook = load_workbook(BytesIO(response.content), data_only=True)
-        self.assertEqual(workbook.sheetnames, ["Historia", "Matemáticas"])
-        self.assertNotIn("Física", workbook.sheetnames)
-        math_rows = list(workbook["Matemáticas"].iter_rows(values_only=True))
-        history_rows = list(workbook["Historia"].iter_rows(values_only=True))
-        self.assertEqual(len(workbook["Matemáticas"].tables), 5)
-        self.assertEqual(len(workbook["Historia"].tables), 1)
-        self.assertIn("Ana Pérez", [value for row in math_rows for value in row])
-        self.assertIn("Luis Gómez", [value for row in math_rows for value in row])
+        self.assertEqual(workbook.sheetnames, ["HISTORIA", "MATEMÁTICAS"])
+        self.assertNotIn("FÍSICA", workbook.sheetnames)
+        math_rows = list(workbook["MATEMÁTICAS"].iter_rows(values_only=True))
+        history_rows = list(workbook["HISTORIA"].iter_rows(values_only=True))
+        self.assertEqual(len(workbook["MATEMÁTICAS"].tables), 5)
+        self.assertEqual(len(workbook["HISTORIA"].tables), 1)
+        self.assertIn("ANA PÉREZ", [value for row in math_rows for value in row])
+        self.assertIn("LUIS GÓMEZ", [value for row in math_rows for value in row])
         math_values = [value for row in math_rows for value in row]
         for group in ("A", "B", "C", "D", "E"):
             self.assertTrue(
@@ -129,15 +129,15 @@ class CourseStudentExportTests(TestCase):
                     for value in math_values
                 )
             )
-        self.assertIn("Marta Ruiz", [value for row in history_rows for value in row])
-        math_table = workbook["Matemáticas"].tables[f"Course_{self.course_a.pk}"]
+        self.assertIn("MARTA RUIZ", [value for row in history_rows for value in row])
+        math_table = workbook["MATEMÁTICAS"].tables[f"Course_{self.course_a.pk}"]
         header_row = int(math_table.ref.split(":")[0][1:])
         self.assertEqual(
-            [workbook["Matemáticas"].cell(header_row, column).value for column in range(1, 6)],
+            [workbook["MATEMÁTICAS"].cell(header_row, column).value for column in range(1, 6)],
             ["N.º", "Alumno", "DNI", "Teléfonos", "Fecha de matrícula"],
         )
-        self.assertEqual(workbook["Matemáticas"].cell(header_row + 1, 1).value, 1)
-        self.assertEqual(workbook["Matemáticas"].cell(header_row + 2, 1).value, 2)
+        self.assertEqual(workbook["MATEMÁTICAS"].cell(header_row + 1, 1).value, 1)
+        self.assertEqual(workbook["MATEMÁTICAS"].cell(header_row + 2, 1).value, 2)
 
 
 class StudentEnrollmentCrudTests(TestCase):
@@ -212,7 +212,7 @@ class StudentEnrollmentCrudTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.student.refresh_from_db()
-        self.assertEqual(self.student.full_name, "Apellidos actualizados Nombres")
+        self.assertEqual(self.student.full_name, "APELLIDOS ACTUALIZADOS NOMBRES")
 
         response = self.client.get(reverse("enrollment-update", args=[self.enrollment.pk]))
         self.assertEqual(response.status_code, 200)
@@ -221,6 +221,7 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
+                "has_record": "on",
                 "record_code": "202601",
                 "promoter": [],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -240,6 +241,7 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
+                "has_record": "on",
                 "record_code": "F-2026-01",
                 "promoter": [],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -253,6 +255,39 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertContains(response, "Ingrese solo números en el código de ficha.")
         self.enrollment.refresh_from_db()
         self.assertEqual(self.enrollment.record_code, "")
+
+    def test_record_code_depends_on_has_record_flag(self):
+        base = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "promoter": [],
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-update", args=[self.enrollment.pk])
+        for data in (
+            {"has_record": "on", "record_code": ""},
+            {"has_record": "on", "record_code": "0"},
+            {"record_code": "15"},
+        ):
+            response = self.client.post(url, {**base, **data})
+            self.assertEqual(response.status_code, 200, data)
+            self.assertTrue(response.context["form"].errors.get("record_code"), data)
+
+        response = self.client.post(url, {**base, "has_record": "on", "record_code": "15"})
+        self.assertEqual(response.status_code, 302)
+        self.enrollment.refresh_from_db()
+        self.assertTrue(self.enrollment.has_record)
+        self.assertEqual(self.enrollment.record_code, "15")
+
+    def test_student_form_inputs_convert_names_to_uppercase(self):
+        response = self.client.get(reverse("student-create"))
+
+        self.assertContains(response, 'name="last_name"')
+        self.assertContains(response, "<input", count=None)
+        self.assertContains(response, 'data-uppercase style="text-transform:uppercase"', count=2)
 
     def test_student_creation_requires_separate_last_and_first_names(self):
         response = self.client.post(
@@ -268,9 +303,9 @@ class StudentEnrollmentCrudTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        student = Student.objects.get(full_name="Pérez Ana")
-        self.assertEqual(student.last_name, "Pérez")
-        self.assertEqual(student.first_name, "Ana")
+        student = Student.objects.get(full_name="PÉREZ ANA")
+        self.assertEqual(student.last_name, "PÉREZ")
+        self.assertEqual(student.first_name, "ANA")
 
         invalid_response = self.client.post(
             reverse("student-create"),
@@ -283,6 +318,63 @@ class StudentEnrollmentCrudTests(TestCase):
         )
         self.assertEqual(invalid_response.status_code, 200)
         self.assertContains(invalid_response, "Este campo es obligatorio.")
+
+    def test_only_unassigned_course_allows_repeated_enrollments(self):
+        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
+        for _ in range(2):
+            Enrollment(
+                campus=self.campus,
+                student=self.student,
+                course=unassigned,
+                enrollment_fee=10,
+                monthly_fee=10,
+            ).full_clean()
+            Enrollment.objects.create(campus=self.campus, student=self.student, course=unassigned)
+        self.assertEqual(
+            Enrollment.objects.filter(student=self.student, course=unassigned).count(), 2
+        )
+        response = self.client.get(reverse("enrollment-create"), {"student": self.student.pk})
+        self.assertContains(response, f'<option value="{unassigned.pk}"')
+        self.assertNotContains(response, f'<option value="{self.course.pk}"')
+        with self.assertRaises(ValidationError):
+            Enrollment(campus=self.campus, student=self.student, course=self.course).full_clean(
+                exclude=["enrollment_fee", "monthly_fee"]
+            )
+
+    def test_default_promoters_cannot_be_combined_with_others(self):
+        other = Promoter.objects.create(name="Otro Promotor")
+        other.campuses.add(self.campus)
+        particular, _ = Promoter.objects.get_or_create(name="PARTICULAR")
+        particular.campuses.add(self.campus)
+        base = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-update", args=[self.enrollment.pk])
+        response = self.client.get(url)
+        labels = [c[1] for c in response.context["form"].fields["promoter"].choices]
+        self.assertEqual(labels[-2:], ["NN", "PARTICULAR"])
+        self.assertEqual(labels[0], "OTRO PROMOTOR")
+        response = self.client.post(url, {**base, "promoter": [particular.pk, other.pk]})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "no se pueden combinar con otros promotores")
+        response = self.client.post(url, {**base, "promoter": [particular.pk]})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(url, {**base, "promoter": [other.pk]})
+        self.assertEqual(response.status_code, 302)
+
+    def test_enrollment_create_lists_student_current_enrollments(self):
+        response = self.client.get(reverse("enrollment-create"), {"student": self.student.pk})
+        self.assertContains(response, "Cursos en los que ya está matriculado")
+        self.assertContains(response, self.course.name)
+
+        other = Student.objects.create(campus=self.campus, full_name="Sin matriculas")
+        response = self.client.get(reverse("enrollment-create"), {"student": other.pk})
+        self.assertNotContains(response, "Cursos en los que ya está matriculado")
 
     def test_enrollment_creation_saves_user_selected_date(self):
         new_student = Student.objects.create(
@@ -304,6 +396,7 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": new_student.pk,
+                "has_record": "on",
                 "record_code": "202602",
                 "promoter": [],
                 "enrollment_date": "2026-09-29",
@@ -322,7 +415,7 @@ class StudentEnrollmentCrudTests(TestCase):
         Student.objects.create(campus=self.campus, full_name="Canción Ñandú")
         for term in ("cancion", "CANCIÓN", "CANcion", "nandu"):
             response = self.client.get(reverse("student-list"), {"q": term})
-            self.assertContains(response, "Canción Ñandú", msg_prefix=term)
+            self.assertContains(response, "CANCIÓN ÑANDÚ", msg_prefix=term)
 
     def test_list_pages_use_live_filtering(self):
         for name in (
@@ -356,13 +449,14 @@ class StudentEnrollmentCrudTests(TestCase):
         response = self.client.get(reverse("enrollment-update", args=[self.enrollment.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'type="checkbox"')
-        self.assertContains(response, "Primer promotor")
-        self.assertContains(response, "Segundo promotor")
+        self.assertContains(response, "PRIMER PROMOTOR")
+        self.assertContains(response, "SEGUNDO PROMOTOR")
         response = self.client.post(
             reverse("enrollment-update", args=[self.enrollment.pk]),
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
+                "has_record": "on",
                 "record_code": "202603",
                 "promoter": [first_promoter.pk, second_promoter.pk],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -597,8 +691,8 @@ class StudentEnrollmentCrudTests(TestCase):
         workbook = load_workbook(BytesIO(response.content), data_only=True)
         worksheet = workbook["Matrículas"]
         rows = list(worksheet.iter_rows(values_only=True))
-        self.assertIn("Estudiante de prueba", [value for row in rows for value in row])
-        self.assertNotIn("Otro estudiante para exportar", [value for row in rows for value in row])
+        self.assertIn("ESTUDIANTE DE PRUEBA", [value for row in rows for value in row])
+        self.assertNotIn("OTRO ESTUDIANTE PARA EXPORTAR", [value for row in rows for value in row])
         self.assertEqual(rows[3][0], "N.º")
         self.assertNotIn("Estado", rows[3])
         self.assertEqual(rows[4][0], 1)
@@ -650,7 +744,7 @@ class StudentEnrollmentCrudTests(TestCase):
         rows = list(worksheet.iter_rows(min_row=5, values_only=True))
         self.assertEqual(
             [row[1] for row in rows],
-            ["Ana Alumna", "Estudiante de prueba", "Zoe Alumna"],
+            ["ANA ALUMNA", "ESTUDIANTE DE PRUEBA", "ZOE ALUMNA"],
         )
         self.assertEqual([row[0] for row in rows], [1, 2, 3])
 
@@ -727,7 +821,7 @@ class StudentEnrollmentCrudTests(TestCase):
             row[1]: row[0] for row in worksheet.iter_rows(min_row=5, values_only=True)
         }
         self.assertEqual(ranks_by_student[self.student.full_name], 1)
-        self.assertEqual(ranks_by_student["Inscripción más antigua"], 2)
+        self.assertEqual(ranks_by_student["INSCRIPCIÓN MÁS ANTIGUA"], 2)
 
     def test_enrollment_filters_cover_student_course_record_code_and_promoter(self):
         promoter = Promoter.objects.create(name="Promotor de prueba", active=True)
@@ -1045,6 +1139,77 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(self.student.phone, "987654321")
 
 
+class UnassignedCourseTests(TestCase):
+    def test_course_and_enrollment_fees_must_be_greater_than_zero(self):
+        campus = Campus.objects.create(name="Sede Montos")
+        course = Course(campus=campus, name="X", schedule="Y", enrollment_fee=0, monthly_fee=-5)
+        with self.assertRaises(ValidationError) as context:
+            course.full_clean()
+        self.assertIn("enrollment_fee", context.exception.message_dict)
+        self.assertIn("monthly_fee", context.exception.message_dict)
+        enrollment = Enrollment(enrollment_fee=0, monthly_fee=0)
+        with self.assertRaises(ValidationError) as context:
+            enrollment.full_clean()
+        self.assertIn("enrollment_fee", context.exception.message_dict)
+        self.assertIn("monthly_fee", context.exception.message_dict)
+
+    def test_new_campus_gets_default_promoters(self):
+        campus = Campus.objects.create(name="Sede Promotores")
+        names = set(campus.promoters.values_list("name", flat=True))
+        self.assertEqual(names, {"PARTICULAR", "NN"})
+        other = Campus.objects.create(name="Otra Sede Promotores")
+        self.assertEqual(Promoter.objects.filter(name="NN").count(), 1)
+        self.assertTrue(other.promoters.filter(name="NN").exists())
+
+    def test_new_campus_gets_unassigned_course_and_schedule(self):
+        campus = Campus.objects.create(name="Sede Nueva")
+        course = Course.objects.get(campus=campus, name="POR ASIGNAR")
+        self.assertEqual(course.schedule, "PENDIENTE DE ASIGNACION")
+        self.assertEqual(course.group, "PENDIENTE DE ASIGNACION")
+        self.assertIsNone(course.start_date)
+        self.assertEqual(course.start_date_display(), "PENDIENTE DE ASIGNACION")
+        for field in ("capacity", "enrollment_fee", "monthly_fee"):
+            self.assertIsNone(getattr(course, field))
+        self.assertEqual(course.capacity_display(), "PENDIENTE DE ASIGNACION")
+        self.assertEqual(course.enrollment_fee_display(), "PENDIENTE DE ASIGNACION")
+        self.assertEqual(course.monthly_fee_display(), "PENDIENTE DE ASIGNACION")
+        regular = Course(
+            campus=campus,
+            name="X",
+            schedule="Y",
+            group="1",
+            start_date=None,
+            capacity=None,
+            enrollment_fee=None,
+            monthly_fee=None,
+        )
+        with self.assertRaises(ValidationError) as context:
+            regular.full_clean()
+        for field in ("start_date", "capacity", "enrollment_fee", "monthly_fee"):
+            self.assertIn(field, context.exception.message_dict)
+        self.assertTrue(Schedule.objects.filter(name="PENDIENTE DE ASIGNACION").exists())
+
+    def test_only_superuser_can_modify_unassigned_course(self):
+        from django.contrib.admin.sites import site
+        from django.contrib.auth.models import Permission
+        from django.test import RequestFactory
+
+        campus = Campus.objects.create(name="Sede Admin")
+        course = Course.objects.get(campus=campus, name="POR ASIGNAR")
+        schedule = Schedule.objects.get(name="PENDIENTE DE ASIGNACION")
+        staff = User.objects.create_user("staff", password="x", is_staff=True)
+        staff.user_permissions.set(Permission.objects.filter(content_type__app_label="students"))
+        admin_user = User.objects.create_superuser("root", password="x")
+        request = RequestFactory().get("/")
+        for obj in (course, schedule):
+            model_admin = site._registry[type(obj)]
+            request.user = User.objects.get(pk=staff.pk)
+            self.assertFalse(model_admin.has_change_permission(request, obj))
+            self.assertFalse(model_admin.has_delete_permission(request, obj))
+            request.user = admin_user
+            self.assertTrue(model_admin.has_change_permission(request, obj))
+
+
 class CourseUniquenessTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede de cursos", active=True)
@@ -1054,6 +1219,17 @@ class CourseUniquenessTests(TestCase):
             "schedule": "Lunes 18:00",
             "group": "A",
         }
+
+    def test_course_group_must_be_positive_integer_except_unassigned(self):
+        for bad in ("A", "0", "-1", "1.5", ""):
+            with self.assertRaises(ValidationError, msg=bad) as context:
+                Course(**{**self.course_data, "group": bad}).full_clean()
+            self.assertIn("group", context.exception.message_dict)
+        fees = {"enrollment_fee": 10, "monthly_fee": 10}
+        Course(**{**self.course_data, "group": "2", **fees}).full_clean()
+        Course.objects.get(campus=self.campus, name="POR ASIGNAR").full_clean(
+            exclude=["enrollment_fee", "monthly_fee"]
+        )
 
     def test_same_course_identity_cannot_be_created_twice_in_one_campus(self):
         Course.objects.create(**self.course_data)
@@ -1078,5 +1254,5 @@ class CourseUniquenessTests(TestCase):
     def test_default_schedules_are_available_in_the_catalog(self):
         self.assertEqual(
             set(Schedule.objects.values_list("name", flat=True)),
-            {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM"},
+            {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM", "PENDIENTE DE ASIGNACION"},
         )

@@ -736,6 +736,17 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 <script>
+document.addEventListener("input", function (e) {
+  var input = e.target;
+  if (!input.matches || !input.matches("input[data-uppercase]")) return;
+  var upper = input.value.toUpperCase();
+  if (input.value === upper) return;
+  var start = input.selectionStart, end = input.selectionEnd;
+  input.value = upper;
+  try { input.setSelectionRange(start, end); } catch (err) {}
+});
+</script>
+<script>
 document.addEventListener("click", function (e) {
   document.querySelectorAll("details.campus-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
 });

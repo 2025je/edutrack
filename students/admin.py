@@ -1,7 +1,15 @@
 from django.contrib import admin
 from django import forms
 
-from .models import Student, Course, Enrollment, Promoter, Schedule
+from .models import (
+    UNASSIGNED_COURSE_NAME,
+    UNASSIGNED_SCHEDULE_NAME,
+    Course,
+    Enrollment,
+    Promoter,
+    Schedule,
+    Student,
+)
 
 
 class StudentAdminForm(forms.ModelForm):
@@ -14,16 +22,13 @@ class StudentAdminForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        full_name = " ".join(
-            part.strip()
-            for part in (
-                cleaned_data.get("last_name", ""),
-                cleaned_data.get("first_name", ""),
-            )
-            if part.strip()
-        )
+        last_name = cleaned_data.get("last_name", "").strip().upper()
+        first_name = cleaned_data.get("first_name", "").strip().upper()
+        cleaned_data["last_name"] = last_name
+        cleaned_data["first_name"] = first_name
+        full_name = " ".join(part.strip() for part in (last_name, first_name) if part.strip())
         if full_name:
-            duplicate = Student.objects.filter(full_name=full_name)
+            duplicate = Student.objects.filter(full_name__iexact=full_name)
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
@@ -49,6 +54,7 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ("campus", "active")
     search_fields = ("full_name", "document_number")
 
+
 class CourseAdminForm(forms.ModelForm):
     schedule = forms.ModelChoiceField(
         label="Horario",
@@ -63,9 +69,7 @@ class CourseAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
-            self.initial["schedule"] = Schedule.objects.filter(
-                name=self.instance.schedule
-            ).first()
+            self.initial["schedule"] = Schedule.objects.filter(name=self.instance.schedule).first()
 
     def clean_schedule(self):
         return self.cleaned_data["schedule"].name
@@ -74,14 +78,52 @@ class CourseAdminForm(forms.ModelForm):
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
     form = CourseAdminForm
-    list_display = ("name", "campus", "start_date", "schedule", "group", "capacity", "enrollment_fee", "monthly_fee", "active")
+    list_display = (
+        "name",
+        "campus",
+        "start_date",
+        "schedule",
+        "group",
+        "capacity",
+        "enrollment_fee",
+        "monthly_fee",
+        "active",
+    )
     list_filter = ("campus", "active")
     search_fields = ("name", "schedule", "group")
+
+    def _is_locked(self, request, obj):
+        return (
+            obj is not None
+            and not request.user.is_superuser
+            and obj.name == UNASSIGNED_COURSE_NAME
+            and obj.schedule == UNASSIGNED_SCHEDULE_NAME
+        )
+
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and not self._is_locked(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and not self._is_locked(request, obj)
 
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
     search_fields = ("name",)
+
+    def _is_locked(self, request, obj):
+        return (
+            obj is not None
+            and not request.user.is_superuser
+            and obj.name == UNASSIGNED_SCHEDULE_NAME
+        )
+
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and not self._is_locked(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and not self._is_locked(request, obj)
+
 
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
