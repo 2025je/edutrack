@@ -7,6 +7,18 @@ from decimal import Decimal
 from django.db import migrations, models
 
 
+DEFAULT_SCHEDULES = (
+    "SÁBADOS DE 8AM A 11AM",
+    "SÁBADOS DE 11AM A 2PM",
+)
+
+
+def create_default_schedules(apps, schema_editor):
+    Schedule = apps.get_model("students", "Schedule")
+    for name in DEFAULT_SCHEDULES:
+        Schedule.objects.get_or_create(name=name)
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -107,4 +119,5 @@ class Migration(migrations.Migration):
             model_name='course',
             constraint=models.UniqueConstraint(fields=('campus', 'name', 'schedule', 'group'), name='unique_course_name_schedule_group_per_campus'),
         ),
+        migrations.RunPython(create_default_schedules, migrations.RunPython.noop),
     ]

@@ -282,6 +282,66 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertTrue(self.enrollment.has_record)
         self.assertEqual(self.enrollment.record_code, "15")
 
+    def test_editing_enrollment_recalculates_installments(self):
+        data = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "promoter": [],
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-update", args=[self.enrollment.pk])
+        due = self.enrollment.enrollment_date
+        matricula = Installment.objects.create(
+            enrollment=self.enrollment, concept="Matrícula", amount=30, due_date=due
+        )
+        monthly = Installment.objects.create(
+            enrollment=self.enrollment,
+            concept="Mensualidad inicial (2026-01)",
+            amount=50,
+            due_date=due,
+        )
+
+        response = self.client.post(url, data)
+
+        self.assertEqual(response.status_code, 302)
+        matricula.refresh_from_db()
+        monthly.refresh_from_db()
+        self.assertEqual(matricula.amount, 40)
+        self.assertEqual(monthly.amount, 60)
+
+    def test_fee_cannot_drop_below_amount_already_paid(self):
+        data = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "promoter": [],
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "10.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        due = self.enrollment.enrollment_date
+        matricula = Installment.objects.create(
+            enrollment=self.enrollment, concept="Matrícula", amount=40, due_date=due
+        )
+        payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=User.objects.first(),
+            receipt_number="900",
+            amount=25,
+        )
+        PaymentAllocation.objects.create(payment=payment, installment=matricula, amount=25)
+
+        response = self.client.post(reverse("enrollment-update", args=[self.enrollment.pk]), data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["form"].errors.get("enrollment_fee"))
+        matricula.refresh_from_db()
+        self.assertEqual(matricula.amount, 40)
+
     def test_student_form_inputs_convert_names_to_uppercase(self):
         response = self.client.get(reverse("student-create"))
 

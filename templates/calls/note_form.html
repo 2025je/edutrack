@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{% if note %}Editar llamada{% else %}Registrar llamada{% endif %} · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">{% if note %}Editar llamada{% else %}Registrar llamada{% endif %}</h1><div class="muted">{{ student.full_name }} · {{ student.phone }}</div></div>
+<div class="card card-pad">
+  <form method="post">
+    {% csrf_token %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <label for="{{ form.response.id_for_label }}">Tipo de respuesta</label>
+    {{ form.response }}
+    {% for error in form.response.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <label for="{{ form.note.id_for_label }}">Detalle de la llamada</label>
+    {{ form.note }}
+    {% for error in form.note.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <button class="btn" type="submit">Guardar registro</button>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-notes' student.pk %}">Ver historial</a>
+    <a class="btn-flat grey-text text-darken-2" href="{% if next %}{{ next }}{% else %}{% url 'calls-students' %}{% endif %}">Cancelar</a>
+  </form>
+</div>
+{% endblock %}

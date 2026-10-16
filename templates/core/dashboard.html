@@ -27,7 +27,10 @@
   <a class="btn-flat blue-text" href="{% url 'installment-list' %}">Ver cuotas pendientes</a>
   <a class="btn-flat blue-text" href="{% url 'pending-debts' %}">Consultar deudas</a>
   {% endif %}
-  {% if not user.is_superuser and not user.can_manage_students and not user.can_register_payments %}<p class="muted mb-0">Tu usuario no tiene permisos operativos asignados. Contacta al administrador.</p>{% endif %}
+  {% if user.is_superuser or user.can_manage_calls %}
+  <a class="btn-flat blue-text" href="{% url 'calls-students' %}">Llamadas</a>
+  {% endif %}
+  {% if not user.is_superuser and not user.can_manage_students and not user.can_register_payments and not user.can_manage_calls %}<p class="muted mb-0">Tu usuario no tiene permisos operativos asignados. Contacta al administrador.</p>{% endif %}
 </div></div>
 <div class="card card-pad"><h2>Sedes habilitadas</h2>{% if campuses %}<ul class="browser-default mb-0" style="padding-left:1.5rem;list-style:disc">{% for campus in campuses %}<li>{{ campus.name }}</li>{% endfor %}</ul>{% else %}<p class="muted mb-0">Tu usuario aún no tiene sedes asignadas. Solicita al administrador que configure tus permisos.</p>{% endif %}</div>
 {% endblock %}

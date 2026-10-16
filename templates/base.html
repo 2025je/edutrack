@@ -582,6 +582,13 @@
     <li><a href="{% url 'pending-debts' %}"><i class="material-icons">money_off</i>Deudas pendientes</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
+    {% if user.is_superuser or user.can_manage_calls %}
+    <li><div class="subheader">Llamadas</div></li>
+    <li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Alumnos y deudas</a></li>
+    <li><a href="{% url 'calls-notes-all' %}"><i class="material-icons">forum</i>Historial de llamadas</a></li>
+     <li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
     {% if user.is_superuser or user.can_manage_promoters %}
     <li><div class="subheader">Catálogo</div></li>
     <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>

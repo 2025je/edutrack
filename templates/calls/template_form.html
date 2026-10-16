@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Plantilla de WhatsApp · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">Plantilla de mensaje de WhatsApp</h1><div class="muted">Se usa al hacer clic en un teléfono de la lista de llamadas de la sede seleccionada.</div></div>
+<div class="card card-pad">
+  <form method="post">
+    {% csrf_token %}
+    <label for="{{ form.body.id_for_label }}">Mensaje</label>
+    {{ form.body }}
+    <div class="no-print mb" id="emoji-bar" aria-label="Insertar emoji" style="max-height:150px;overflow-y:auto;border:1px solid #cfd4dc;border-radius:4px;padding:4px">{% for e in emojis %}<button type="button" class="btn-flat" style="padding:0 6px;font-size:1.3rem" data-emoji="{{ e }}">{{ e }}</button>{% endfor %}</div>
+    {% for error in form.body.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <div class="small muted mb">Variables disponibles (se reemplazan automáticamente):
+      <ul>{% for key, desc in placeholders %}<li><code>{{ key }}</code> — {{ desc }}</li>{% endfor %}</ul>
+    </div>
+    <button class="btn" type="submit">Guardar plantilla</button>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver a llamadas</a>
+  </form>
+</div>
+<div class="card card-pad">
+  <h2>Vista previa</h2>
+  <div id="wa-preview" style="white-space:pre-wrap">{{ preview }}</div>
+</div>
+{{ sample|json_script:"wa-sample" }}
+<script>
+(function () {
+  var input = document.getElementById("{{ form.body.id_for_label }}");
+  var out = document.getElementById("wa-preview");
+  var sample = JSON.parse(document.getElementById("wa-sample").textContent);
+  function render() {
+    out.textContent = input.value.replace(/\{(\w+)\}/g, function (m, key) {
+      return Object.prototype.hasOwnProperty.call(sample, key) ? sample[key] : m;
+    });
+  }
+  input.addEventListener("input", render);
+  document.getElementById("emoji-bar").addEventListener("click", function (event) {
+    var btn = event.target.closest("[data-emoji]");
+    if (!btn) return;
+    var start = input.selectionStart, end = input.selectionEnd;
+    input.setRangeText(btn.dataset.emoji, start, end, "end");
+    input.focus();
+    render();
+  });
+  render();
+})();
+</script>
+{% endblock %}

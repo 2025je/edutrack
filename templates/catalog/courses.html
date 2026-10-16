@@ -19,8 +19,12 @@
 (function () {
 	var select = document.getElementById("{{ form.schedule.id_for_label }}");
 	if (!select) return;
-	var option = new Option("➕ Nuevo horario…", "__new_schedule__");
-	select.add(option);
+	// Opción vacía: sin ella, si no hay horarios la única opción ya está elegida y no dispara 'change'.
+	var hasDefault = Array.prototype.some.call(select.options, function (o) { return o.defaultSelected; });
+	var placeholder = new Option("Seleccione un horario", "", !hasDefault, !hasDefault);
+	select.add(placeholder, 0);
+	select.required = true;
+	select.add(new Option("➕ Nuevo horario…", "__new_schedule__"));
 	var previous = select.value;
 	select.addEventListener("focus", function () { if (select.value !== "__new_schedule__") previous = select.value; });
 	select.addEventListener("change", function () {

@@ -25,6 +25,7 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_students",
                     "can_register_payments",
                     "can_manage_promoters",
+                    "can_manage_calls",
                 )
             },
         ),
@@ -38,6 +39,7 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_students",
                     "can_register_payments",
                     "can_manage_promoters",
+                    "can_manage_calls",
                 )
             },
         ),
@@ -50,6 +52,7 @@ class UserAdmin(BaseUserAdmin):
         "can_manage_students",
         "can_register_payments",
         "can_manage_promoters",
+        "can_manage_calls",
         "is_staff",
         "is_active",
     )
