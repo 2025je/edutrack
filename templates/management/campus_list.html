@@ -1,20 +1,27 @@
 {% extends "base.html" %}{% block title %}Sedes · EduTrack{% endblock %}
 {% block content %}
+<style>
+  .flyer-preview{display:inline-block;width:120px;margin:0 .5rem .5rem 0;vertical-align:top;text-align:center;color:inherit}
+  .flyer-preview iframe,.flyer-preview img{display:block;width:120px;height:150px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff}
+  .flyer-preview iframe{pointer-events:none}
+  .flyer-preview img{object-fit:contain}
+  .flyer-preview span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
 <div class="flex wrap between items-center gap mb">
   <div><h1 class="mb-0">Sedes</h1><div class="muted">Crea y edita las sedes del sistema.</div></div>
   <div class="no-print">
     <a class="btn" href="{% url 'campus-create' %}"><i class="material-icons left">add</i>Nueva sede</a>
-    <a class="btn-flat blue-text" href="{% url 'campus-users' %}">Sedes por usuario</a>
   </div>
 </div>
-<div class="card table-wrap"><table class="highlight"><thead><tr><th>Logo</th><th>Sede</th><th>Dirección</th><th>Estado</th><th class="right-align">Usuarios</th><th class="no-print">Acciones</th></tr></thead><tbody>
+<div class="card table-wrap"><table class="highlight"><thead><tr><th>Logo</th><th>Sede</th><th>Dirección</th><th>Volantes</th><th>Estado</th><th class="right-align">Usuarios</th><th class="no-print">Acciones</th></tr></thead><tbody>
 {% for campus in campuses %}<tr>
   <td>{% if campus.logo %}<img src="{{ campus.logo.url }}" alt="Logo de {{ campus.name }}" style="height:36px;max-width:60px;object-fit:contain">{% else %}<span class="muted">—</span>{% endif %}</td>
   <td class="strong">{{ campus.name }}</td>
   <td>{{ campus.address|default:"—" }}</td>
+  <td>{% for flyer in campus.flyers.all %}<a class="flyer-preview" href="{{ flyer.file.url }}" target="_blank" rel="noopener" title="{{ flyer.title }}">{% if flyer.is_image %}<img src="{{ flyer.file.url }}" alt="Vista previa de {{ flyer.title }}" loading="lazy">{% else %}<iframe src="{{ flyer.file.url }}#toolbar=0&navpanes=0&view=FitH" title="Vista previa de {{ flyer.title }}" loading="lazy" tabindex="-1"></iframe>{% endif %}<span class="small">{{ flyer.title }}</span></a>{% empty %}<span class="muted">—</span>{% endfor %}</td>
   <td>{% if campus.active %}Activa{% else %}<span class="muted">Inactiva</span>{% endif %}</td>
   <td class="right-align">{{ campus.users_count }}</td>
   <td class="no-print"><a class="blue-text" href="{% url 'campus-update' campus.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a></td>
-</tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay sedes registradas.</td></tr>{% endfor %}
+</tr>{% empty %}<tr><td colspan="7" class="center-align muted">No hay sedes registradas.</td></tr>{% endfor %}
 </tbody></table></div>
 {% endblock %}

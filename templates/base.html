@@ -595,14 +595,13 @@
     <li><div class="subheader">Gestión</div></li>
     {% if user.is_superuser or user.can_manage_campuses %}
     <li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>
-    <li><a href="{% url 'campus-users' %}"><i class="material-icons">manage_accounts</i>Sedes por usuario</a></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_promoters %}
     <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
     <li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_users %}
-    <li><a href="{% url 'user-create' %}"><i class="material-icons">person_add</i>Nuevo usuario</a></li>
+    <li><a href="{% url 'user-list' %}"><i class="material-icons">group</i>Usuarios</a></li>
     {% endif %}
     {% if user.is_staff %}
     <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>

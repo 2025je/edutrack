@@ -1,15 +1,16 @@
-{% extends "base.html" %}{% block title %}Nuevo usuario · EduTrack{% endblock %}
+{% extends "base.html" %}{% block title %}{% if target_user %}Editar usuario{% else %}Nuevo usuario{% endif %} · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Nuevo usuario</h1><div class="muted">Define el nombre de usuario, la contraseña, los permisos y las sedes que podrá manejar.</div></div>
+<div class="mb"><h1 class="mb-0">{% if target_user %}Editar usuario{% else %}Nuevo usuario{% endif %}</h1><div class="muted">{% if target_user %}Deja la contraseña vacía para conservar la actual.{% else %}Define el nombre de usuario, la contraseña, los permisos y las sedes que podrá manejar.{% endif %}</div></div>
 <div class="card card-pad">
   <form method="post" autocomplete="off">
     {% csrf_token %}
     {% for error in form.non_field_errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <div class="row">
       <div class="col s12 m4"><label for="{{ form.username.id_for_label }}">Nombre de usuario</label>{{ form.username }}{% for error in form.username.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
-      <div class="col s12 m4"><label for="{{ form.password1.id_for_label }}">Contraseña</label>{{ form.password1 }}{% for error in form.password1.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
-      <div class="col s12 m4"><label for="{{ form.password2.id_for_label }}">Confirmar contraseña</label>{{ form.password2 }}{% for error in form.password2.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+      <div class="col s12 m4"><label for="{{ form.password1.id_for_label }}">{{ form.password1.label }}</label>{{ form.password1 }}{% for error in form.password1.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+      <div class="col s12 m4"><label for="{{ form.password2.id_for_label }}">{{ form.password2.label }}</label>{{ form.password2 }}{% for error in form.password2.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
     </div>
+    {% if form.is_active %}<p><label for="{{ form.is_active.id_for_label }}">{{ form.is_active }}<span>{{ form.is_active.label }}</span></label></p>{% for error in form.is_active.errors %}<div class="field-error">{{ error }}</div>{% endfor %}{% endif %}
     <label>Permisos</label>
     <div class="check-list">
       {% for field in form.permission_fields %}
@@ -26,8 +27,8 @@
     </div>
     {% for error in form.campuses.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <div class="mt">
-      <button class="btn" type="submit">Crear usuario</button>
-      <a class="btn-flat grey-text text-darken-2" href="{% url 'dashboard' %}">Cancelar</a>
+      <button class="btn" type="submit">{% if target_user %}Guardar cambios{% else %}Crear usuario{% endif %}</button>
+      <a class="btn-flat grey-text text-darken-2" href="{% url 'user-list' %}">Cancelar</a>
     </div>
   </form>
 </div>

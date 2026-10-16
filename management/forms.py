@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
-from core.models import Campus, User
+from core.models import Campus, CampusFlyer, User
 from students.models import UNASSIGNED_SCHEDULE_NAME, Course, Promoter, Schedule
 
 PERMISSION_FIELDS = [
@@ -28,17 +28,17 @@ class CampusForm(forms.ModelForm):
         return name
 
 
-class UserCampusesForm(forms.ModelForm):
-    campuses = forms.ModelMultipleChoiceField(
-        label="Sedes asignadas",
-        queryset=Campus.objects.all(),
-        required=False,
-        widget=forms.CheckboxSelectMultiple,
-    )
-
+class CampusFlyerForm(forms.ModelForm):
     class Meta:
-        model = User
-        fields = ["campuses"]
+        model = CampusFlyer
+        fields = ["title", "file"]
+        widgets = {
+            "file": forms.ClearableFileInput(
+                attrs={
+                    "accept": "application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp"
+                }
+            )
+        }
 
 
 class UserCreateForm(forms.ModelForm):
@@ -71,11 +71,12 @@ class UserCreateForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         password1, password2 = cleaned.get("password1"), cleaned.get("password2")
-        if password1 and password2:
+        if password1 or password2:
             if password1 != password2:
                 self.add_error("password2", "Las contraseñas no coinciden.")
             else:
-                user = User(username=cleaned.get("username", ""))
+                user = self.instance if self.instance.pk else User()
+                user.username = cleaned.get("username", user.username)
                 try:
                     validate_password(password1, user)
                 except ValidationError as error:
@@ -84,11 +85,34 @@ class UserCreateForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        user.set_password(self.cleaned_data["password1"])
+        if self.cleaned_data.get("password1"):
+            user.set_password(self.cleaned_data["password1"])
         if commit:
             user.save()
             user.campuses.set(self.cleaned_data["campuses"])
         return user
+
+
+class UserUpdateForm(UserCreateForm):
+    class Meta(UserCreateForm.Meta):
+        fields = ["username", "is_active", *PERMISSION_FIELDS]
+        labels = {"username": "Nombre de usuario", "is_active": "Usuario activo"}
+
+    def __init__(self, *args, editor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.editor = editor
+        for name in ("password1", "password2"):
+            self.fields[name].required = False
+        self.fields["password1"].label = "Nueva contraseña"
+        self.fields["password2"].label = "Confirmar nueva contraseña"
+        if self.instance.pk:
+            self.fields["campuses"].initial = self.instance.campuses.all()
+
+    def clean_is_active(self):
+        is_active = self.cleaned_data["is_active"]
+        if not is_active and self.editor and self.editor.pk == self.instance.pk:
+            raise ValidationError("No puedes desactivar tu propio usuario.")
+        return is_active
 
 
 class CourseForm(forms.ModelForm):

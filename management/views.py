@@ -1,12 +1,14 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, When
-from django.shortcuts import redirect
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
+from django.views import View
 from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
-from core.models import Campus, User
+from core.models import Campus, CampusFlyer, User
 from students.models import (
     UNASSIGNED_COURSE_NAME,
     UNASSIGNED_SCHEDULE_NAME,
@@ -16,13 +18,14 @@ from students.models import (
 )
 
 from .forms import (
+    CampusFlyerForm,
     CampusForm,
     CourseForm,
     CourseStartDateForm,
     PromoterForm,
     ScheduleForm,
-    UserCampusesForm,
     UserCreateForm,
+    UserUpdateForm,
 )
 
 
@@ -34,6 +37,12 @@ class CatalogManagerMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
     permission_field = "can_manage_promoters"
 
 
+def manageable_users(editor):
+    """Usuarios editables: nunca superusuarios, y el personal de admin solo por superusuarios."""
+    users = User.objects.filter(is_superuser=False)
+    return users if editor.is_superuser else users.filter(is_staff=False)
+
+
 # Sedes
 
 
@@ -42,7 +51,9 @@ class CampusListView(CampusManagementMixin, ListView):
     context_object_name = "campuses"
 
     def get_queryset(self):
-        return Campus.objects.annotate(users_count=Count("users", distinct=True))
+        return Campus.objects.annotate(users_count=Count("users", distinct=True)).prefetch_related(
+            "flyers"
+        )
 
 
 class CampusCreateView(CampusManagementMixin, CreateView):
@@ -51,9 +62,27 @@ class CampusCreateView(CampusManagementMixin, CreateView):
     template_name = "management/campus_form.html"
     success_url = reverse_lazy("campus-list")
 
-    def form_valid(self, form):
-        messages.success(self.request, "Sede creada correctamente.")
-        return super().form_valid(form)
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("flyer_form", CampusFlyerForm(prefix="flyer"))
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = None
+        form = self.get_form()
+        flyer_form = CampusFlyerForm(request.POST, request.FILES, prefix="flyer")
+        # El volante es opcional: solo se valida si se llenó algún campo.
+        flyer_given = flyer_form.has_changed()
+        if form.is_valid() and (not flyer_given or flyer_form.is_valid()):
+            with transaction.atomic():
+                self.object = form.save()
+                if flyer_given:
+                    flyer = flyer_form.save(commit=False)
+                    flyer.campus = self.object
+                    flyer.save()
+            messages.success(request, "Sede creada correctamente.")
+            return redirect(self.get_success_url())
+        return self.render_to_response(self.get_context_data(form=form, flyer_form=flyer_form))
 
 
 class CampusUpdateView(CampusManagementMixin, UpdateView):
@@ -66,14 +95,57 @@ class CampusUpdateView(CampusManagementMixin, UpdateView):
         messages.success(self.request, "Sede actualizada correctamente.")
         return super().form_valid(form)
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["flyers"] = self.object.flyers.all()
+        context["flyer_form"] = CampusFlyerForm()
+        return context
 
-class CampusUserListView(CampusManagementMixin, ListView):
-    template_name = "management/campus_users.html"
+
+class CampusFlyerCreateView(CampusManagementMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        campus = get_object_or_404(Campus, pk=pk)
+        form = CampusFlyerForm(request.POST, request.FILES)
+        if form.is_valid():
+            flyer = form.save(commit=False)
+            flyer.campus = campus
+            flyer.save()
+            messages.success(request, f"Volante «{flyer.title}» subido.")
+        else:
+            for errors in form.errors.values():
+                for error in errors:
+                    messages.error(request, error)
+        return redirect("campus-update", pk=campus.pk)
+
+
+class CampusFlyerDeleteView(CampusManagementMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        flyer = get_object_or_404(CampusFlyer, pk=pk)
+        campus_pk = flyer.campus_id
+        flyer.file.delete(save=False)
+        flyer.delete()
+        messages.success(request, "Volante eliminado.")
+        return redirect("campus-update", pk=campus_pk)
+
+
+# Usuarios
+
+
+class UserManagementMixin(FeaturePermissionMixin):
+    permission_field = "can_manage_users"
+
+
+class UserListView(UserManagementMixin, ListView):
+    template_name = "management/user_list.html"
     context_object_name = "users"
     paginate_by = 25
 
     def get_queryset(self):
-        users = User.objects.filter(is_superuser=False).prefetch_related("campuses")
+        users = manageable_users(self.request.user).prefetch_related("campuses")
         q = self.request.GET.get("q", "").strip()
         if q:
             users = users.filter(username__icontains=q)
@@ -85,32 +157,34 @@ class CampusUserListView(CampusManagementMixin, ListView):
         return context
 
 
-class CampusUserUpdateView(CampusManagementMixin, UpdateView):
-    form_class = UserCampusesForm
-    template_name = "management/campus_user_form.html"
-    context_object_name = "target_user"
-    success_url = reverse_lazy("campus-users")
-
-    # Los superusuarios ven todas las sedes y no se administran desde aquí.
-    queryset = User.objects.filter(is_superuser=False)
-
-    def form_valid(self, form):
-        messages.success(self.request, "Sedes del usuario actualizadas.")
-        return super().form_valid(form)
-
-
-# Usuarios
-
-
-class UserCreateView(FeaturePermissionMixin, CreateView):
-    permission_field = "can_manage_users"
+class UserCreateView(UserManagementMixin, CreateView):
     form_class = UserCreateForm
     template_name = "management/user_form.html"
-    success_url = reverse_lazy("user-create")
+    success_url = reverse_lazy("user-list")
 
     def form_valid(self, form):
         response = super().form_valid(form)
         messages.success(self.request, f"Usuario «{self.object.username}» creado.")
+        return response
+
+
+class UserUpdateView(UserManagementMixin, UpdateView):
+    form_class = UserUpdateForm
+    template_name = "management/user_form.html"
+    context_object_name = "target_user"
+    success_url = reverse_lazy("user-list")
+
+    def get_queryset(self):
+        return manageable_users(self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["editor"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f"Usuario «{self.object.username}» actualizado.")
         return response
 
 

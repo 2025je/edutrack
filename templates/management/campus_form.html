@@ -11,9 +11,58 @@
     {{ form.address }}{% for error in form.address.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <label for="{{ form.logo.id_for_label }}">Logo</label>
     {{ form.logo }}{% for error in form.logo.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <div id="logo-preview-box" style="margin:8px 0;{% if not object.logo %}display:none{% endif %}">
+      <img id="logo-preview" src="{% if object.logo %}{{ object.logo.url }}{% endif %}" alt="Vista previa del logo" style="max-height:100px;max-width:200px;object-fit:contain;border:1px solid #ddd;padding:4px">
+    </div>
+    <script>
+    (function () {
+      var input = document.getElementById("{{ form.logo.id_for_label }}");
+      var box = document.getElementById("logo-preview-box");
+      var img = document.getElementById("logo-preview");
+      var original = img.getAttribute("src");
+      var url = null;
+      input.addEventListener("change", function () {
+        if (url) { URL.revokeObjectURL(url); url = null; }
+        var file = input.files && input.files[0];
+        if (file && file.type.indexOf("image/") === 0) {
+          url = URL.createObjectURL(file);
+          img.src = url;
+          box.style.display = "block";
+        } else {
+          img.src = original || "";
+          box.style.display = original ? "block" : "none";
+        }
+      });
+    })();
+    </script>
     <p><label for="{{ form.active.id_for_label }}">{{ form.active }}<span>Sede activa</span></label></p>
+    {% if not object %}
+    <div class="row mb-0">
+      <h2>Volantes (PDF o imagen)</h2>
+      <p class="muted col s12">Opcional: puedes subir un volante ahora y agregar más al editar la sede.</p>
+      {% include "management/_flyer_fields.html" %}
+    </div>
+    {% endif %}
     <button class="btn" type="submit">Guardar sede</button>
     <a class="btn-flat grey-text text-darken-2" href="{% url 'campus-list' %}">Cancelar</a>
   </form>
 </div>
+{% if object %}
+<div class="card card-pad">
+  <h2>Volantes (PDF o imagen)</h2>
+  <form method="post" action="{% url 'campus-flyer-create' object.pk %}" enctype="multipart/form-data" class="row mb-0">
+    {% csrf_token %}
+    {% include "management/_flyer_fields.html" %}
+    <div class="col s12"><button class="btn" type="submit">Subir</button></div>
+  </form>
+  <div class="table-wrap mt"><table class="highlight">  <thead><tr><th>Vista previa</th><th>Título</th><th>Subido</th><th class="no-print">Acciones</th></tr></thead><tbody>
+  {% for flyer in flyers %}<tr>
+      <td><a href="{{ flyer.file.url }}" target="_blank" rel="noopener" title="Abrir {{ flyer.title }}">{% if flyer.is_image %}<img src="{{ flyer.file.url }}" alt="Vista previa de {{ flyer.title }}" loading="lazy" style="width:120px;height:150px;object-fit:contain;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff;display:block">{% else %}<iframe src="{{ flyer.file.url }}#toolbar=0&navpanes=0&view=FitH" title="Vista previa de {{ flyer.title }}" loading="lazy" tabindex="-1" style="width:120px;height:150px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff;pointer-events:none;display:block"></iframe>{% endif %}</a></td>
+      <td><a class="blue-text" href="{{ flyer.file.url }}" target="_blank" rel="noopener">{{ flyer.title }}</a></td>
+      <td>{{ flyer.uploaded_at|date:"d/m/Y H:i" }}</td>
+      <td class="no-print"><form method="post" action="{% url 'campus-flyer-delete' flyer.pk %}" onsubmit="return confirm('¿Eliminar este volante?')" style="display:inline">{% csrf_token %}<button type="submit" class="btn-flat red-text" title="Eliminar" style="padding:0"><i class="material-icons tiny">delete</i></button></form></td>
+    </tr>{% empty %}<tr><td colspan="4" class="center-align muted">Esta sede aún no tiene volantes.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
 {% endblock %}
