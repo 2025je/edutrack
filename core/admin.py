@@ -26,6 +26,8 @@ class UserAdmin(BaseUserAdmin):
                     "can_register_payments",
                     "can_manage_promoters",
                     "can_manage_calls",
+                    "can_edit_call_notes",
+                    "can_manage_campuses",
                 )
             },
         ),
@@ -40,6 +42,8 @@ class UserAdmin(BaseUserAdmin):
                     "can_register_payments",
                     "can_manage_promoters",
                     "can_manage_calls",
+                    "can_edit_call_notes",
+                    "can_manage_campuses",
                 )
             },
         ),
@@ -53,6 +57,8 @@ class UserAdmin(BaseUserAdmin):
         "can_register_payments",
         "can_manage_promoters",
         "can_manage_calls",
+        "can_edit_call_notes",
+        "can_manage_campuses",
         "is_staff",
         "is_active",
     )

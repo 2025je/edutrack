@@ -1,5 +1,7 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.http import Http404
+from django.urls import path, include, re_path
+from django.views.defaults import page_not_found
 from django.conf import settings
 from django.conf.urls.static import static
 from core.views import DashboardView, select_campus
@@ -19,8 +21,12 @@ urlpatterns = [
     path("catalogo/", include("catalog.urls")),
     path("pagos/", include("payments.urls")),
     path("llamadas/", include("calls.urls")),
+    path("sedes/", include("sedes.urls")),
 ]
 
 if settings.DEBUG:
     urlpatterns += [path("__debug__/", include("debug_toolbar.urls"))]
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# También en DEBUG se muestra la página 404 amigable en lugar de la técnica de Django.
+urlpatterns += [re_path(r"^.*$", page_not_found, {"exception": Http404()})]

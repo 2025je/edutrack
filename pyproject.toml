@@ -2,9 +2,9 @@
 name = "edutrack"
 version = "0.1.0"
 description = "Sistema web para administrar estudiantes, matrículas y pagos"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "Django>=5.2,<5.3",
+    "Django>=6.0,<6.1",
     "gunicorn>=23,<24",
     "psycopg[binary]>=3.2,<4",
     "openpyxl>=3.1,<4",
@@ -18,7 +18,7 @@ dependencies = [
 package = false
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 extend-exclude = ["**/migrations/**"]
 

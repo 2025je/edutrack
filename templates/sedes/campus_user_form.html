@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Asignar sedes · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">Asignar sedes</h1><div class="muted">{{ target_user.get_full_name|default:target_user.username }} · {{ target_user.username }}</div></div>
+<div class="card card-pad">
+  <form method="post">
+    {% csrf_token %}
+    <label>Sedes asignadas</label>
+    <div class="check-list">
+      {% for choice in form.campuses %}
+        <p><label for="{{ choice.id_for_label }}">{{ choice.tag }}<span>{{ choice.choice_label }}</span></label></p>
+      {% empty %}
+        <span class="muted">No hay sedes registradas.</span>
+      {% endfor %}
+    </div>
+    {% for error in form.campuses.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <div class="mt">
+      <button class="btn" type="submit">Guardar sedes</button>
+      <a class="btn-flat grey-text text-darken-2" href="{% url 'campus-users' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,7 +1,7 @@
-{% extends "base.html" %}{% block title %}Ingresar · EduTrack{% endblock %}
+{% extends "base.html" %}{% load static %}{% block title %}Ingresar · EduTrack{% endblock %}
 {% block content %}
 <div class="row" style="margin-top:3rem"><div class="col s12 m8 offset-m2 l5 offset-l3 xl4 offset-xl4"><div class="card card-pad">
-<h1>Iniciar sesión</h1><p class="muted">Ingresa con tu cuenta individual.</p>
+<div class="center-align"><img src="{% static 'img/logo.svg' %}" alt="EduTrack" width="96" height="93"></div><h1>Iniciar sesión</h1><p class="muted">Ingresa con tu cuenta individual.</p>
 <form method="post">{% csrf_token %}
 {% if form.errors %}<div class="note note-danger">Usuario o contraseña incorrectos.</div>{% endif %}
 <div class="field"><label for="{{ form.username.id_for_label }}">Usuario</label>{{ form.username.as_widget|safe }}</div>

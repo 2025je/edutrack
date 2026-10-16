@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Sedes · EduTrack{% endblock %}
+{% block content %}
+<div class="flex wrap between items-center gap mb">
+  <div><h1 class="mb-0">Sedes</h1><div class="muted">Crea y edita las sedes del sistema.</div></div>
+  <div class="no-print">
+    <a class="btn" href="{% url 'campus-create' %}"><i class="material-icons left">add</i>Nueva sede</a>
+    <a class="btn-flat blue-text" href="{% url 'campus-users' %}">Sedes por usuario</a>
+  </div>
+</div>
+<div class="card table-wrap"><table class="highlight"><thead><tr><th>Logo</th><th>Sede</th><th>Dirección</th><th>Estado</th><th class="right-align">Usuarios</th><th class="no-print">Acciones</th></tr></thead><tbody>
+{% for campus in campuses %}<tr>
+  <td>{% if campus.logo %}<img src="{{ campus.logo.url }}" alt="Logo de {{ campus.name }}" style="height:36px;max-width:60px;object-fit:contain">{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="strong">{{ campus.name }}</td>
+  <td>{{ campus.address|default:"—" }}</td>
+  <td>{% if campus.active %}Activa{% else %}<span class="muted">Inactiva</span>{% endif %}</td>
+  <td class="right-align">{{ campus.users_count }}</td>
+  <td class="no-print"><a class="blue-text" href="{% url 'campus-update' campus.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a></td>
+</tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay sedes registradas.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

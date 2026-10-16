@@ -1,9 +1,10 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}EduTrack{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{% static 'img/logo.svg' %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -556,9 +557,10 @@
   <nav class="blue">
     <div class="nav-wrapper" style="padding:0 1rem">
       {% if user.is_authenticated %}<a href="#" data-target="slide-out" class="sidenav-trigger" aria-label="Abrir menú"><i class="material-icons">menu</i></a>{% endif %}
-      <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}">EduTrack</a>
+      <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}"><img src="{% static 'img/logo.svg' %}" alt="" width="36" height="36" style="margin-right:10px">EduTrack</a>
       <ul class="right">
       {% if user.is_authenticated and selected_campus %}<li class="header-campus hide-on-small-only"><form method="post" action="{% url 'select-campus' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><details class="campus-menu"><summary aria-label="Cambiar de sede">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }}</span><i class="material-icons" aria-hidden="true">arrow_drop_down</i></summary><ul class="campus-options">{% for campus in available_campuses %}<li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{% if campus.logo %}<img class="campus-logo" src="{{ campus.logo.url }}" alt="">{% else %}<span class="campus-logo-empty"></span>{% endif %}{{ campus.name }}</button></li>{% endfor %}</ul></details></form></li>{% endif %}
+            <li class="header-user hide-on-med-and-down"><span title="Fecha actual"><i class="material-icons" aria-hidden="true">calendar_today</i>{% now "d/m/Y" %}</span></li>
             {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
             <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
             {% if user.is_authenticated %}<li class="header-logout"><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="logout-btn" title="Cerrar sesión"><i class="material-icons" aria-hidden="true">logout</i><span class="hide-on-small-only">Salir</span></button></form></li>{% endif %}
@@ -587,6 +589,12 @@
     <li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Alumnos y deudas</a></li>
     <li><a href="{% url 'calls-notes-all' %}"><i class="material-icons">forum</i>Historial de llamadas</a></li>
      <li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_campuses %}
+    <li><div class="subheader">Sedes</div></li>
+    <li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>
+    <li><a href="{% url 'campus-users' %}"><i class="material-icons">manage_accounts</i>Sedes por usuario</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_promoters %}

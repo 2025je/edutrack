@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Página no encontrada · EduTrack{% endblock %}
+{% block content %}
+<style>
+  .nf{text-align:center;padding:3rem 1rem}
+  .nf-code{font-size:7rem;font-weight:800;line-height:1;letter-spacing:-.05em;color:#1565c0}
+  .nf-code .o{display:inline-block;animation:nf-spin 6s linear infinite}
+  .nf-emoji{font-size:4rem;display:inline-block;animation:nf-bounce 1.6s ease-in-out infinite}
+  .nf code{padding:2px 8px;border-radius:4px;background:rgba(128,128,128,.18);word-break:break-all}
+  @keyframes nf-spin{to{transform:rotate(360deg)}}
+  @keyframes nf-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+  html[data-theme=dark] .nf-code{color:#90caf9}
+  @media (prefers-reduced-motion:reduce){.nf-code .o,.nf-emoji{animation:none}}
+</style>
+<div class="nf">
+  <div class="nf-emoji" aria-hidden="true">🕵️</div>
+  <div class="nf-code">4<span class="o">0</span>4</div>
+  <h1 style="font-size:1.8rem">¡Ups! Esta página se fue de recreo</h1>
+  <p class="muted">Buscamos por todas las aulas, pasillos y hasta en la cafetería, pero <code>{{ request.path }}</code> no aparece en ninguna lista de asistencia. 📋</p>
+  <p class="muted">Quizá el enlace está mal escrito o la página nunca se matriculó. 🎓</p>
+  <div style="margin-top:1.5rem">
+    <a class="btn" href="{% url 'dashboard' %}"><i class="material-icons left">home</i>Volver al inicio</a>
+    <a class="btn-flat blue-text" href="javascript:history.back()"><i class="material-icons left">arrow_back</i>Regresar</a>
+  </div>
+</div>
+{% endblock %}

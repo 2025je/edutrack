@@ -25,6 +25,12 @@ class User(AbstractUser):
     can_register_payments = models.BooleanField("Puede registrar pagos", default=False)
     can_manage_promoters = models.BooleanField("Puede crear promotores y cursos", default=False)
     can_manage_calls = models.BooleanField("Puede acceder a llamadas", default=False)
+    can_manage_campuses = models.BooleanField(
+        "Puede crear y editar sedes y asignarlas a usuarios", default=False
+    )
+    can_edit_call_notes = models.BooleanField(
+        "Puede editar y eliminar el historial de llamadas", default=False
+    )
 
     class Meta:
         verbose_name = "usuario"

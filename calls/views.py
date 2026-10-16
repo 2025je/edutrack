@@ -39,6 +39,8 @@ def build_phone_links(template, campus, student, courses, total):
         {
             "number": p,
             "url": f"https://api.whatsapp.com/send?phone=51{p}&text={message}",
+            "sms_url": f"sms:+51{p}?&body={message}",
+            "tel_url": f"tel:+51{p}",
         }
         for p in phones
     ]
@@ -88,10 +90,43 @@ class CallNoteListView(StudentNotesMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         student = self.get_student()
+        campus = get_selected_campus(self.request)
         context["student"] = student
-        context["notes"] = CallNote.objects.filter(
-            student=student, campus=get_selected_campus(self.request)
-        ).select_related("author")
+        context["notes"] = CallNote.objects.filter(student=student, campus=campus).select_related(
+            "author"
+        )
+        enrollments = list(
+            Enrollment.objects.filter(student=student, active=True, campus=campus)
+            .select_related("course")
+            .order_by("course__name")
+        )
+        ids = [e.pk for e in enrollments]
+        billed = dict(
+            Installment.objects.filter(enrollment__in=ids, active=True)
+            .values_list("enrollment")
+            .annotate(total=Sum("amount"))
+        )
+        paid = dict(
+            PaymentAllocation.objects.filter(
+                installment__enrollment__in=ids,
+                installment__active=True,
+                payment__status=Payment.Status.CONFIRMED,
+            )
+            .values_list("installment__enrollment")
+            .annotate(total=Sum("amount"))
+        )
+        context["courses"] = [
+            {
+                "course": e.course,
+                "enrollment_fee": e.enrollment_fee,
+                "monthly_fee": e.monthly_fee,
+                "total": billed.get(e.pk, ZERO),
+                "paid": paid.get(e.pk, ZERO),
+                "debt": max(billed.get(e.pk, ZERO) - paid.get(e.pk, ZERO), ZERO),
+            }
+            for e in enrollments
+        ]
+        context["total_debt"] = sum((c["debt"] for c in context["courses"]), ZERO)
         return context
 
 
@@ -119,6 +154,7 @@ class CallNoteCreateView(StudentNotesMixin, TemplateView):
 
 
 class CallNoteMutationMixin(StudentNotesMixin):
+    permission_field = "can_edit_call_notes"
     """Edición y eliminación de un registro de la sede seleccionada."""
 
     def get_note(self):
@@ -266,6 +302,9 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             by_student[enrollment.student_id].append(
                 {
                     "course": enrollment.course,
+                    "enrollment_fee": enrollment.enrollment_fee,
+                    "monthly_fee": enrollment.monthly_fee,
+                    "total": billed.get(enrollment.pk, ZERO),
                     "debt": max(debt, ZERO),
                     "receipts": receipts[enrollment.pk],
                 }

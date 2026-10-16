@@ -13,7 +13,9 @@ from students.models import Course, Enrollment, Student
 class CallStudentListTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede Llamadas", active=True)
-        user = User.objects.create_user(username="caja", password="x", can_manage_calls=True)
+        user = User.objects.create_user(
+            username="caja", password="x", can_manage_calls=True, can_edit_call_notes=True
+        )
         user.campuses.add(self.campus)
         self.client.force_login(user)
         session = self.client.session
@@ -153,6 +155,24 @@ class CallStudentListTests(TestCase):
             self.client.post(reverse("calls-note-delete", args=[note.pk])).status_code, 404
         )
         self.assertTrue(CallNote.objects.filter(pk=note.pk).exists())
+
+    def test_editing_notes_requires_its_own_permission(self):
+        student = Student.objects.create(campus=self.campus, full_name="Eva", phone="933333333")
+        user = User.objects.get(username="caja")
+        note = CallNote.objects.create(
+            campus=self.campus, student=student, author=user, note="Original"
+        )
+        user.can_edit_call_notes = False
+        user.save()
+        for name in ("calls-note-update", "calls-note-delete"):
+            self.assertEqual(self.client.get(reverse(name, args=[note.pk])).status_code, 403)
+        self.assertEqual(
+            self.client.post(reverse("calls-note-delete", args=[note.pk])).status_code, 403
+        )
+        self.assertTrue(CallNote.objects.filter(pk=note.pk).exists())
+        page = self.client.get(reverse("calls-notes", args=[student.pk]))
+        self.assertEqual(page.status_code, 200)
+        self.assertNotContains(page, reverse("calls-note-update", args=[note.pk]))
 
     def test_invalid_response_type_is_rejected(self):
         student = Student.objects.create(campus=self.campus, full_name="Eva", phone="933333333")

@@ -2,7 +2,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.1 AS uv-bin
 
-FROM python:3.11-slim AS dependencies
+FROM python:3.12-slim AS dependencies
 COPY --from=uv-bin /uv /uvx /bin/
 ENV UV_LINK_MODE=copy
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
@@ -11,7 +11,7 @@ COPY pyproject.toml uv.lock /app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
