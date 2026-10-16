@@ -376,6 +376,70 @@ class StudentEnrollmentCrudTests(TestCase):
         response = self.client.get(reverse("enrollment-create"), {"student": other.pk})
         self.assertNotContains(response, "Cursos en los que ya está matriculado")
 
+    def test_record_code_cannot_repeat_on_same_enrollment_date(self):
+        self.enrollment.has_record = True
+        self.enrollment.record_code = "500"
+        self.enrollment.enrollment_date = date(2026, 9, 29)
+        self.enrollment.save()
+        other = Student.objects.create(campus=self.campus, full_name="Alumno ficha repetida")
+        other_course = Course.objects.create(
+            campus=self.campus, name="Otro curso", enrollment_fee=10, monthly_fee=10
+        )
+        data = {
+            "course": other_course.pk,
+            "student": other.pk,
+            "has_record": "on",
+            "record_code": "500",
+            "promoter": [],
+            "enrollment_date": "2026-09-29",
+            "enrollment_fee": "10.00",
+            "monthly_fee": "10.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-create") + f"?student={other.pk}"
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("record_code", response.context["form"].errors)
+        self.assertFalse(Enrollment.objects.filter(student=other).exists())
+        data["enrollment_date"] = "2026-09-30"
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.assertTrue(Enrollment.objects.filter(student=other).exists())
+
+    def test_enrollment_form_defaults_to_unassigned_course_listed_first(self):
+        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
+        response = self.client.get(reverse("enrollment-create"), {"student": self.student.pk})
+        form = response.context["form"]
+        self.assertEqual(form.initial["course"], unassigned.pk)
+        self.assertEqual(form.fields["course"].queryset.first(), unassigned)
+        self.assertEqual(list(form.fields["course"].choices)[0][0].value, unassigned.pk)
+        self.assertContains(response, 'data-unassigned="true"')
+
+    def test_enrollment_in_unassigned_course_forces_zero_fees(self):
+        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
+        new_student = Student.objects.create(campus=self.campus, full_name="Alumno por asignar")
+        response = self.client.get(
+            reverse("enrollment-create"), {"student": new_student.pk, "course": unassigned.pk}
+        )
+        self.assertContains(response, 'data-unassigned="true"')
+        self.assertContains(response, "readonly")
+        response = self.client.post(
+            reverse("enrollment-create") + f"?student={new_student.pk}",
+            {
+                "course": unassigned.pk,
+                "student": new_student.pk,
+                "promoter": [],
+                "enrollment_date": "2026-09-29",
+                "enrollment_fee": "99.00",
+                "monthly_fee": "",
+                "active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        enrollment = Enrollment.objects.get(student=new_student, course=unassigned)
+        self.assertEqual(enrollment.enrollment_fee, 0)
+        self.assertEqual(enrollment.monthly_fee, 0)
+        self.assertFalse(Installment.objects.filter(enrollment=enrollment).exists())
+
     def test_enrollment_creation_saves_user_selected_date(self):
         new_student = Student.objects.create(
             campus=self.campus,
@@ -925,8 +989,10 @@ class StudentEnrollmentCrudTests(TestCase):
 
         response = self.client.get(reverse("enrollment-list"))
 
-        self.assertContains(response, "row-warning")
-        self.assertContains(response, "row-success")
+        self.assertContains(response, "debt-owed")
+        self.assertContains(response, "debt-clear")
+        self.assertNotContains(response, "row-warning")
+        self.assertNotContains(response, "row-success")
         self.assertNotContains(response, "<th>Sede</th>")
 
     def test_enrollment_list_filters_by_debt_status(self):

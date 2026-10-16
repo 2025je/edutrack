@@ -34,7 +34,7 @@
 <th><a href="{{ sort_urls.active }}">Estado{% if current_sort == "active" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th class="right-align">Acciones</th></tr></thead><tbody>
 {% for e in enrollments %}
-<tr class="{% if e.has_outstanding_debt %}row-warning{% elif e.has_no_debt %}row-success{% endif %}">
+<tr>
 	<td>{{ e.row_number }}</td>
 	<td><a href="{% url 'student-enrollment-list' e.student.pk %}">{{ e.student.full_name }}</a></td>
 	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course.name }}</a></td>
@@ -48,7 +48,7 @@
 	<td>S/ {{ e.monthly_fee|floatformat:2 }}</td>
 	<td class="strong">S/ {{ e.total_enrollment_cost|floatformat:2 }}</td>
 	<td>S/ {{ e.total_paid|floatformat:2 }}</td>
-	<td class="strong debt-cell">S/ {{ e.total_debt|floatformat:2 }}</td>
+	<td class="strong debt-cell{% if e.has_outstanding_debt %} debt-owed{% elif e.has_no_debt %} debt-clear{% endif %}">S/ {{ e.total_debt|floatformat:2 }}</td>
 	<td>
 		{% for receipt in e.payments.all %}
 			{% if user.is_superuser or user.can_register_payments %}

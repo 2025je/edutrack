@@ -270,6 +270,20 @@ class Enrollment(models.Model):
                     "record_code": "Solo se puede registrar un código de ficha si la matrícula tiene ficha."
                 }
             )
+        if self.has_record and self.campus_id and self.enrollment_date:
+            same_code = Enrollment.objects.filter(
+                campus_id=self.campus_id,
+                enrollment_date=self.enrollment_date,
+                record_code=(self.record_code or "").strip(),
+            )
+            if self.pk:
+                same_code = same_code.exclude(pk=self.pk)
+            if same_code.exists():
+                raise ValidationError(
+                    {
+                        "record_code": "Este código de ficha ya está registrado en la misma fecha de matrícula."
+                    }
+                )
         if self.student_id and self.course_id and not self.course.is_unassigned():
             duplicates = Enrollment.objects.filter(
                 student_id=self.student_id, course_id=self.course_id

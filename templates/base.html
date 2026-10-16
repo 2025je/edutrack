@@ -23,7 +23,6 @@
     table th,table td{padding:10px 8px}
     table th a{color:inherit}
     .table-wrap{overflow-x:auto}
-    .row-warning{background:#fff8e1}.row-success{background:#e8f5e9}
     .btn,.btn-small,.btn-flat{text-transform:none;letter-spacing:0}
     .btn,.btn-small{background-color:#1565c0}.btn:hover,.btn-small:hover{background-color:#0d47a1}
     .btn.green,.btn-small.green{background-color:#2e7d32}.btn.red,.btn-small.red{background-color:#c62828}
@@ -47,7 +46,9 @@
     select.browser-default:focus{outline:0;border-bottom:1px solid #1565c0}
     .check-list{border:1px solid #e0e0e0;border-radius:4px;padding:.75rem}
     .check-list label{display:block;color:#333;font-size:1rem;margin:.25rem 0}
-    .phone-row{display:flex;gap:.5rem;align-items:flex-end}.phone-row input{margin-bottom:8px}
+    .phone-row{display:flex;gap:.5rem;align-items:center;margin-bottom:8px}
+    .phone-row input{flex:1;margin:0!important;height:2.6rem!important;box-sizing:border-box}
+    .phone-row .remove-phone{flex:none;height:2.6rem!important;line-height:2.6rem!important;padding:0 14px;margin:0!important}
     .campus-logo{width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:2px;vertical-align:middle;margin-right:6px}
     .nav-btn{background:none;border:0;color:inherit;cursor:pointer;font:inherit;width:100%;text-align:left;padding:0 32px;height:48px;line-height:48px}
     .nav-btn:hover{background:rgba(0,0,0,.05)}
@@ -72,8 +73,6 @@
     html[data-theme=dark] table.striped>tbody>tr:nth-child(odd){background:#242424}
     html[data-theme=dark] table.highlight>tbody>tr:hover{background:#2c2c2c}
     html[data-theme=dark] tr,html[data-theme=dark] thead{border-bottom-color:#333}
-    html[data-theme=dark] .row-warning{background:#3e3410}
-    html[data-theme=dark] .row-success{background:#1b3a1f}
     html[data-theme=dark] .muted,html[data-theme=dark] .help{color:#9e9e9e}
     html[data-theme=dark] .danger,html[data-theme=dark] .field-error{color:#ef9a9a}
     html[data-theme=dark] .success{color:#a5d6a7}
@@ -107,9 +106,6 @@
     html[data-theme=dark] table thead th{color:#b0bec5;background:#1d212a;font-weight:600}
     html[data-theme=dark] table tbody tr{border-bottom:1px solid #262b36}
     html[data-theme=dark] table.highlight>tbody>tr:hover{background:#222733}
-    html[data-theme=dark] .row-warning{background:#3a3114}
-    html[data-theme=dark] .row-success{background:#17301d}
-    html[data-theme=dark] .row-warning:hover,html[data-theme=dark] .row-success:hover{filter:brightness(1.25)}
     html[data-theme=dark] input:not([type]),html[data-theme=dark] input[type=text],html[data-theme=dark] input[type=number],html[data-theme=dark] input[type=date],html[data-theme=dark] input[type=search],html[data-theme=dark] input[type=password],html[data-theme=dark] input[type=email],html[data-theme=dark] textarea,html[data-theme=dark] select.browser-default{background:#12151b;border:1px solid #303644;border-radius:4px;padding:0 10px;height:2.6rem;box-sizing:border-box;margin-bottom:12px;color:#e8eaed}
     html[data-theme=dark] textarea{height:auto;padding:8px 10px}
     html[data-theme=dark] input:focus:not([readonly]),html[data-theme=dark] textarea:focus:not([readonly]),html[data-theme=dark] select.browser-default:focus{border:1px solid #64b5f6!important;box-shadow:0 0 0 2px rgba(100,181,246,.25)!important;outline:0}
@@ -513,22 +509,10 @@
     main .btn-small.icon-only{width:34px;height:34px;min-height:34px;padding:0;border-radius:4px}
     main .btn-small.icon-only i.material-icons{font-size:1.15rem}
     main .btn-small.action-btn{display:inline-flex;align-items:center;gap:.3rem;height:34px;line-height:1;padding:0 10px;border-radius:4px;white-space:nowrap}
-    tr.row-warning>td{background:#fdecea}
-    tr.row-success>td{background:#eaf6ec}
-    tr.row-warning>td:first-child{box-shadow:inset 4px 0 0 #d32f2f}
-    tr.row-success>td:first-child{box-shadow:inset 4px 0 0 #2e7d32}
-    tr.row-warning>td.debt-cell{color:#b71c1c}
-    tr.row-success>td.debt-cell{color:#1b5e20}
-    tr.row-warning:hover>td{background:#fadbd8}
-    tr.row-success:hover>td{background:#d9eedc}
-    html[data-theme=dark] tr.row-warning>td{background:#3b1f22}
-    html[data-theme=dark] tr.row-success>td{background:#17301d}
-    html[data-theme=dark] tr.row-warning>td:first-child{box-shadow:inset 4px 0 0 #ef5350}
-    html[data-theme=dark] tr.row-success>td:first-child{box-shadow:inset 4px 0 0 #66bb6a}
-    html[data-theme=dark] tr.row-warning>td.debt-cell{color:#ef9a9a}
-    html[data-theme=dark] tr.row-success>td.debt-cell{color:#a5d6a7}
-    html[data-theme=dark] tr.row-warning:hover>td{background:#4a272b}
-    html[data-theme=dark] tr.row-success:hover>td{background:#1f3d26}
+    td.debt-cell.debt-owed{color:#b71c1c}
+    td.debt-cell.debt-clear{color:#1b5e20}
+    html[data-theme=dark] td.debt-cell.debt-owed{color:#ef9a9a}
+    html[data-theme=dark] td.debt-cell.debt-clear{color:#a5d6a7}
     main .btn-small.action-btn i.material-icons{margin:0;color:#fff;font-size:1.15rem;line-height:1;height:auto}
     td .flex.gap{flex-wrap:wrap}
     main .btn-flat.btn-small{min-height:32px;height:auto}

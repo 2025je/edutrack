@@ -265,9 +265,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
             const registrationFee = option.dataset.registrationFee;
             const monthlyFeeValue = option.dataset.monthlyFee;
+            const isUnassigned = option.dataset.unassigned === "true";
 
-            if (registrationFee !== undefined) enrollmentFee.value = registrationFee;
-            if (monthlyFeeValue !== undefined) monthlyFee.value = monthlyFeeValue;
+            enrollmentFee.readOnly = isUnassigned;
+            monthlyFee.readOnly = isUnassigned;
+            if (isUnassigned) {
+                enrollmentFee.value = "0";
+                monthlyFee.value = "0";
+            } else {
+                if (registrationFee !== undefined) enrollmentFee.value = registrationFee;
+                if (monthlyFeeValue !== undefined) monthlyFee.value = monthlyFeeValue;
+            }
 
             if (capacityAlert) {
                 const capacity = Number(option.dataset.capacity);

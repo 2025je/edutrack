@@ -59,14 +59,23 @@ class StudentListView(CampusScopedMixin, ListView):
     }
 
     def get_queryset(self):
+        unassigned_course = Q(
+            enrollments__course__name=UNASSIGNED_COURSE_NAME,
+            enrollments__course__schedule=UNASSIGNED_SCHEDULE_NAME,
+        )
         qs = self.campus_queryset(
             Student.objects.select_related("campus")
             .annotate(
                 enrollment_count=Count(
                     "enrollments",
-                    filter=Q(enrollments__active=True),
+                    filter=Q(enrollments__active=True) & ~unassigned_course,
                     distinct=True,
-                )
+                ),
+                unassigned_count=Count(
+                    "enrollments",
+                    filter=Q(enrollments__active=True) & unassigned_course,
+                    distinct=True,
+                ),
             )
             .order_by("full_name", "pk")
         )

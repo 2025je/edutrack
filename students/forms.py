@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from .models import (
     DEFAULT_PROMOTER_NAMES,
@@ -15,8 +18,9 @@ from core.campus import get_selected_campus
 
 
 class CourseSelectWidget(forms.Select):
-    def __init__(self, course_prices=None, *args, **kwargs):
+    def __init__(self, course_prices=None, unassigned_ids=None, *args, **kwargs):
         self.course_prices = course_prices or {}
+        self.unassigned_ids = unassigned_ids or {}
         super().__init__(*args, **kwargs)
 
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
@@ -30,6 +34,7 @@ class CourseSelectWidget(forms.Select):
             option["attrs"]["data-monthly-fee"] = "" if monthly is None else str(monthly)
             option["attrs"]["data-capacity"] = "" if capacity is None else str(capacity)
             option["attrs"]["data-enrolled-count"] = str(enrolled_count)
+            option["attrs"]["data-unassigned"] = "true" if self.unassigned_ids.get(key) else "false"
         return option
 
 
@@ -186,7 +191,25 @@ class EnrollmentForm(forms.ModelForm):
                     )
                     .values_list("course_id", flat=True)
                 )
+            # POR ASIGNAR siempre aparece primero y es el valor por defecto al crear.
+            course_queryset = course_queryset.annotate(
+                is_not_unassigned=models.Case(
+                    models.When(
+                        name=UNASSIGNED_COURSE_NAME,
+                        schedule=UNASSIGNED_SCHEDULE_NAME,
+                        then=0,
+                    ),
+                    default=1,
+                    output_field=models.IntegerField(),
+                )
+            ).order_by("is_not_unassigned", "name", "schedule", "group")
             self.fields["course"].queryset = course_queryset
+            if not self.instance.pk:
+                default_course = course_queryset.filter(is_not_unassigned=0).first()
+                if default_course:
+                    self.fields["course"].empty_label = None
+                    if not self.is_bound and not self.initial.get("course"):
+                        self.initial["course"] = default_course.pk
         else:
             self.fields["course"].queryset = Course.objects.none()
 
@@ -254,6 +277,7 @@ class EnrollmentForm(forms.ModelForm):
             )
         self.fields["course"].widget = CourseSelectWidget(
             course_prices=course_info,
+            unassigned_ids={str(c.pk): c.is_unassigned() for c in courses},
             choices=self.fields["course"].choices,
         )
         # self.fields["course"].widget = CourseSelectWidget(course_info)
@@ -261,11 +285,42 @@ class EnrollmentForm(forms.ModelForm):
             self.fields["enrollment_fee"].initial = selected_course.enrollment_fee
             self.fields["monthly_fee"].initial = selected_course.monthly_fee
 
+        # Con POR ASIGNAR los costos son siempre 0 (se validan manualmente en el resto de cursos).
+        self.fee_fields = ("enrollment_fee", "monthly_fee")
+        for name in self.fee_fields:
+            field = self.fields[name]
+            field.validators = [v for v in field.validators if not isinstance(v, MinValueValidator)]
+        self.selected_is_unassigned = bool(selected_course and selected_course.is_unassigned())
+        if self.selected_is_unassigned:
+            if self.is_bound:
+                self.data = self.data.copy()
+                for name in self.fee_fields:
+                    self.data[self.add_prefix(name)] = "0"
+            else:
+                for name in self.fee_fields:
+                    self.initial[name] = Decimal("0")
+                    self.fields[name].initial = Decimal("0")
+            for name in self.fee_fields:
+                self.fields[name].widget.attrs["readonly"] = True
+
+    def _get_validation_exclusions(self):
+        exclude = super()._get_validation_exclusions()
+        exclude.update(self.fee_fields)
+        return exclude
+
     def clean(self):
         cleaned = super().clean()
         student = cleaned.get("student")
         course = cleaned.get("course")
         campus = self.selected_campus
+        if course and course.is_unassigned():
+            for name in self.fee_fields:
+                cleaned[name] = Decimal("0")
+        else:
+            for name in self.fee_fields:
+                value = cleaned.get(name)
+                if value is not None and value < Decimal("0.01"):
+                    self.add_error(name, "El valor debe ser mayor a 0.")
         promoters = cleaned.get("promoter")
         if promoters and len(promoters) > 1:
             if any(p.name in DEFAULT_PROMOTER_NAMES for p in promoters):
@@ -285,4 +340,17 @@ class EnrollmentForm(forms.ModelForm):
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists() and not course.is_unassigned():
                 self.add_error("course", "Este estudiante ya está matriculado en este curso.")
+        record_code = (cleaned.get("record_code") or "").strip()
+        enrollment_date = cleaned.get("enrollment_date")
+        if cleaned.get("has_record") and record_code and enrollment_date:
+            same_code = Enrollment.objects.filter(
+                campus=campus, enrollment_date=enrollment_date, record_code=record_code
+            )
+            if self.instance.pk:
+                same_code = same_code.exclude(pk=self.instance.pk)
+            if same_code.exists():
+                self.add_error(
+                    "record_code",
+                    "Este código de ficha ya está registrado en la misma fecha de matrícula.",
+                )
         return cleaned
