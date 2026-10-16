@@ -18,10 +18,9 @@ urlpatterns = [
     path("sedes/seleccionar/", select_campus, name="select-campus"),
     path("", DashboardView.as_view(), name="dashboard"),
     path("estudiantes/", include("students.urls")),
-    path("catalogo/", include("catalog.urls")),
     path("pagos/", include("payments.urls")),
     path("llamadas/", include("calls.urls")),
-    path("sedes/", include("sedes.urls")),
+    path("", include("management.urls")),
 ]
 
 if settings.DEBUG:

@@ -591,26 +591,27 @@
      <li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
+    {% if user.is_superuser or user.can_manage_campuses or user.can_manage_promoters or user.can_manage_users or user.is_staff %}
+    <li><div class="subheader">Gestión</div></li>
     {% if user.is_superuser or user.can_manage_campuses %}
-    <li><div class="subheader">Sedes</div></li>
     <li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>
     <li><a href="{% url 'campus-users' %}"><i class="material-icons">manage_accounts</i>Sedes por usuario</a></li>
-    <li><div class="divider"></div></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_promoters %}
-    <li><div class="subheader">Catálogo</div></li>
     <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
     <li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_users %}
+    <li><a href="{% url 'user-create' %}"><i class="material-icons">person_add</i>Nuevo usuario</a></li>
+    {% endif %}
+    {% if user.is_staff %}
+    <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
+    {% endif %}
     <li><div class="divider"></div></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_students or user.can_register_payments %}
     <li><div class="subheader">Herramientas</div></li>
     <li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_staff %}
-    <li><div class="subheader">Administración</div></li>
-    <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
       </ul>

@@ -28,13 +28,24 @@ class User(AbstractUser):
     can_manage_campuses = models.BooleanField(
         "Puede crear y editar sedes y asignarlas a usuarios", default=False
     )
+    can_manage_users = models.BooleanField("Puede crear usuarios", default=False)
     can_edit_call_notes = models.BooleanField(
         "Puede editar y eliminar el historial de llamadas", default=False
     )
 
+    # Los usuarios se identifican solo por su nombre de usuario.
+    first_name = None
+    last_name = None
+
     class Meta:
         verbose_name = "usuario"
         verbose_name_plural = "usuarios"
+
+    def get_full_name(self):
+        return self.username
+
+    def get_short_name(self):
+        return self.username
 
     def can_access_campus(self, campus):
         return self.is_superuser or self.campuses.filter(pk=campus.pk, active=True).exists()

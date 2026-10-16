@@ -1,12 +1,12 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Q
+from django.db.models import Case, Count, IntegerField, Q, When
 from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
-from django.views.generic import TemplateView, UpdateView
+from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
-from django.db.models import Case, IntegerField, When
+from core.models import Campus, User
 from students.models import (
     UNASSIGNED_COURSE_NAME,
     UNASSIGNED_SCHEDULE_NAME,
@@ -15,15 +15,110 @@ from students.models import (
     Schedule,
 )
 
-from .forms import CourseForm, CourseStartDateForm, PromoterForm, ScheduleForm
+from .forms import (
+    CampusForm,
+    CourseForm,
+    CourseStartDateForm,
+    PromoterForm,
+    ScheduleForm,
+    UserCampusesForm,
+    UserCreateForm,
+)
+
+
+class CampusManagementMixin(FeaturePermissionMixin):
+    permission_field = "can_manage_campuses"
 
 
 class CatalogManagerMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin):
     permission_field = "can_manage_promoters"
 
 
+# Sedes
+
+
+class CampusListView(CampusManagementMixin, ListView):
+    template_name = "management/campus_list.html"
+    context_object_name = "campuses"
+
+    def get_queryset(self):
+        return Campus.objects.annotate(users_count=Count("users", distinct=True))
+
+
+class CampusCreateView(CampusManagementMixin, CreateView):
+    model = Campus
+    form_class = CampusForm
+    template_name = "management/campus_form.html"
+    success_url = reverse_lazy("campus-list")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Sede creada correctamente.")
+        return super().form_valid(form)
+
+
+class CampusUpdateView(CampusManagementMixin, UpdateView):
+    model = Campus
+    form_class = CampusForm
+    template_name = "management/campus_form.html"
+    success_url = reverse_lazy("campus-list")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Sede actualizada correctamente.")
+        return super().form_valid(form)
+
+
+class CampusUserListView(CampusManagementMixin, ListView):
+    template_name = "management/campus_users.html"
+    context_object_name = "users"
+    paginate_by = 25
+
+    def get_queryset(self):
+        users = User.objects.filter(is_superuser=False).prefetch_related("campuses")
+        q = self.request.GET.get("q", "").strip()
+        if q:
+            users = users.filter(username__icontains=q)
+        return users.order_by("username")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["q"] = self.request.GET.get("q", "").strip()
+        return context
+
+
+class CampusUserUpdateView(CampusManagementMixin, UpdateView):
+    form_class = UserCampusesForm
+    template_name = "management/campus_user_form.html"
+    context_object_name = "target_user"
+    success_url = reverse_lazy("campus-users")
+
+    # Los superusuarios ven todas las sedes y no se administran desde aquí.
+    queryset = User.objects.filter(is_superuser=False)
+
+    def form_valid(self, form):
+        messages.success(self.request, "Sedes del usuario actualizadas.")
+        return super().form_valid(form)
+
+
+# Usuarios
+
+
+class UserCreateView(FeaturePermissionMixin, CreateView):
+    permission_field = "can_manage_users"
+    form_class = UserCreateForm
+    template_name = "management/user_form.html"
+    success_url = reverse_lazy("user-create")
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f"Usuario «{self.object.username}» creado.")
+        return response
+
+
+# Catálogo
+
+
 class CourseCreateView(CatalogManagerMixin, TemplateView):
-    template_name = "catalog/courses.html"
+    template_name = "management/courses.html"
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -57,7 +152,7 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
 
 
 class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
-    template_name = "catalog/course_edit.html"
+    template_name = "management/course_edit.html"
     form_class = CourseStartDateForm
     success_url = reverse_lazy("course-list")
 
@@ -73,7 +168,7 @@ class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
 
 
 class ScheduleCreateView(CatalogManagerMixin, TemplateView):
-    template_name = "catalog/schedule_form.html"
+    template_name = "management/schedule_form.html"
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -91,7 +186,7 @@ class ScheduleCreateView(CatalogManagerMixin, TemplateView):
 
 
 class PromoterView(CatalogManagerMixin, TemplateView):
-    template_name = "catalog/promoters.html"
+    template_name = "management/promoters.html"
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)

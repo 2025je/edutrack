@@ -1,7 +1,94 @@
 from django import forms
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
+from core.models import Campus, User
 from students.models import UNASSIGNED_SCHEDULE_NAME, Course, Promoter, Schedule
+
+PERMISSION_FIELDS = [
+    "can_manage_students",
+    "can_register_payments",
+    "can_manage_promoters",
+    "can_manage_calls",
+    "can_edit_call_notes",
+    "can_manage_campuses",
+    "can_manage_users",
+]
+
+
+class CampusForm(forms.ModelForm):
+    class Meta:
+        model = Campus
+        fields = ["name", "address", "logo", "active"]
+
+    def clean_name(self):
+        name = self.cleaned_data["name"].strip()
+        if Campus.objects.filter(name__iexact=name).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("Ya existe una sede con ese nombre.")
+        return name
+
+
+class UserCampusesForm(forms.ModelForm):
+    campuses = forms.ModelMultipleChoiceField(
+        label="Sedes asignadas",
+        queryset=Campus.objects.all(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = User
+        fields = ["campuses"]
+
+
+class UserCreateForm(forms.ModelForm):
+    password1 = forms.CharField(
+        label="Contraseña",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    password2 = forms.CharField(
+        label="Confirmar contraseña",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    campuses = forms.ModelMultipleChoiceField(
+        label="Sedes que puede manejar",
+        queryset=Campus.objects.all(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = User
+        fields = ["username", *PERMISSION_FIELDS]
+        labels = {"username": "Nombre de usuario"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.permission_fields = [self[name] for name in PERMISSION_FIELDS]
+
+    def clean(self):
+        cleaned = super().clean()
+        password1, password2 = cleaned.get("password1"), cleaned.get("password2")
+        if password1 and password2:
+            if password1 != password2:
+                self.add_error("password2", "Las contraseñas no coinciden.")
+            else:
+                user = User(username=cleaned.get("username", ""))
+                try:
+                    validate_password(password1, user)
+                except ValidationError as error:
+                    self.add_error("password1", error)
+        return cleaned
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.set_password(self.cleaned_data["password1"])
+        if commit:
+            user.save()
+            user.campuses.set(self.cleaned_data["campuses"])
+        return user
 
 
 class CourseForm(forms.ModelForm):

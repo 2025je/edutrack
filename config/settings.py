@@ -31,7 +31,7 @@ INSTALLED_APPS = [
     "students",
     "payments",
     "calls",
-    "sedes",
+    "management",
 ]
 if DEBUG:
     INSTALLED_APPS.append("debug_toolbar")

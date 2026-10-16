@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
 
-class SedesConfig(AppConfig):
+class ManagementConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "sedes"
+    name = "management"
+    verbose_name = "Gestión"

@@ -16,7 +16,21 @@ class CampusAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    fieldsets = BaseUserAdmin.fieldsets + (
+    fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        (
+            "Permisos",
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
+        ("Fechas importantes", {"fields": ("last_login", "date_joined")}),
         (
             "Acceso al sistema",
             {
@@ -28,6 +42,7 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_calls",
                     "can_edit_call_notes",
                     "can_manage_campuses",
+                    "can_manage_users",
                 )
             },
         ),
@@ -44,21 +59,22 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_calls",
                     "can_edit_call_notes",
                     "can_manage_campuses",
+                    "can_manage_users",
                 )
             },
         ),
     )
     filter_horizontal = ("groups", "user_permissions", "campuses")
+    search_fields = ("username", "email")
     list_display = (
         "username",
-        "first_name",
-        "last_name",
         "can_manage_students",
         "can_register_payments",
         "can_manage_promoters",
         "can_manage_calls",
         "can_edit_call_notes",
         "can_manage_campuses",
+        "can_manage_users",
         "is_staff",
         "is_active",
     )
