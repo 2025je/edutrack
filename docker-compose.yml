@@ -5,6 +5,7 @@ services:
   db:
     image: postgres:15-alpine
     container_name: postgres_db
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -36,6 +37,7 @@ services:
   web:
     build: .
     container_name: django_app
+    restart: unless-stopped
     command: sh -c "python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -"
     env_file:
       - .env
@@ -57,6 +59,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx
+    restart: unless-stopped
     ports:
       - "0.0.0.0:8080:80"
     volumes:
