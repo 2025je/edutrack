@@ -10,7 +10,7 @@ from django.utils import timezone
 from core.models import Campus, User
 from payments.forms import PaymentForm, PaymentUpdateForm
 from payments.models import Installment, Payment, PaymentAllocation
-from students.models import Course, Enrollment, Student
+from students.models import Course, Enrollment, Ficha, Student
 
 
 class PaymentCrudTests(TestCase):
@@ -394,6 +394,33 @@ class PaymentCrudTests(TestCase):
         self.assertEqual(len(rows({"debt_min": "100000"})), 0)
         self.assertEqual(len(rows({"date_from": "2999-01-01"})), 0)
         self.assertEqual(len(rows({"ficha": "abc"})), 0)
+
+    def test_global_search_finds_students_fichas_and_receipts(self):
+        Ficha.objects.create(
+            enrollment=self.enrollment,
+            campus=self.campus,
+            date=self.enrollment.enrollment_date,
+            code=777,
+        )
+        url = reverse("global-search")
+        by_name = self.client.get(url, {"q": "alumno para"})
+        self.assertContains(by_name, "ALUMNO PARA PAGO")
+        by_ficha = self.client.get(url, {"q": "777"})
+        self.assertEqual([f.code for f in by_ficha.context["fichas"]], [777])
+        by_receipt = self.client.get(url, {"q": "d1"})
+        self.assertEqual([p.pk for p in by_receipt.context["payments"]], [self.payment.pk])
+        self.assertContains(self.client.get(url, {"q": "zzzz"}), "No se encontraron resultados")
+
+    def test_global_search_hides_sections_without_permission(self):
+        self.user.can_register_payments = False
+        self.user.save()
+        response = self.client.get(reverse("global-search"), {"q": "D1"})
+        self.assertEqual(response.context["payments"], [])
+
+    def test_global_search_requires_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("global-search"), {"q": "x"})
+        self.assertEqual(response.status_code, 302)
 
     def test_select_view_lists_pending_enrollments_with_pay_column(self):
         response = self.client.get(reverse("payment-create"))

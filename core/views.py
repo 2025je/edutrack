@@ -1,7 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.shortcuts import render, redirect
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import TemplateView
@@ -117,3 +117,47 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         if user.is_superuser or user.can_manage_users:
             ctx["user_count"] = User.objects.filter(is_active=True).count()
         return ctx
+
+
+class GlobalSearchView(LoginRequiredMixin, TemplateView):
+    template_name = "core/search.html"
+    limit = 15
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and get_selected_campus(request) is None:
+            return redirect("select-campus")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        from students.models import Ficha
+
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        campus = get_selected_campus(self.request)
+        q = self.request.GET.get("q", "").strip()[:80]
+        can_students = user.is_superuser or user.can_manage_students
+        can_payments = user.is_superuser or user.can_register_payments
+        context.update(q=q, can_students=can_students, can_payments=can_payments)
+        students = fichas = payments = []
+        if q:
+            if can_students:
+                students = list(
+                    Student.objects.filter(campus=campus)
+                    .filter(Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q))
+                    .order_by("full_name")[: self.limit]
+                )
+                if q.isdigit():
+                    fichas = list(
+                        Ficha.objects.filter(campus=campus, code=int(q))
+                        .select_related("enrollment__student", "enrollment__course")
+                        .order_by("-date")[: self.limit]
+                    )
+            if can_payments:
+                payments = list(
+                    Payment.objects.filter(campus=campus, receipt_number__icontains=q)
+                    .select_related("enrollment__student")
+                    .order_by("-created_at")[: self.limit]
+                )
+        context.update(students=students, fichas=fichas, payments=payments)
+        context["total"] = len(students) + len(fichas) + len(payments)
+        return context

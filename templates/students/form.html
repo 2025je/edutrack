@@ -147,7 +147,7 @@
 
                             {% if field.name == "record_image" %}
                                 <div id="record-image-preview" class="mt" {% if not object.ficha.image %}style="display:none"{% endif %}>
-                                    <img id="record-image-preview-img" alt="Vista previa de la ficha" src="{% if object.ficha.image %}{{ object.ficha.image.url }}{% endif %}" style="max-width:100%;max-height:260px;border:1px solid #ccc;border-radius:4px;display:block">
+                                    <img id="record-image-preview-img" data-zoom title="Clic para ampliar" alt="Vista previa de la ficha" src="{% if object.ficha.image %}{{ object.ficha.image.url }}{% endif %}" style="max-width:100%;max-height:260px;border:1px solid #ccc;border-radius:4px;display:block">
                                     <div id="record-image-preview-info" class="help"></div>
                                 </div>
                             {% endif %}

@@ -50,7 +50,7 @@
 	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course.name }}</a></td>
 	<td>{{ e.course.schedule }}</td>
 	<td>{{ e.course.group }}</td>
-	<td>{{ e.record_code|default:"—" }}{% if e.ficha.image %} <a href="{{ e.ficha.image.url }}" target="_blank" rel="noopener" title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td>
+	<td>{{ e.record_code|default:"—" }}{% if e.ficha.image %} <a href="{{ e.ficha.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td>
 	<td>{% for promoter in e.promoter.all %}<a href="{% url 'enrollment-list' %}?promoter_id={{ promoter.pk }}">{{ promoter.name }}</a>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
 	<td><a href="{% url 'enrollment-list' %}?enrollment_date={{ e.enrollment_date|date:'Y-m-d' }}">{{ e.enrollment_date|date:"d/m/Y" }}</a></td>
 	<td>{{ e.course.start_date_display }}</td>
@@ -75,7 +75,7 @@
 		<div class="flex gap" style="justify-content:flex-end">
 			{% if user.is_superuser or user.can_register_payments %}
 				{% if e.pk in payable_enrollment_ids %}
-				<a class="btn-small action-btn green darken-1" href="{% url 'payment-create' %}?enrollment={{ e.pk }}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
+				<a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
 				{% endif %}
 			{% endif %}
 			<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula"><i class="material-icons" aria-hidden="true">edit</i>Editar</a>

@@ -770,12 +770,16 @@ class StudentEnrollmentCrudTests(TestCase):
             response,
             f'href="{reverse("payment-create")}?student={self.student.pk}"',
         )
+        self.assertContains(
+            response,
+            f'href="{reverse("enrollment-create")}?student={self.student.pk}"',
+        )
         self.assertContains(response, 'aria-label="Editar estudiante"')
         self.assertContains(response, 'aria-label="Dar de baja estudiante"')
         response = self.client.get(reverse("enrollment-list"))
         self.assertContains(
             response,
-            f'href="{reverse("payment-create")}?enrollment={self.enrollment.pk}"',
+            f'href="{reverse("payment-create-for", args=[self.enrollment.pk])}"',
         )
         self.assertContains(response, 'aria-label="Pagar matrícula"')
         self.assertContains(response, 'aria-label="Editar matrícula"')

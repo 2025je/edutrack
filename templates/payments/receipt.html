@@ -11,7 +11,7 @@
 <div class="mt"><small class="muted">Cajero</small><div>{{ payment.cashier.get_full_name|default:payment.cashier.username }}</div></div>
 {% if payment.reference %}<div class="mt"><small class="muted">Referencia</small><div>{{ payment.reference }}</div></div>{% endif %}
 {% if payment.notes %}<div class="mt"><small class="muted">Observaciones</small><div>{{ payment.notes }}</div></div>{% endif %}
-{% if payment.voucher %}<div class="mt no-print"><small class="muted">Voucher</small><div><a href="{{ payment.voucher.url }}" target="_blank" rel="noopener"><img src="{{ payment.voucher.url }}" alt="Voucher del pago" style="max-width:100%;max-height:320px;border:1px solid #ccc;border-radius:4px"></a></div></div>{% endif %}
+{% if payment.voucher %}<div class="mt no-print"><small class="muted">Voucher</small><div><a href="{{ payment.voucher.url }}" data-zoom title="Ampliar voucher"><img src="{{ payment.voucher.url }}" alt="Voucher del pago" style="max-width:100%;max-height:320px;border:1px solid #ccc;border-radius:4px"></a></div></div>{% endif %}
 <div class="center-align small muted" style="border-top:1px solid #e0e0e0;margin-top:2.5rem;padding-top:1rem">Documento interno de control. No constituye comprobante de pago tributario autorizado por SUNAT.</div>
 </div></div></div>
 {% endblock %}

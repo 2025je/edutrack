@@ -347,6 +347,26 @@
     html[data-theme=dark] main .card{background:#20232b;border-color:#343946;box-shadow:0 1px 3px rgba(0,0,0,.2)}
     html[data-theme=dark] main form.row:not(.mb-0){background:#1d2027;border-color:#343946}
     html[data-theme=dark] main form label,html[data-theme=dark] main .field label{color:#c4cbd7}
+    .header-search form{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.18);border-radius:20px;padding:0 12px;height:38px;margin:0 .5rem}
+    .header-search i{color:#fff;font-size:1.2rem;height:auto;line-height:1}
+    header nav .header-search input[type=search]{margin:0;border:0!important;box-shadow:none!important;height:38px;width:230px;color:#fff;font-size:.9rem;background:transparent}
+    header nav .header-search input[type=search]::placeholder{color:rgba(255,255,255,.75)}
+    @media only screen and (max-width:1200px){header nav .header-search input[type=search]{width:130px}}
+    .saved-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 1rem}
+    .saved-filters select{width:auto;min-width:180px;display:block;margin:0}
+    .saved-filters .chip-label{font-size:.85rem;opacity:.75}
+    th[data-sortable]{cursor:pointer;user-select:none}
+    th[data-sortable]::after{content:"\2195";margin-left:4px;opacity:.35;font-size:.8em}
+    th[data-sortable][aria-sort=ascending]::after{content:"\25B2";opacity:1}
+    th[data-sortable][aria-sort=descending]::after{content:"\25BC";opacity:1}
+    [data-zoom]{cursor:zoom-in}
+    #lightbox{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.88);display:none;flex-direction:column}
+    #lightbox.open{display:flex}
+    #lightbox .lb-bar{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px}
+    #lightbox .lb-bar button,#lightbox .lb-bar a{background:rgba(255,255,255,.15);border:0;color:#fff;border-radius:6px;height:38px;min-width:38px;padding:0 10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+    #lightbox .lb-bar button:hover,#lightbox .lb-bar a:hover{background:rgba(255,255,255,.3)}
+    #lightbox .lb-stage{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+    #lightbox .lb-stage img{max-width:92vw;max-height:84vh;transform-origin:center;cursor:grab;user-select:none;-webkit-user-drag:none;background:#fff}
     .has-title-icon{display:flex!important;align-items:center;gap:10px}
     .title-icon{width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:rgba(33,150,243,.14);color:#1e88e5;flex:none}
     .title-icon .material-icons{font-size:20px;line-height:1}
@@ -585,7 +605,7 @@
       {% if user.is_authenticated %}<a href="#" data-target="slide-out" class="sidenav-trigger" aria-label="Abrir menú"><i class="material-icons">menu</i></a>{% endif %}
       <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}"><img src="{% static 'img/logo.svg' %}" alt="" width="36" height="36" style="margin-right:10px">EduTrack</a>
       <ul class="right">
-      {% if user.is_authenticated and selected_campus %}<li class="header-campus hide-on-small-only"><form method="post" action="{% url 'select-campus' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><details class="campus-menu"><summary aria-label="Cambiar de sede">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }}</span><i class="material-icons" aria-hidden="true">arrow_drop_down</i></summary><ul class="campus-options">{% for campus in available_campuses %}<li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{% if campus.logo %}<img class="campus-logo" src="{{ campus.logo.url }}" alt="">{% else %}<span class="campus-logo-empty"></span>{% endif %}{{ campus.name }}</button></li>{% endfor %}</ul></details></form></li>{% endif %}
+      {% if user.is_authenticated and selected_campus %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}      {% if user.is_authenticated and selected_campus %}<li class="header-campus hide-on-small-only"><form method="post" action="{% url 'select-campus' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><details class="campus-menu"><summary aria-label="Cambiar de sede">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }}</span><i class="material-icons" aria-hidden="true">arrow_drop_down</i></summary><ul class="campus-options">{% for campus in available_campuses %}<li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{% if campus.logo %}<img class="campus-logo" src="{{ campus.logo.url }}" alt="">{% else %}<span class="campus-logo-empty"></span>{% endif %}{{ campus.name }}</button></li>{% endfor %}</ul></details></form></li>{% endif %}
             <li class="header-user hide-on-med-and-down"><span title="Fecha actual"><i class="material-icons" aria-hidden="true">calendar_today</i>{% now "d/m/Y" %}</span></li>
             {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
             <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
@@ -597,6 +617,7 @@
   <ul id="slide-out" class="sidenav sidenav-fixed">
     <li class="sidenav-spacer" aria-hidden="true"></li>
     <li><a href="{% url 'dashboard' %}"><i class="material-icons">dashboard</i>Inicio</a></li>
+    <li class="hide-on-med-and-up"><a href="{% url 'global-search' %}"><i class="material-icons">search</i>Buscar</a></li>
     <li><div class="divider"></div></li>
     {% if user.is_superuser or user.can_manage_students %}
     <li><div class="subheader">Académico</div></li>
@@ -681,6 +702,110 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     setup();window.addEventListener("resize",setup);
     document.addEventListener("live-filter:updated",setup);
+  })();
+  (function(){
+    var lb=document.createElement("div");lb.id="lightbox";lb.setAttribute("role","dialog");lb.setAttribute("aria-label","Vista ampliada");
+    lb.innerHTML='<div class="lb-bar"><button type="button" data-a="out" aria-label="Alejar"><i class="material-icons">zoom_out</i></button><button type="button" data-a="in" aria-label="Acercar"><i class="material-icons">zoom_in</i></button><button type="button" data-a="reset" aria-label="Restablecer"><i class="material-icons">fit_screen</i></button><a data-a="open" target="_blank" rel="noopener" aria-label="Abrir en otra pesta\u00f1a"><i class="material-icons">open_in_new</i></a><button type="button" data-a="close" aria-label="Cerrar"><i class="material-icons">close</i></button></div><div class="lb-stage"><img alt="Imagen ampliada"></div>';
+    document.body.appendChild(lb);
+    var img=lb.querySelector("img"),stage=lb.querySelector(".lb-stage"),open=lb.querySelector('[data-a=open]');
+    var scale=1,x=0,y=0,drag=null;
+    function paint(){img.style.transform="translate("+x+"px,"+y+"px) scale("+scale+")";}
+    function zoom(f){scale=Math.min(8,Math.max(1,scale*f));if(scale===1){x=0;y=0;}paint();}
+    function show(src){scale=1;x=0;y=0;paint();img.src=src;open.href=src;lb.classList.add("open");document.body.style.overflow="hidden";}
+    function hide(){lb.classList.remove("open");document.body.style.overflow="";img.removeAttribute("src");}
+    document.addEventListener("click",function(e){
+      var el=e.target.closest("[data-zoom]");
+      if(el&&!lb.contains(el)){var src=el.getAttribute("href")||el.currentSrc||el.src;if(src){e.preventDefault();show(src);}return;}
+      var b=e.target.closest("#lightbox [data-a]");
+      if(b){var a=b.dataset.a;if(a==="in")zoom(1.4);else if(a==="out")zoom(1/1.4);else if(a==="reset"){scale=1;x=0;y=0;paint();}else if(a==="close")hide();return;}
+      if(e.target===lb||e.target===stage)hide();
+    });
+    document.addEventListener("keydown",function(e){
+      if(!lb.classList.contains("open"))return;
+      if(e.key==="Escape")hide();else if(e.key==="+"||e.key==="=")zoom(1.4);else if(e.key==="-")zoom(1/1.4);
+    });
+    stage.addEventListener("wheel",function(e){e.preventDefault();zoom(e.deltaY<0?1.2:1/1.2);},{passive:false});
+    img.addEventListener("dblclick",function(){if(scale>1){scale=1;x=0;y=0;}else scale=2.5;paint();});
+    img.addEventListener("pointerdown",function(e){if(scale<=1)return;drag={px:e.clientX,py:e.clientY,x:x,y:y};img.setPointerCapture(e.pointerId);img.style.cursor="grabbing";});
+    img.addEventListener("pointermove",function(e){if(!drag)return;x=drag.x+e.clientX-drag.px;y=drag.y+e.clientY-drag.py;paint();});
+    img.addEventListener("pointerup",function(){drag=null;img.style.cursor="";});
+  })();
+  (function(){
+    function clean(th){return th.textContent.replace(/\s+/g," ").trim();}
+    function val(td){
+      var t=td?td.textContent.replace(/\s+/g," ").trim():"";
+      var d=t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if(d)return {n:+(d[3]+d[2]+d[1])};
+      var num=t.replace(/^S\/\s*/,"").replace(/,/g,"");
+      if(/^-?\d+(\.\d+)?$/.test(num))return {n:parseFloat(num)};
+      return {s:t.toLowerCase()};
+    }
+    function cmp(a,b){
+      if(a.n!==undefined&&b.n!==undefined)return a.n-b.n;
+      if(a.n!==undefined)return -1;if(b.n!==undefined)return 1;
+      if(a.s===""&&b.s!=="")return 1;if(b.s===""&&a.s!=="")return -1;
+      return a.s.localeCompare(b.s,"es",{numeric:true});
+    }
+    function sortBy(table,th,idx){
+      var dir=th.getAttribute("aria-sort")==="ascending"?"descending":"ascending";
+      table.querySelectorAll("th[data-sortable]").forEach(function(h){h.removeAttribute("aria-sort");});
+      th.setAttribute("aria-sort",dir);
+      var body=table.tBodies[0];
+      var rows=Array.prototype.filter.call(body.rows,function(r){return r.cells.length>idx&&!r.querySelector("td[colspan]");});
+      var keyed=rows.map(function(r,i){return {r:r,i:i,v:val(r.cells[idx])};});
+      keyed.sort(function(a,b){var c=cmp(a.v,b.v);if(dir==="descending")c=-c;return c||a.i-b.i;});
+      keyed.forEach(function(k){body.appendChild(k.r);});
+    }
+    function init(){
+      document.querySelectorAll("main table:not([data-no-sort])").forEach(function(table){
+        if(!table.tHead||!table.tBodies[0])return;
+        var ths=table.tHead.rows[table.tHead.rows.length-1].cells;
+        Array.prototype.forEach.call(ths,function(th,idx){
+          if(th.dataset.sortable!==undefined||th.querySelector("a")||th.querySelector("input")||!clean(th)||/^acci/i.test(clean(th)))return;
+          th.setAttribute("data-sortable","");th.title="Ordenar por esta columna (p\u00e1gina actual)";
+          th.addEventListener("click",function(){sortBy(table,th,idx);});
+        });
+      });
+    }
+    init();document.addEventListener("live-filter:updated",init);
+  })();
+  (function(){
+    var form=document.querySelector("form[data-live-filter]");
+    if(!form||!window.localStorage)return;
+    var key="edutrack:filters:"+location.pathname,saved={};
+    try{saved=JSON.parse(localStorage.getItem(key)||"{}");}catch(e){saved={};}
+    var bar=document.createElement("div");bar.className="saved-filters no-print";
+    bar.innerHTML='<span class="chip-label"><i class="material-icons tiny" style="vertical-align:middle">bookmark</i> Filtros guardados</span><select class="browser-default" aria-label="Filtros guardados"></select><button type="button" class="btn-small blue darken-2" data-sf="save">Guardar actual</button><button type="button" class="btn-flat red-text" data-sf="del">Eliminar</button>';
+    var sel=bar.querySelector("select");
+    function fill(current){
+      sel.innerHTML='<option value="">Seleccionar\u2026</option>';
+      Object.keys(saved).sort().forEach(function(n){var o=document.createElement("option");o.value=n;o.textContent=n;if(n===current)o.selected=true;sel.appendChild(o);});
+    }
+    function persist(){localStorage.setItem(key,JSON.stringify(saved));}
+    function currentQuery(){
+      var p=new URLSearchParams();
+      new FormData(form).forEach(function(v,k){if(v!==""&&k!=="page"&&k!=="csrfmiddlewaretoken")p.append(k,v);});
+      return p.toString();
+    }
+    fill();
+    sel.addEventListener("change",function(){
+      if(!sel.value)return;
+      var qs=saved[sel.value];
+      location.href=location.pathname+(qs?"?"+qs:"");
+    });
+    bar.addEventListener("click",function(e){
+      var b=e.target.closest("[data-sf]");if(!b)return;
+      if(b.dataset.sf==="save"){
+        var qs=currentQuery();
+        if(!qs){alert("Aplica al menos un filtro antes de guardarlo.");return;}
+        var name=(prompt("Nombre para este filtro:")||"").trim().slice(0,40);
+        if(!name)return;
+        saved[name]=qs;persist();fill(name);
+      }else if(sel.value&&confirm("\u00bfEliminar el filtro \u00ab"+sel.value+"\u00bb?")){
+        delete saved[sel.value];persist();fill();
+      }
+    });
+    form.parentNode.insertBefore(bar,form.nextSibling);
   })();
   (function(){
     var icons=[["personales","person"],["contacto","contact_phone"],["estado","toggle_on"],["matr","assignment"],["promotor","badge"],["ficha","description"],["costo","payments"],["curso","menu_book"],["alumno","school"],["estudiante","school"],["usuario","person"],["recibo","receipt_long"],["importe","attach_money"],["deuda","money_off"],["fecha","event"],["inicio","event"],["pago","payments"],["adicional","info"],["voucher","image"],["acceso","vpn_key"],["permiso","security"],["sede","apartment"],["identidad","palette"],["volante","picture_as_pdf"],["qui","manage_search"],["cu\u00e1ndo","schedule"],["asignaci","assignment_ind"]];
