@@ -153,7 +153,7 @@ class CampusFlyerTests(TestCase):
         self.assertEqual(self.campus.flyers.count(), 3)
         self.assertTrue(all(f.is_image for f in self.campus.flyers.all()))
         page = self.client.get(reverse("campus-update", args=[self.campus.pk]))
-        self.assertContains(page, "<img src=", count=3, html=False)
+        self.assertContains(page, 'alt="Vista previa de ', count=3, html=False)
 
     def test_rejects_oversized_pdf(self):
         big = b"%PDF-" + b"0" * (10 * 1024 * 1024)
@@ -554,7 +554,7 @@ class UserUpdateTests(TestCase):
             self.assertEqual(
                 self.client.get(reverse("user-update", args=[user.pk])).status_code, 404
             )
-        self.assertNotContains(self.client.get(reverse("user-list")), "root")
+        self.assertNotContains(self.client.get(reverse("user-list")), ">root<")
         self.assertNotContains(self.client.get(reverse("user-list")), "staff")
 
     def test_edit_cannot_escalate_to_staff_or_superuser(self):

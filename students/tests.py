@@ -1237,8 +1237,8 @@ class StudentEnrollmentCrudTests(TestCase):
             {enrollment.pk for enrollment in response.context["enrollments"]},
             {self.enrollment.pk},
         )
-        self.assertContains(response, "Fecha de matrícula - Desde")
-        self.assertContains(response, "Fecha de matrícula - Hasta")
+        self.assertContains(response, 'for="enrollment-date-from">Desde')
+        self.assertContains(response, 'for="enrollment-date-to">Hasta')
 
         response = self.client.get(
             reverse("enrollment-list"),
