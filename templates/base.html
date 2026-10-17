@@ -557,7 +557,19 @@
       main .container-wide> .flex.wrap.between.items-center.gap.mb{align-items:flex-start}
     }
     @media only screen and (max-width:992px){
-      .table-scroll-hint{display:block;margin:.5rem 0;font-size:.85rem}
+      .table-scroll-hint{display:none;margin:.5rem 0;font-size:.85rem}
+      .table-scroll-hint.show{display:block}
+      .table-wrap{-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;background:linear-gradient(to right,var(--md-surface,#fff) 30%,rgba(255,255,255,0)) left center/24px 100% no-repeat local,linear-gradient(to left,var(--md-surface,#fff) 30%,rgba(255,255,255,0)) right center/24px 100% no-repeat local,radial-gradient(farthest-side at 0 50%,rgba(0,0,0,.25),transparent) left center/10px 100% no-repeat scroll,radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.25),transparent) right center/10px 100% no-repeat scroll}
+      main table td,main table th{white-space:nowrap}
+      main table td.wrap-cell,main table td .flex.gap{white-space:normal}
+      main table td:first-child,main table th:first-child{position:sticky;left:0;z-index:1;background:var(--md-surface,#fff)}
+      html[data-theme=dark] main table td:first-child,html[data-theme=dark] main table th:first-child{background:#252933}
+    }
+    @media only screen and (max-width:600px){
+      main table{font-size:.85rem}
+      main table td,main table th{padding:8px 7px}
+      .tools-grid{grid-template-columns:1fr!important}
+      main .btn-small{padding:0 10px}
     }
     @media print{
       .no-print,nav,.sidenav,.msg,.btn,.btn-small,.btn-flat{display:none!important}
@@ -648,6 +660,28 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+  (function(){
+    function setup(){
+      document.querySelectorAll("main table").forEach(function(t){
+        if(!t.closest(".table-wrap")){
+          var w=document.createElement("div");w.className="table-wrap";
+          t.parentNode.insertBefore(w,t);w.appendChild(t);
+        }
+      });
+      document.querySelectorAll("main .table-wrap").forEach(function(w){
+        var hint=w.previousElementSibling,has=hint&&hint.classList.contains("table-scroll-hint");
+        var over=w.scrollWidth>w.clientWidth+2;
+        if(over&&!has&&window.innerWidth<=992){
+          hint=document.createElement("p");hint.className="table-scroll-hint muted";
+          hint.textContent="Desliza la tabla horizontalmente para ver todas las columnas.";
+          w.parentNode.insertBefore(hint,w);has=true;
+        }
+        if(has)hint.classList.toggle("show",over);
+      });
+    }
+    setup();window.addEventListener("resize",setup);
+    document.addEventListener("live-filter:updated",setup);
+  })();
   (function(){
     var icons=[["personales","person"],["contacto","contact_phone"],["estado","toggle_on"],["matr","assignment"],["promotor","badge"],["ficha","description"],["costo","payments"],["curso","menu_book"],["alumno","school"],["estudiante","school"],["usuario","person"],["recibo","receipt_long"],["importe","attach_money"],["deuda","money_off"],["fecha","event"],["inicio","event"],["pago","payments"],["adicional","info"],["voucher","image"],["acceso","vpn_key"],["permiso","security"],["sede","apartment"],["identidad","palette"],["volante","picture_as_pdf"],["qui","manage_search"],["cu\u00e1ndo","schedule"],["asignaci","assignment_ind"]];
     document.querySelectorAll("form h6.strong, h2.section-title").forEach(function(h){
@@ -758,6 +792,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         history.replaceState(null, "", url);
         syncExports(url);
+        document.dispatchEvent(new Event("live-filter:updated"));
       })
       .catch(function (error) {
         if (error.name !== "AbortError") console.error(error);
