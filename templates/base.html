@@ -347,6 +347,9 @@
     html[data-theme=dark] main .card{background:#20232b;border-color:#343946;box-shadow:0 1px 3px rgba(0,0,0,.2)}
     html[data-theme=dark] main form.row:not(.mb-0){background:#1d2027;border-color:#343946}
     html[data-theme=dark] main form label,html[data-theme=dark] main .field label{color:#c4cbd7}
+    .has-title-icon{display:flex!important;align-items:center;gap:10px}
+    .title-icon{width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:rgba(33,150,243,.14);color:#1e88e5;flex:none}
+    .title-icon .material-icons{font-size:20px;line-height:1}
     .radio-inline{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.25rem 0 .5rem}
     .radio-inline label{display:inline-flex;align-items:center;border:1px solid #d5d9e0;border-radius:6px;padding:.5rem 1rem;margin:0}
     .radio-inline label span{color:inherit;padding-left:28px;height:auto;line-height:1.4rem}
@@ -581,6 +584,8 @@
   {% if user.is_authenticated %}
   <ul id="slide-out" class="sidenav sidenav-fixed">
     <li class="sidenav-spacer" aria-hidden="true"></li>
+    <li><a href="{% url 'dashboard' %}"><i class="material-icons">dashboard</i>Inicio</a></li>
+    <li><div class="divider"></div></li>
     {% if user.is_superuser or user.can_manage_students %}
     <li><div class="subheader">Académico</div></li>
     <li><a href="{% url 'student-list' %}"><i class="material-icons">school</i>Estudiantes</a></li>
@@ -602,15 +607,24 @@
      <li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
-    {% if user.is_superuser or user.can_manage_campuses or user.can_manage_promoters or user.can_manage_users or user.is_staff %}
+    {% if user.is_superuser or user.can_manage_students or user.can_register_payments %}
+    <li><div class="subheader">Herramientas</div></li>
+    <li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>
+    <li><div class="divider"></div></li>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_campuses or user.can_manage_promoters %}
     <li><div class="subheader">Gestión</div></li>
     {% if user.is_superuser or user.can_manage_campuses %}
     <li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>
     {% endif %}
     {% if user.is_superuser or user.can_manage_promoters %}
-    <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
     <li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>
+    <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
     {% endif %}
+    <li><div class="divider"></div></li>
+    {% endif %}
+    {% if user.is_superuser or user.can_manage_users or user.is_staff %}
+    <li><div class="subheader">Sistema</div></li>
     {% if user.is_superuser or user.can_manage_users %}
     <li><a href="{% url 'user-list' %}"><i class="material-icons">group</i>Usuarios</a></li>
     {% endif %}
@@ -620,11 +634,6 @@
     {% if user.is_staff %}
     <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
     {% endif %}
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_students or user.can_register_payments %}
-    <li><div class="subheader">Herramientas</div></li>
-    <li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>
     <li><div class="divider"></div></li>
     {% endif %}
       </ul>
@@ -639,6 +648,17 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+  (function(){
+    var icons=[["personales","person"],["contacto","contact_phone"],["estado","toggle_on"],["matr","assignment"],["promotor","badge"],["ficha","description"],["costo","payments"],["curso","menu_book"],["alumno","school"],["estudiante","school"],["usuario","person"],["recibo","receipt_long"],["importe","attach_money"],["deuda","money_off"],["fecha","event"],["inicio","event"],["pago","payments"],["adicional","info"],["voucher","image"],["acceso","vpn_key"],["permiso","security"],["sede","apartment"],["identidad","palette"],["volante","picture_as_pdf"],["qui","manage_search"],["cu\u00e1ndo","schedule"],["asignaci","assignment_ind"]];
+    document.querySelectorAll("form h6.strong, h2.section-title").forEach(function(h){
+      if(h.querySelector(".title-icon"))return;
+      var t=h.textContent.toLowerCase(),name="label";
+      for(var i=0;i<icons.length;i++){if(t.indexOf(icons[i][0])!==-1){name=icons[i][1];break;}}
+      var s=document.createElement("span");s.className="title-icon";s.setAttribute("aria-hidden","true");
+      s.innerHTML='<i class="material-icons">'+name+'</i>';
+      h.insertBefore(s,h.firstChild);h.classList.add("has-title-icon");
+    });
+  })();
   M.Sidenav.init(document.querySelectorAll(".sidenav"));
   var toggle = document.getElementById("theme-toggle");
   function syncThemeIcon() {

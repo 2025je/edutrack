@@ -1140,7 +1140,8 @@ class StudentEnrollmentCrudTests(TestCase):
             response.context["missing_record_codes"],
             [3, 6, 7, 8, 9, 10],
         )
-        self.assertContains(response, "3, 6, 7, 8, 9, 10")
+        self.assertEqual(response.context["missing_record_codes"], [3, 6, 7, 8, 9, 10])
+        self.assertContains(response, '<span class="tool-chip">10</span>')
 
     def test_enrollment_rows_highlight_debt_and_no_debt(self):
         Installment.objects.create(

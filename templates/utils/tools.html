@@ -1,29 +1,44 @@
 {% extends "base.html" %}{% block title %}Herramientas · EduTrack{% endblock %}
 {% block content %}
+<style>
+	.tools-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:20px;align-items:start}
+	.tool-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+	.tool-head h2{margin:0;font-size:1.2rem}
+	.tool-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(33,150,243,.14);color:#1e88e5;flex:none}
+	.tool-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;align-items:end;margin-top:12px}
+	.tool-form .input-box label{display:block;font-size:.8rem;margin-bottom:4px}
+	.tool-form input{margin:0!important;width:100%;box-sizing:border-box}
+	.tool-result{margin-top:16px;padding-top:14px;border-top:1px solid rgba(128,128,128,.25)}
+	.tool-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;max-height:220px;overflow:auto}
+	.tool-chip{padding:3px 10px;border-radius:14px;background:rgba(244,67,54,.14);color:#e53935;font-weight:600;font-size:.85rem;font-family:'Roboto Mono',monospace}
+	.tool-ok{display:flex;align-items:center;gap:8px}
+</style>
 <div class="mb"><h1 class="mb-0">Herramientas</h1><div class="muted">Utilidades de verificación para la sede seleccionada.</div></div>
+{% if can_check_record_codes or can_check_receipts %}<div class="tools-grid">{% endif %}
 {% if can_check_record_codes %}
-<div class="card card-pad">
-	<h2>Verificar códigos de ficha faltantes</h2>
-	<p class="muted">Seleccione una fecha de matrícula e indique el rango numérico de códigos que desea comprobar.</p>
-	<form method="get" class="row mb-0">
-		<div class="col s12 m4"><label for="record-code-check-date">Fecha de matrícula</label><input id="record-code-check-date" type="date" name="record_code_check_date" value="{{ record_code_check_date }}" required></div>
-		<div class="col s12 m3"><label for="record-code-start">Desde</label><input id="record-code-start" type="number" name="record_code_start" value="{{ record_code_start }}" min="0" step="1" required></div>
-		<div class="col s12 m3"><label for="record-code-end">Hasta</label><input id="record-code-end" type="number" name="record_code_end" value="{{ record_code_end }}" min="0" step="1" required></div>
-		<div class="col s12 m2"><button class="btn-flat blue-text" type="submit" name="check_record_codes" value="1">Verificar</button></div>
+<div class="card card-pad tool-card">
+	<div class="tool-head"><span class="tool-icon"><i class="material-icons">assignment_turned_in</i></span><h2>Códigos de ficha faltantes</h2></div>
+	<p class="muted">Elija la fecha de matrícula y el rango de códigos a comprobar.</p>
+	<form method="get" class="tool-form">
+		<div class="input-box"><label for="record-code-check-date">Fecha de matrícula</label><input id="record-code-check-date" type="date" name="record_code_check_date" value="{{ record_code_check_date }}" required></div>
+		<div class="input-box"><label for="record-code-start">Desde</label><input id="record-code-start" type="number" name="record_code_start" value="{{ record_code_start }}" min="0" step="1" required></div>
+		<div class="input-box"><label for="record-code-end">Hasta</label><input id="record-code-end" type="number" name="record_code_end" value="{{ record_code_end }}" min="0" step="1" required></div>
+		<div><button class="btn blue" type="submit" name="check_record_codes" value="1"><i class="material-icons left">search</i>Verificar</button></div>
 	</form>
-	{% if record_code_check_error %}<div class="note note-warning mb-0">{{ record_code_check_error }}</div>{% elif missing_record_codes is not None %}<div class="mt">{% if missing_record_codes %}<strong>Códigos de ficha no registrados:</strong> {{ missing_record_codes|join:", " }}{% else %}<span class="success">Todos los códigos del rango están registrados.</span>{% endif %}</div>{% endif %}
+	{% if record_code_check_error %}<div class="tool-result"><div class="note note-warning mb-0">{{ record_code_check_error }}</div></div>{% elif missing_record_codes is not None %}<div class="tool-result">{% if missing_record_codes %}<strong>{{ missing_record_codes|length }} código{{ missing_record_codes|length|pluralize }} no registrado{{ missing_record_codes|length|pluralize }}</strong><div class="tool-chips">{% for code in missing_record_codes %}<span class="tool-chip">{{ code }}</span>{% endfor %}</div>{% else %}<div class="tool-ok success"><i class="material-icons">check_circle</i>Todos los códigos del rango están registrados.</div>{% endif %}</div>{% endif %}
 </div>
 {% endif %}
 {% if can_check_receipts %}
-<div class="card card-pad">
-	<h2>Verificar recibos faltantes</h2>
-	<p class="muted">Indique los extremos del rango. Ambos recibos deben ser numéricos o usar la misma letra.</p>
-	<form method="get" class="row mb-0">
-		<div class="col s12 m4"><label for="receipt-start">Desde</label><input id="receipt-start" name="receipt_start" value="{{ receipt_start }}" placeholder="1 o D1" pattern="[A-Z]?[0-9]+"></div>
-		<div class="col s12 m4"><label for="receipt-end">Hasta</label><input id="receipt-end" name="receipt_end" value="{{ receipt_end }}" placeholder="7 o D7" pattern="[A-Z]?[0-9]+"></div>
-		<div class="col s12 m4"><button class="btn-flat blue-text" type="submit" name="check_receipts" value="1">Verificar</button></div>
+<div class="card card-pad tool-card">
+	<div class="tool-head"><span class="tool-icon"><i class="material-icons">receipt_long</i></span><h2>Recibos faltantes</h2></div>
+	<p class="muted">Indique los extremos del rango. Ambos deben ser numéricos o usar la misma letra.</p>
+	<form method="get" class="tool-form">
+		<div class="input-box"><label for="receipt-start">Desde</label><input id="receipt-start" name="receipt_start" value="{{ receipt_start }}" placeholder="1 o D1" pattern="[A-Z]?[0-9]+"></div>
+		<div class="input-box"><label for="receipt-end">Hasta</label><input id="receipt-end" name="receipt_end" value="{{ receipt_end }}" placeholder="7 o D7" pattern="[A-Z]?[0-9]+"></div>
+		<div><button class="btn blue" type="submit" name="check_receipts" value="1"><i class="material-icons left">search</i>Verificar</button></div>
 	</form>
-	{% if receipt_check_error %}<div class="note note-warning mb-0">{{ receipt_check_error }}</div>{% elif missing_receipts is not None %}<div class="mt">{% if missing_receipts %}<strong>Recibos no registrados:</strong> {{ missing_receipts|join:", " }}{% else %}<span class="success">Todos los recibos del rango están registrados.</span>{% endif %}</div>{% endif %}
+	{% if receipt_check_error %}<div class="tool-result"><div class="note note-warning mb-0">{{ receipt_check_error }}</div></div>{% elif missing_receipts is not None %}<div class="tool-result">{% if missing_receipts %}<strong>{{ missing_receipts|length }} recibo{{ missing_receipts|length|pluralize }} no registrado{{ missing_receipts|length|pluralize }}</strong><div class="tool-chips">{% for receipt in missing_receipts %}<span class="tool-chip">{{ receipt }}</span>{% endfor %}</div>{% else %}<div class="tool-ok success"><i class="material-icons">check_circle</i>Todos los recibos del rango están registrados.</div>{% endif %}</div>{% endif %}
 </div>
 {% endif %}
+{% if can_check_record_codes or can_check_receipts %}</div>{% endif %}
 {% endblock %}

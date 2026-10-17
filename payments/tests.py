@@ -298,7 +298,8 @@ class PaymentCrudTests(TestCase):
         )
 
         self.assertEqual(response.context["missing_receipts"], ["3", "6", "7"])
-        self.assertContains(response, "3, 6, 7")
+        for number in (3, 6, 7):
+            self.assertContains(response, f'<span class="tool-chip">{number}</span>')
 
     def test_receipt_check_lists_missing_receipts_with_the_same_letter(self):
         for receipt_number in ["D2", "D4", "D5"]:
