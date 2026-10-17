@@ -63,8 +63,31 @@ class CampusManagementTests(TestCase):
         self.client.post(reverse("campus-create"), {"name": "Sede Sin Volante", "active": "on"})
         self.assertEqual(Campus.objects.get(name="Sede Sin Volante").flyers.count(), 0)
 
+    def test_create_campus_with_flyer_without_title_uses_file_name(self):
+        response = self.client.post(
+            reverse("campus-create"),
+            {
+                "name": "Sede Volante Sin Titulo",
+                "active": "on",
+                "flyer-file": SimpleUploadedFile("promo.pdf", b"%PDF-1.4 x", "application/pdf"),
+            },
+        )
+        self.assertRedirects(response, reverse("campus-list"))
+        campus = Campus.objects.get(name="Sede Volante Sin Titulo")
+        self.assertEqual(campus.flyers.get().title, "promo")
+
+    def test_flyer_title_without_file_is_rejected(self):
+        response = self.client.post(
+            reverse("campus-create"),
+            {"name": "Sede Titulo Solo", "active": "on", "flyer-title": "Promo"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Campus.objects.filter(name="Sede Titulo Solo").exists())
+
     def test_create_page_shows_flyer_section(self):
-        self.assertContains(self.client.get(reverse("campus-create")), "flyer-file")
+        response = self.client.get(reverse("campus-create"))
+        self.assertContains(response, "flyer-file")
+        self.assertFalse(response.context["flyer_form"].use_required_attribute)
 
     def test_invalid_flyer_blocks_campus_creation(self):
         response = self.client.post(
@@ -199,7 +222,7 @@ class PromoterCreationTests(TestCase):
 class CourseCreationTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede Cursos", active=True)
-        self.schedule = Schedule.objects.create(name="Lunes 8:00")
+        self.schedule = Schedule.objects.create(campus=self.campus, name="Lunes 8:00")
 
     def login(self, **permissions):
         user = User.objects.create_user(username="cursos", password="x-test-pass-1", **permissions)
@@ -250,6 +273,22 @@ class CourseCreationTests(TestCase):
         self.assertContains(response, reverse("schedule-create"))
         self.assertContains(response, "data-uppercase")
 
+    def test_schedules_are_available_only_at_their_campus(self):
+        self.login(can_manage_promoters=True)
+        other_campus = Campus.objects.create(name="Otra Sede Cursos", active=True)
+        other_schedule = Schedule.objects.create(campus=other_campus, name="Lunes 8:00")
+
+        response = self.client.get(reverse("course-list"))
+
+        available_schedule_ids = list(
+            response.context["form"].fields["schedule"].queryset.values_list("pk", flat=True)
+        )
+        self.assertIn(self.schedule.pk, available_schedule_ids)
+        self.assertNotIn(other_schedule.pk, available_schedule_ids)
+        response = self.client.post(reverse("course-list"), self.data(schedule=other_schedule.pk))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Course.objects.filter(name="INGLÉS").exists())
+
     def test_catalog_name_inputs_convert_text_to_uppercase(self):
         self.login(can_manage_promoters=True)
 
@@ -262,11 +301,11 @@ class CourseCreationTests(TestCase):
 
         response = self.client.post(reverse("schedule-create"), {"name": "  Sábado   9:00 "})
 
+        schedule = Schedule.objects.get(campus=self.campus, name="SÁBADO 9:00")
         self.assertRedirects(
             response,
-            f"{reverse('course-list')}?schedule={Schedule.objects.get(name='SÁBADO 9:00').pk}",
+            f"{reverse('course-list')}?schedule={schedule.pk}",
         )
-        schedule = Schedule.objects.get(name="SÁBADO 9:00")
         page = self.client.get(response.url)
         self.assertContains(page, f'<option value="{schedule.pk}" selected>SÁBADO 9:00</option>')
         self.client.post(reverse("course-list"), self.data(schedule=schedule.pk))
@@ -280,6 +319,23 @@ class CourseCreationTests(TestCase):
 
         self.assertContains(response, "Ya existe un horario")
         self.assertEqual(Schedule.objects.count(), before)
+
+    def test_same_schedule_name_is_allowed_at_another_campus(self):
+        self.login(can_manage_promoters=True)
+        other_campus = Campus.objects.create(name="Otra Sede Cursos", active=True)
+        user = User.objects.get(username="cursos")
+        user.campuses.add(other_campus)
+        user = self.client.session
+        user["selected_campus_id"] = other_campus.pk
+        user.save()
+
+        response = self.client.post(reverse("schedule-create"), {"name": "LUNES 8:00"})
+
+        self.assertRedirects(
+            response,
+            f"{reverse('course-list')}?schedule="
+            f"{Schedule.objects.get(campus=other_campus, name='LUNES 8:00').pk}",
+        )
 
     def test_user_without_permission_cannot_create_schedules(self):
         self.login(can_manage_students=True)

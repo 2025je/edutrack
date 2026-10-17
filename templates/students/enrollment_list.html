@@ -2,15 +2,25 @@
 {% block content %}
 <div class="flex between items-center wrap gap mb"><h1 class="mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1><div class="flex gap wrap"><a class="btn green" data-live-export="{% url 'enrollment-excel' %}"{% if filtered_student %} data-live-extra="student_id={{ filtered_student.pk }}"{% endif %} href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a><a class="btn" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a></div></div>
 <form method="get" class="row" data-live-filter>
-	<div class="col s12 m6 l3"><label for="f-student">Estudiante</label><input id="f-student" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
 	{% if request.GET.course_id %}<input type="hidden" name="course_id" value="{{ request.GET.course_id }}">{% endif %}
 	{% if request.GET.promoter_id %}<input type="hidden" name="promoter_id" value="{{ request.GET.promoter_id }}">{% endif %}
+	<h6 class="col s12 strong">Estudiante</h6>
+	<div class="col s12 m6 l3"><label for="f-student">Nombre</label><input id="f-student" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
+	<div class="col s12 m6 l3"><label for="f-document">DNI</label><input id="f-document" name="document" value="{{ request.GET.document }}" placeholder="Filtrar por DNI" inputmode="numeric"></div>
+	<h6 class="col s12 strong">Curso</h6>
 	<div class="col s12 m6 l3"><label for="f-course">Curso</label><input id="f-course" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
+	<div class="col s12 m6 l3"><label for="f-schedule">Horario</label><input id="f-schedule" name="schedule" value="{{ request.GET.schedule }}" placeholder="Filtrar por horario"></div>
+	<div class="col s12 m6 l3"><label for="f-group">Grupo</label><input id="f-group" name="group" value="{{ request.GET.group }}" placeholder="Filtrar por grupo"></div>
+	<h6 class="col s12 strong">Ficha y promotor</h6>
 	<div class="col s12 m6 l3"><label for="f-record">Código de ficha</label><input id="f-record" name="record_code" value="{{ request.GET.record_code }}" placeholder="Filtrar por código de ficha"></div>
+	<div class="col s12 m6 l3"><label for="f-record-status">Ficha</label><select id="f-record-status" name="record_status" aria-label="Filtrar por ficha"><option value="">Todas</option><option value="with_record" {% if request.GET.record_status == "with_record" %}selected{% endif %}>Con ficha</option><option value="without_record" {% if request.GET.record_status == "without_record" %}selected{% endif %}>Sin ficha</option><option value="with_image" {% if request.GET.record_status == "with_image" %}selected{% endif %}>Con imagen de ficha</option></select></div>
 	<div class="col s12 m6 l3"><label for="f-promoter">Promotor</label><input id="f-promoter" name="promoter" value="{{ promoter_filter_value }}" placeholder="Filtrar por promotor"></div>
-	<div class="col s12 m6 l3"><label for="enrollment-date-from">Fecha de matrícula - Desde</label><input id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
-	<div class="col s12 m6 l3"><label for="enrollment-date-to">Fecha de matrícula - Hasta</label><input id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
+	<h6 class="col s12 strong">Fecha de matrícula</h6>
+	<div class="col s12 m6 l3"><label for="enrollment-date-from">Desde</label><input id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
+	<div class="col s12 m6 l3"><label for="enrollment-date-to">Hasta</label><input id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
+	<h6 class="col s12 strong">Estado y deuda</h6>
 	<div class="col s12 m6 l3"><label for="f-debt">Deuda</label><select id="f-debt" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
+	<div class="col s12 m6 l3"><label for="f-active">Estado</label><select id="f-active" name="active_status" aria-label="Filtrar por estado"><option value="">Todos</option><option value="active" {% if request.GET.active_status == "active" %}selected{% endif %}>Activas</option><option value="inactive" {% if request.GET.active_status == "inactive" %}selected{% endif %}>Inactivas</option></select></div>
 	<div class="col s12"><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Limpiar</a></div>
 </form>
 <p class="table-scroll-hint muted">Desliza la tabla horizontalmente para ver todas las columnas.</p>
@@ -40,7 +50,7 @@
 	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course.name }}</a></td>
 	<td>{{ e.course.schedule }}</td>
 	<td>{{ e.course.group }}</td>
-	<td>{{ e.record_code|default:"—" }}</td>
+	<td>{{ e.record_code|default:"—" }}{% if e.ficha.image %} <a href="{{ e.ficha.image.url }}" target="_blank" rel="noopener" title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td>
 	<td>{% for promoter in e.promoter.all %}<a href="{% url 'enrollment-list' %}?promoter_id={{ promoter.pk }}">{{ promoter.name }}</a>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
 	<td><a href="{% url 'enrollment-list' %}?enrollment_date={{ e.enrollment_date|date:'Y-m-d' }}">{{ e.enrollment_date|date:"d/m/Y" }}</a></td>
 	<td>{{ e.course.start_date_display }}</td>

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Asignar llamadas · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">Asignar llamadas</h1><div class="muted">Elige qué matrículas verá cada usuario en «Alumnos y deudas». Quienes asignan llamadas ven todas.</div></div>
+<div class="card card-pad">
+  <form method="get" class="row mb-0" data-live-filter>
+    <h6 class="col s12 strong">Usuario</h6>
+    <div class="col s12 m6"><label for="usuario">Usuario</label>
+      <select id="usuario" name="usuario" class="browser-default">
+        <option value="">Selecciona un usuario</option>
+        {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
+      </select>
+      {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
+    </div>
+    <h6 class="col s12 strong">Alumno y curso</h6>
+    <div class="col s12 m6 l3"><label for="q">Alumno o curso</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
+    <div class="col s12 m6 l3"><label for="curso">Curso</label>
+      <select id="curso" name="curso" class="browser-default"><option value="">Todos</option>{% for c in courses %}<option value="{{ c }}" {% if filters.curso == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="col s12 m6 l3"><label for="horario">Horario</label>
+      <select id="horario" name="horario" class="browser-default"><option value="">Todos</option>{% for s in schedules %}<option value="{{ s }}" {% if filters.horario == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div class="col s12 m6 l3"><label for="grupo">Grupo</label>
+      <select id="grupo" name="grupo" class="browser-default"><option value="">Todos</option>{% for g in groups %}<option value="{{ g }}" {% if filters.grupo == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
+    <h6 class="col s12 strong">Asignación y deuda</h6>
+    <div class="col s12 m6 l3"><label for="estado">Estado de asignación</label>
+      <select id="estado" name="estado" class="browser-default">
+        <option value="">Todas</option>
+        <option value="sin_asignar" {% if filters.estado == "sin_asignar" %}selected{% endif %}>Sin asignar a nadie</option>
+        <option value="asignadas" {% if filters.estado == "asignadas" %}selected{% endif %}>Asignadas al usuario</option>
+        <option value="no_asignadas" {% if filters.estado == "no_asignadas" %}selected{% endif %}>No asignadas al usuario</option>
+        <option value="otros" {% if filters.estado == "otros" %}selected{% endif %}>Asignadas a otros usuarios</option>
+      </select></div>
+    <div class="col s12">
+      <label><input type="checkbox" name="deuda" value="1" {% if filters.deuda %}checked{% endif %}><span>Solo con deuda pendiente</span></label>
+      <button class="btn" type="submit">Filtrar</button>
+      <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-assignments' %}{% if target %}?usuario={{ target.pk }}{% endif %}">Limpiar</a>
+    </div>
+  </form>
+</div>
+<div data-live-region="results">
+{% if target %}
+<p class="muted mt">{{ total_results }} matrícula{{ total_results|pluralize }} encontrada{{ total_results|pluralize }}.</p>
+<form method="post">
+  {% csrf_token %}
+  <input type="hidden" name="usuario" value="{{ target.pk }}">
+  <div class="card table-wrap"><table class="highlight"><thead><tr><th class="center-align">Asignar</th><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
+  {% for row in rows %}<tr>
+    <td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>
+    <td>{{ row.enrollment.student.full_name }}</td><td>{{ row.enrollment.course.name }}</td><td>{{ row.enrollment.course.schedule }}</td><td>{{ row.enrollment.course.group }}</td><td>{{ row.owners|default:"—" }}</td>
+  </tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <button class="btn" type="submit">Guardar asignaciones de esta página</button>
+  <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver</a>
+</form>
+<div class="mt">{% include "shared/pagination.html" %}</div>
+{% else %}
+<p class="muted mt">Selecciona un usuario para ver y modificar sus matrículas asignadas.</p>
+{% endif %}
+</div>
+{% endblock %}

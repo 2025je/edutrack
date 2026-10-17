@@ -140,6 +140,39 @@ class WhatsAppTemplate(models.Model):
         return text
 
 
+class CallAssignment(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="call_assignments", verbose_name="Usuario"
+    )
+    enrollment = models.ForeignKey(
+        "students.Enrollment",
+        on_delete=models.CASCADE,
+        related_name="call_assignments",
+        verbose_name="Matrícula",
+    )
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="Asignado por",
+    )
+    created_at = models.DateTimeField("Asignado el", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "asignación de llamada"
+        verbose_name_plural = "asignaciones de llamadas"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "enrollment"], name="unique_call_assignment_per_user_enrollment"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} → {self.enrollment}"
+
+
 class CallNote(models.Model):
     class Response(models.TextChoices):
         WILL_ATTEND = "ASISTIRA", "Asistirá"

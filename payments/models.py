@@ -3,7 +3,7 @@ from django.db import models
 from django.db.models import Sum
 from django.core.validators import MinValueValidator, RegexValidator
 from core.models import Campus, User
-from students.models import Enrollment
+from students.models import Enrollment, validate_ficha_image_size
 
 receipt_number_validator = RegexValidator(
     r"^(?:\d+|[A-Z]\d+)$",
@@ -67,6 +67,12 @@ class Payment(models.Model):
     )
     reference = models.CharField("Referencia", max_length=100, blank=True)
     notes = models.CharField("Observaciones", max_length=250, blank=True)
+    voucher = models.ImageField(
+        "Foto del voucher",
+        upload_to="vouchers/",
+        blank=True,
+        validators=[validate_ficha_image_size],
+    )
     status = models.CharField(
         "Estado", max_length=15, choices=Status.choices, default=Status.CONFIRMED
     )

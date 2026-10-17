@@ -1,7 +1,9 @@
 import re
+from datetime import date
 from decimal import Decimal
 
 from django import forms
+from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import RegexValidator
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -10,7 +12,8 @@ from django.db.models.functions import Coalesce
 
 from core.campus import get_selected_campus
 from payments.models import Installment, Payment, PaymentAllocation, receipt_number_validator
-from students.models import Enrollment
+from students.models import Enrollment, validate_ficha_image_size
+from students.images import DEFAULT_QUALITY, QUALITY_CHOICES, to_jpeg
 
 
 def pending_enrollments_for_campus(campus):
@@ -53,6 +56,59 @@ def pending_enrollments_for_campus(campus):
         .annotate(pending_balance=Subquery(pending_totals, output_field=money_field))
         .filter(pending_balance__gt=0)
     )
+
+
+def filter_pending_enrollments(qs, get):
+    """Aplica los filtros de la pantalla de búsqueda de matrículas con deuda."""
+
+    def param(name):
+        return str(get.get(name, "")).strip()
+
+    def number(name, kind=int):
+        try:
+            return kind(param(name))
+        except (ValueError, ArithmeticError):
+            return None
+
+    query = param("q")
+    if query:
+        qs = qs.filter(
+            Q(student__full_name__unaccent__icontains=query)
+            | Q(course__name__unaccent__icontains=query)
+        )
+    if param("dni"):
+        qs = qs.filter(student__document_number__icontains=param("dni"))
+    if param("course"):
+        course_id = number("course")
+        qs = qs.filter(course_id=course_id) if course_id else qs.none()
+    if param("schedule"):
+        qs = qs.filter(course__schedule__icontains=param("schedule"))
+    if param("group"):
+        qs = qs.filter(course__group__iexact=param("group"))
+    if param("promoter"):
+        promoter_id = number("promoter")
+        qs = qs.filter(promoter__id=promoter_id) if promoter_id else qs.none()
+    if param("ficha"):
+        ficha_code = number("ficha")
+        qs = qs.filter(ficha__code=ficha_code) if ficha_code else qs.none()
+    if param("student"):
+        student_id = number("student")
+        qs = qs.filter(student_id=student_id) if student_id else qs.none()
+    for name, lookup in (("date_from", "gte"), ("date_to", "lte")):
+        if param(name):
+            try:
+                qs = qs.filter(**{f"enrollment_date__{lookup}": date.fromisoformat(param(name))})
+            except ValueError:
+                qs = qs.none()
+    for name, lookup in (("debt_min", "gte"), ("debt_max", "lte")):
+        if param(name):
+            amount = number(name, Decimal)
+            qs = (
+                qs.filter(**{f"pending_balance__{lookup}": amount})
+                if amount is not None
+                else qs.none()
+            )
+    return qs.distinct()
 
 
 class ReceiptNumberWidget(forms.MultiWidget):
@@ -126,12 +182,45 @@ class ReceiptNumberField(forms.MultiValueField):
         return f"{prefix.upper()}{number}"
 
 
-class PaymentForm(forms.Form):
+class VoucherFieldsMixin(forms.Form):
+    voucher = forms.ImageField(
+        label="Foto del voucher (opcional)",
+        required=False,
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*"}),
+        validators=[validate_ficha_image_size],
+    )
+    voucher_quality = forms.ChoiceField(
+        label="Compresión de la imagen",
+        choices=QUALITY_CHOICES,
+        initial=DEFAULT_QUALITY,
+        required=False,
+        widget=forms.RadioSelect,
+        help_text="La imagen se guardará como JPEG con esta calidad.",
+    )
+
+    def voucher_file(self):
+        """Devuelve la imagen convertida a JPEG, False si se pidió quitarla, o None si no cambió."""
+        voucher = self.cleaned_data.get("voucher")
+        if isinstance(voucher, UploadedFile):
+            return to_jpeg(voucher, self.cleaned_data.get("voucher_quality") or DEFAULT_QUALITY)
+        return False if voucher is False else None
+
+
+class PaymentForm(VoucherFieldsMixin, forms.Form):
+    field_order = [
+        "enrollment",
+        "receipt_number",
+        "amount",
+        "reference",
+        "notes",
+        "voucher",
+        "voucher_quality",
+    ]
     receipt_number = ReceiptNumberField(label="N.º de recibo")
     enrollment = forms.ModelChoiceField(
         queryset=Enrollment.objects.none(),
         label="Matrícula pendiente",
-        widget=forms.RadioSelect,
+        widget=forms.HiddenInput,
     )
     amount = forms.DecimalField(
         label="Importe recibido", min_value=0.01, max_digits=10, decimal_places=2
@@ -154,63 +243,29 @@ class PaymentForm(forms.Form):
             raise forms.ValidationError("Este número de recibo ya está registrado.")
         return receipt_number
 
-    def __init__(self, *args, user=None, request=None, **kwargs):
+    def __init__(self, *args, user=None, request=None, enrollment=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.campus = get_selected_campus(request) if request and user else None
-        if not self.campus:
-            self.fields["enrollment"].queryset = Enrollment.objects.none()
-            return
-
-        qs = pending_enrollments_for_campus(self.campus)
-
-        # Buscar por alumno o curso al abrir el formulario; en POST mantenemos
-        # todas las matrículas con deuda para validar correctamente la selección.
-        query = request.GET.get("q", "").strip() if request and request.method == "GET" else ""
-        if query:
-            qs = qs.filter(
-                Q(student__full_name__unaccent__icontains=query)
-                | Q(course__name__unaccent__icontains=query)
-            )
-        student_id = (
-            request.GET.get("student", "").strip() if request and request.method == "GET" else ""
+        self.fields["enrollment"].queryset = (
+            pending_enrollments_for_campus(self.campus).select_related("student", "course")
+            if self.campus
+            else Enrollment.objects.none()
         )
-        if student_id:
-            try:
-                qs = qs.filter(student_id=int(student_id))
-            except ValueError:
-                qs = qs.none()
-
-        self.fields["enrollment"].queryset = qs.select_related(
-            "student", "course", "campus"
-        ).order_by("student__full_name", "course__name")
-        self.fields["enrollment"].label_from_instance = self.enrollment_label
-
-        enrollment_id = (
-            request.GET.get("enrollment", "").strip() if request and request.method == "GET" else ""
-        )
-        selected_enrollment = None
-        if enrollment_id:
-            try:
-                selected_enrollment = qs.get(pk=int(enrollment_id))
-            except (ValueError, Enrollment.DoesNotExist):
-                selected_enrollment = None
-        elif student_id and qs.count() == 1:
-            selected_enrollment = qs.first()
-        if selected_enrollment:
-            self.initial["enrollment"] = selected_enrollment.pk
-            self.initial["amount"] = selected_enrollment.pending_balance
-
-    @staticmethod
-    def enrollment_label(enrollment):
-        pending = sum(
-            (item.balance for item in enrollment.installments.filter(active=True)), Decimal("0.00")
-        )
-        return (
-            f"{enrollment.student.full_name} — {enrollment.course.name} (deuda: S/ {pending:.2f})"
-        )
+        if enrollment is not None:
+            self.initial["enrollment"] = enrollment.pk
+            self.initial["amount"] = enrollment.pending_balance
 
 
-class PaymentUpdateForm(forms.ModelForm):
+class PaymentUpdateForm(VoucherFieldsMixin, forms.ModelForm):
+    field_order = [
+        "enrollment",
+        "receipt_number",
+        "amount",
+        "reference",
+        "notes",
+        "voucher",
+        "voucher_quality",
+    ]
     receipt_number = ReceiptNumberField(label="N.º de recibo")
 
     class Meta:
@@ -233,6 +288,8 @@ class PaymentUpdateForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
+        if self.instance.pk and self.instance.voucher:
+            self.initial["voucher"] = self.instance.voucher
         campus = get_selected_campus(request) if request and user else None
         if campus:
             self.fields["enrollment"].queryset = (

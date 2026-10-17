@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Nuevo horario · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Nuevo horario</h1><div class="muted">Los horarios están disponibles para todas las sedes y se eligen al crear un curso.</div></div>
+<div class="mb"><h1 class="mb-0">Nuevo horario</h1><div class="muted">El horario estará disponible solo en la sede seleccionada.</div></div>
 <div class="card card-pad">
 	<form method="post" class="row mb-0">
 		{% csrf_token %}
@@ -11,4 +11,5 @@
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Horarios existentes</th></tr></thead><tbody>
 {% for schedule in schedules %}<tr><td>{{ schedule.name }}</td></tr>{% empty %}<tr><td class="muted">No hay horarios registrados.</td></tr>{% endfor %}
 </tbody></table></div>
+{% include "shared/pagination.html" %}
 {% endblock %}

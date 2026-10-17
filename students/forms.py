@@ -3,9 +3,14 @@ from decimal import Decimal
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.core.files.uploadedfile import UploadedFile
+from django.db import models, transaction
 from .models import (
     DEFAULT_PROMOTER_NAMES,
+    DUPLICATE_FICHA_MESSAGE,
+    Ficha,
+    record_code_validator,
+    validate_ficha_image_size,
     UNASSIGNED_COURSE_NAME,
     UNASSIGNED_SCHEDULE_NAME,
     Student,
@@ -15,6 +20,7 @@ from .models import (
     phone_validator,
 )
 from core.campus import get_selected_campus
+from .images import DEFAULT_QUALITY, QUALITY_CHOICES, to_jpeg
 
 
 class CourseSelectWidget(forms.Select):
@@ -79,6 +85,9 @@ class StudentForm(forms.ModelForm):
     class Meta:
         model = Student
         fields = ["last_name", "first_name", "document_number", "active"]
+        # Los teléfonos son un campo declarado; se ordenan junto a los datos de contacto.
+
+    field_order = ["last_name", "first_name", "document_number", "phone_numbers", "active"]
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -120,13 +129,17 @@ class StudentForm(forms.ModelForm):
         )
         full_name = full_name.upper()
         if full_name:
-            duplicate = Student.objects.filter(full_name__iexact=full_name)
-            if self.instance.pk:
-                duplicate = duplicate.exclude(pk=self.instance.pk)
-            if duplicate.exists():
-                self.add_error(
-                    "last_name", "Ya existe un estudiante con estos apellidos y nombres."
-                )
+            campus = self.selected_campus
+            if not campus and self.instance.campus_id:
+                campus = self.instance.campus
+            if campus:
+                duplicate = Student.objects.filter(campus=campus, full_name__iexact=full_name)
+                if self.instance.pk:
+                    duplicate = duplicate.exclude(pk=self.instance.pk)
+                if duplicate.exists():
+                    self.add_error(
+                        "last_name", "Ya existe un estudiante con estos apellidos y nombres."
+                    )
         cleaned_data["full_name"] = full_name
         return cleaned_data
 
@@ -141,27 +154,44 @@ class StudentForm(forms.ModelForm):
 
 
 class EnrollmentForm(forms.ModelForm):
+    record_code = forms.CharField(
+        label="Código de ficha",
+        max_length=50,
+        required=False,
+        validators=[record_code_validator],
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "pattern": r"[1-9]\d*"}),
+    )
+    record_image = forms.ImageField(
+        label="Imagen de la ficha (opcional)",
+        required=False,
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*"}),
+        validators=[validate_ficha_image_size],
+    )
+    record_image_quality = forms.ChoiceField(
+        label="Compresión de la imagen",
+        choices=QUALITY_CHOICES,
+        initial=DEFAULT_QUALITY,
+        required=False,
+        widget=forms.RadioSelect,
+        help_text="La imagen se guardará como JPEG con esta calidad.",
+    )
+
     class Meta:
         model = Enrollment
         fields = [
             "course",
             "student",
-            "has_record",
-            "record_code",
-            "promoter",
             "enrollment_date",
+            "promoter",
+            "record_code",
+            "record_image",
+            "record_image_quality",
             "enrollment_fee",
             "monthly_fee",
             "active",
         ]
         widgets = {
             "promoter": forms.CheckboxSelectMultiple,
-            "record_code": forms.TextInput(
-                attrs={
-                    "inputmode": "numeric",
-                    "pattern": r"\d*",
-                }
-            ),
             "enrollment_date": forms.DateInput(
                 attrs={"type": "date"},
                 format="%Y-%m-%d",
@@ -170,6 +200,10 @@ class EnrollmentForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, request=None, locked_student=None, **kwargs):
         super().__init__(*args, **kwargs)
+        ficha = getattr(self.instance, "ficha", None) if self.instance.pk else None
+        if ficha:
+            self.initial["record_code"] = ficha.code
+            self.initial["record_image"] = ficha.image
         self.locked_student = locked_student
         # La sede se obtiene de la sesión del usuario y no se muestra como campo.
         self.selected_campus = get_selected_campus(request) if request and user else None
@@ -341,16 +375,68 @@ class EnrollmentForm(forms.ModelForm):
             if duplicate.exists() and not course.is_unassigned():
                 self.add_error("course", "Este estudiante ya está matriculado en este curso.")
         record_code = (cleaned.get("record_code") or "").strip()
+        record_image = cleaned.get("record_image")
         enrollment_date = cleaned.get("enrollment_date")
-        if cleaned.get("has_record") and record_code and enrollment_date:
-            same_code = Enrollment.objects.filter(
-                campus=campus, enrollment_date=enrollment_date, record_code=record_code
+        if record_code:
+            try:
+                Ficha.validate_code(record_code)
+            except ValidationError as error:
+                if "record_code" not in self.errors:
+                    self.add_error("record_code", error)
+            else:
+                if (
+                    enrollment_date
+                    and Ficha.duplicates(
+                        campus.pk, enrollment_date, record_code, self.instance.pk
+                    ).exists()
+                ):
+                    self.add_error("record_code", DUPLICATE_FICHA_MESSAGE)
+        elif isinstance(record_image, UploadedFile):
+            self.add_error(
+                "record_image",
+                "Ingresa el código de ficha para poder subir la imagen.",
             )
-            if self.instance.pk:
-                same_code = same_code.exclude(pk=self.instance.pk)
-            if same_code.exists():
-                self.add_error(
-                    "record_code",
-                    "Este código de ficha ya está registrado en la misma fecha de matrícula.",
-                )
         return cleaned
+
+    def save(self, commit=True):
+        enrollment = super().save(commit=commit)
+        if commit:
+            self._save_ficha(enrollment)
+        else:
+            save_m2m = self.save_m2m
+
+            def save_m2m_and_ficha():
+                save_m2m()
+                self._save_ficha(enrollment)
+
+            self.save_m2m = save_m2m_and_ficha
+        return enrollment
+
+    def _save_ficha(self, enrollment):
+        ficha = getattr(enrollment, "ficha", None)
+        old_image = ficha.image.name if ficha else ""
+        if not (self.cleaned_data.get("record_code") or "").strip():
+            if ficha:
+                ficha.delete()
+                self._delete_file_on_commit(ficha, old_image)
+            return
+        ficha = ficha or Ficha(enrollment=enrollment)
+        ficha.campus_id = enrollment.campus_id
+        ficha.date = enrollment.enrollment_date
+        ficha.code = int(self.cleaned_data["record_code"].strip())
+        record_image = self.cleaned_data.get("record_image")
+        if isinstance(record_image, UploadedFile):
+            ficha.image = to_jpeg(
+                record_image, self.cleaned_data.get("record_image_quality") or DEFAULT_QUALITY
+            )
+        elif record_image is False:
+            ficha.image = ""
+        ficha.save()
+        if old_image and old_image != ficha.image.name:
+            self._delete_file_on_commit(ficha, old_image)
+
+    @staticmethod
+    def _delete_file_on_commit(ficha, name):
+        # El archivo anterior se borra solo si la transacción se confirma.
+        if name:
+            transaction.on_commit(lambda: ficha.image.storage.delete(name))

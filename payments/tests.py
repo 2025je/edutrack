@@ -101,7 +101,7 @@ class PaymentCrudTests(TestCase):
         self.assertEqual(payment.receipt_number, "D100")
 
     def test_receipt_form_uses_optional_letter_and_positive_integer_inputs(self):
-        response = self.client.get(reverse("payment-create"))
+        response = self.client.get(reverse("payment-create-for", args=[self.enrollment.pk]))
         self.assertContains(response, 'name="receipt_number_0"')
         self.assertContains(response, 'name="receipt_number_1"')
         self.assertContains(response, "data-uppercase")
@@ -326,6 +326,50 @@ class PaymentCrudTests(TestCase):
         self.assertIsNone(response.context["missing_receipts"])
         self.assertContains(response, "usar la misma letra")
 
+    def test_voucher_is_optional_and_saved_as_jpeg(self):
+        import io
+        import shutil
+        import tempfile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGBA", (30, 30), (255, 0, 0, 128)).save(buffer, "PNG")
+        url = reverse("payment-update", args=[self.payment.pk])
+        data = {
+            "receipt_number_0": "D",
+            "receipt_number_1": "2",
+            "enrollment": self.enrollment.pk,
+            "amount": "70.00",
+        }
+        media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media, ignore_errors=True)
+        with override_settings(MEDIA_ROOT=media):
+            self.assertEqual(self.client.post(url, data).status_code, 302)
+            self.payment.refresh_from_db()
+            self.assertFalse(self.payment.voucher)
+
+            upload = SimpleUploadedFile("v.png", buffer.getvalue(), content_type="image/png")
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {**data, "voucher": upload})
+            self.assertEqual(response.status_code, 302)
+            self.payment.refresh_from_db()
+            self.assertTrue(self.payment.voucher.name.startswith("vouchers/"))
+            self.assertTrue(self.payment.voucher.name.endswith(".jpg"))
+            with self.payment.voucher.open("rb") as handle:
+                self.assertEqual(Image.open(handle).format, "JPEG")
+
+            self.client.post(url, data)
+            self.payment.refresh_from_db()
+            self.assertTrue(self.payment.voucher)
+
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(url, {**data, "voucher-clear": "on"})
+            self.payment.refresh_from_db()
+            self.assertFalse(self.payment.voucher)
+
     def test_payment_can_be_voided_without_deleting_receipt_or_allocation(self):
         response = self.client.get(reverse("payment-delete", args=[self.payment.pk]))
         self.assertEqual(response.status_code, 200)
@@ -336,19 +380,73 @@ class PaymentCrudTests(TestCase):
         self.assertTrue(Payment.objects.filter(pk=self.payment.pk).exists())
         self.assertTrue(PaymentAllocation.objects.filter(pk=self.allocation.pk).exists())
 
-    def test_payment_form_shows_pending_enrollments_as_single_choice_table(self):
-        response = self.client.get(
-            reverse("payment-create"),
-            {"enrollment": self.enrollment.pk},
-        )
+    def test_select_view_extra_filters_narrow_pending_enrollments(self):
+        url = reverse("payment-create")
+
+        def rows(params):
+            return list(self.client.get(url, params).context["enrollments"])
+
+        self.assertEqual(len(rows({})), 1)
+        self.assertEqual(len(rows({"course": self.enrollment.course_id})), 1)
+        self.assertEqual(len(rows({"course": 999999})), 0)
+        self.assertEqual(len(rows({"debt_min": "0.01", "debt_max": "100000"})), 1)
+        self.assertEqual(len(rows({"debt_min": "100000"})), 0)
+        self.assertEqual(len(rows({"date_from": "2999-01-01"})), 0)
+        self.assertEqual(len(rows({"ficha": "abc"})), 0)
+
+    def test_select_view_lists_pending_enrollments_with_pay_column(self):
+        response = self.client.get(reverse("payment-create"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.count(b'type="radio"'), 1)
-        self.assertContains(response, "Costo matrícula")
-        self.assertContains(response, "Mensualidad")
-        self.assertContains(response, "Deuda")
-        self.assertContains(response, "S/ 40,00")
-        self.assertContains(response, "S/ 60,00")
+        self.assertContains(response, "Pagar")
+        self.assertContains(response, reverse("payment-create-for", args=[self.enrollment.pk]))
         self.assertContains(response, "S/ 80,00")
+
+    def test_legacy_enrollment_param_redirects_to_payment_form(self):
+        response = self.client.get(reverse("payment-create"), {"enrollment": self.enrollment.pk})
+        self.assertRedirects(response, reverse("payment-create-for", args=[self.enrollment.pk]))
+
+    def test_payment_form_has_enrollment_loaded(self):
+        response = self.client.get(reverse("payment-create-for", args=[self.enrollment.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Deuda pendiente")
         form = response.context["form"]
         self.assertEqual(str(form["enrollment"].value()), str(self.enrollment.pk))
-        self.assertEqual(str(form["amount"].value()), "80.00")
+        self.assertEqual(Decimal(str(form["amount"].value())), Decimal("80"))
+
+    def test_payment_form_rejects_enrollment_without_debt(self):
+        response = self.client.get(reverse("payment-create-for", args=[999999]))
+        self.assertRedirects(response, reverse("payment-create"))
+
+
+class PaymentListExtraFiltersTests(TestCase):
+    def test_amount_and_cashier_filters(self):
+        from decimal import Decimal
+        from core.models import Campus, User
+        from payments.models import Payment
+        from students.models import Course, Enrollment, Student
+
+        campus = Campus.objects.create(name="Sede Filtros", active=True)
+        user = User.objects.create_user(
+            username="caja1", password="pass-12345", can_register_payments=True
+        )
+        user.campuses.add(campus)
+        student = Student.objects.create(campus=campus, full_name="Ana", phone="987654321")
+        course = Course.objects.create(campus=campus, name="Ingles", schedule="L", group="A")
+        enrollment = Enrollment.objects.create(campus=campus, student=student, course=course)
+        for number, amount in (("1", "10"), ("2", "50")):
+            Payment.objects.create(
+                campus=campus,
+                enrollment=enrollment,
+                cashier=user,
+                receipt_number=number,
+                amount=Decimal(amount),
+            )
+        self.client.force_login(user)
+        session = self.client.session
+        session["selected_campus_id"] = campus.pk
+        session.save()
+        url = reverse("payment-list")
+        response = self.client.get(url, {"amount_min": "20", "cashier": "caja"})
+        self.assertEqual([p.receipt_number for p in response.context["payments"]], ["2"])
+        response = self.client.get(url, {"amount_max": "abc"})
+        self.assertEqual(len(response.context["payments"]), 0)

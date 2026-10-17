@@ -18,11 +18,19 @@ record_code_validator = RegexValidator(
     "Ingrese solo números en el código de ficha.",
 )
 
+MAX_FICHA_IMAGE_SIZE = 10 * 1024 * 1024
+DUPLICATE_FICHA_MESSAGE = "Este código de ficha ya está registrado en la misma fecha de matrícula."
+
 UNASSIGNED_COURSE_NAME = "POR ASIGNAR"
 UNASSIGNED_SCHEDULE_NAME = "PENDIENTE DE ASIGNACION"
 
 
 DEFAULT_PROMOTER_NAMES = ("PARTICULAR", "NN")
+DEFAULT_SCHEDULE_NAMES = (
+    "SÁBADOS DE 8AM A 11AM",
+    "SÁBADOS DE 11AM A 2PM",
+    UNASSIGNED_SCHEDULE_NAME,
+)
 
 
 def ensure_default_promoters(campus):
@@ -31,8 +39,13 @@ def ensure_default_promoters(campus):
         promoter.campuses.add(campus)
 
 
+def ensure_default_schedules(campus):
+    for name in DEFAULT_SCHEDULE_NAMES:
+        Schedule.objects.get_or_create(campus=campus, name=name)
+
+
 def ensure_unassigned_course(campus):
-    schedule, _ = Schedule.objects.get_or_create(name=UNASSIGNED_SCHEDULE_NAME)
+    schedule, _ = Schedule.objects.get_or_create(campus=campus, name=UNASSIGNED_SCHEDULE_NAME)
     course, _ = Course.objects.get_or_create(
         campus=campus,
         name=UNASSIGNED_COURSE_NAME,
@@ -50,7 +63,7 @@ def ensure_unassigned_course(campus):
 
 class Student(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
-    full_name = models.CharField("Nombre completo", max_length=180, unique=True)
+    full_name = models.CharField("Nombre completo", max_length=180)
     last_name = models.CharField("Apellidos", max_length=120, blank=True)
     first_name = models.CharField("Nombres", max_length=120, blank=True)
     document_number = models.CharField("DNI", max_length=20, blank=True)
@@ -62,6 +75,12 @@ class Student(models.Model):
         ordering = ["full_name"]
         verbose_name = "estudiante"
         verbose_name_plural = "estudiantes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "full_name"],
+                name="unique_student_full_name_per_campus",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         self.full_name = self.full_name.upper()
@@ -170,12 +189,19 @@ class Course(models.Model):
 
 
 class Schedule(models.Model):
-    name = models.CharField("Horario", max_length=120, unique=True)
+    campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
+    name = models.CharField("Horario", max_length=120)
 
     class Meta:
         ordering = ["name"]
         verbose_name = "horario"
         verbose_name_plural = "horarios"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "name"],
+                name="unique_schedule_name_per_campus",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         self.name = self.name.upper()
@@ -213,13 +239,6 @@ class Enrollment(models.Model):
     course = models.ForeignKey(
         Course, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Curso"
     )
-    has_record = models.BooleanField("¿Tiene Ficha?", default=False)
-    record_code = models.CharField(
-        "Código de ficha",
-        max_length=50,
-        blank=True,
-        validators=[record_code_validator],
-    )
     promoter = models.ManyToManyField(
         Promoter,
         related_name="enrollments",
@@ -256,34 +275,6 @@ class Enrollment(models.Model):
             raise ValidationError("El estudiante debe pertenecer a la misma sede de la matrícula.")
         if self.course_id and self.campus_id and self.course.campus_id != self.campus_id:
             raise ValidationError("El curso debe pertenecer a la misma sede de la matrícula.")
-        if self.has_record:
-            code = (self.record_code or "").strip()
-            if not (code.isascii() and code.isdigit() and int(code) > 0):
-                raise ValidationError(
-                    {
-                        "record_code": "El código de ficha es obligatorio y debe ser un entero positivo."
-                    }
-                )
-        elif self.record_code:
-            raise ValidationError(
-                {
-                    "record_code": "Solo se puede registrar un código de ficha si la matrícula tiene ficha."
-                }
-            )
-        if self.has_record and self.campus_id and self.enrollment_date:
-            same_code = Enrollment.objects.filter(
-                campus_id=self.campus_id,
-                enrollment_date=self.enrollment_date,
-                record_code=(self.record_code or "").strip(),
-            )
-            if self.pk:
-                same_code = same_code.exclude(pk=self.pk)
-            if same_code.exists():
-                raise ValidationError(
-                    {
-                        "record_code": "Este código de ficha ya está registrado en la misma fecha de matrícula."
-                    }
-                )
         if self.student_id and self.course_id and not self.course.is_unassigned():
             duplicates = Enrollment.objects.filter(
                 student_id=self.student_id, course_id=self.course_id
@@ -295,5 +286,97 @@ class Enrollment(models.Model):
                     {"course": "Este estudiante ya está matriculado en este curso."}
                 )
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # La ficha conserva sede y fecha de la matrícula para validar su unicidad.
+        Ficha.objects.filter(enrollment_id=self.pk).update(
+            campus_id=self.campus_id, date=self.enrollment_date
+        )
+
+    @property
+    def record_code(self):
+        ficha = getattr(self, "ficha", None)
+        return ficha.code if ficha else ""
+
+    @property
+    def has_record(self):
+        return getattr(self, "ficha", None) is not None
+
     def __str__(self):
         return f"{self.student} — {self.course}"
+
+
+def validate_ficha_image_size(file):
+    if file.size > MAX_FICHA_IMAGE_SIZE:
+        raise ValidationError("La imagen de la ficha no puede superar los 10 MB.")
+
+
+class Ficha(models.Model):
+    enrollment = models.OneToOneField(
+        Enrollment, on_delete=models.CASCADE, related_name="ficha", verbose_name="Matrícula"
+    )
+    campus = models.ForeignKey(
+        Campus, on_delete=models.PROTECT, editable=False, verbose_name="Sede"
+    )
+    date = models.DateField("Fecha de matrícula", editable=False)
+    code = models.PositiveIntegerField(
+        "Código de ficha",
+        validators=[MinValueValidator(1, "El código de ficha debe ser un entero positivo.")],
+    )
+    image = models.ImageField(
+        "Imagen de la ficha",
+        upload_to="fichas/",
+        blank=True,
+        validators=[validate_ficha_image_size],
+    )
+    created_at = models.DateTimeField("Creada el", auto_now_add=True)
+    updated_at = models.DateTimeField("Actualizada el", auto_now=True)
+
+    class Meta:
+        ordering = ["-date", "code"]
+        verbose_name = "ficha"
+        verbose_name_plural = "fichas"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "date", "code"],
+                name="unique_ficha_code_per_campus_date",
+                violation_error_message=DUPLICATE_FICHA_MESSAGE,
+            ),
+        ]
+
+    @staticmethod
+    def validate_code(code):
+        code = str(code if code is not None else "").strip()
+        if not (code.isascii() and code.isdigit() and 0 < int(code) <= 2147483647):
+            raise ValidationError(
+                "El código de ficha es obligatorio y debe ser un entero positivo."
+            )
+
+    @staticmethod
+    def duplicates(campus_id, date, code, exclude_enrollment_id=None):
+        try:
+            code = int(str(code).strip())
+        except (TypeError, ValueError):
+            return Ficha.objects.none()
+        same_code = Ficha.objects.filter(campus_id=campus_id, date=date, code=code)
+        if exclude_enrollment_id:
+            same_code = same_code.exclude(enrollment_id=exclude_enrollment_id)
+        return same_code
+
+    def clean(self):
+        if self.enrollment_id:
+            self.campus_id = self.enrollment.campus_id
+            self.date = self.enrollment.enrollment_date
+        try:
+            self.validate_code(self.code)
+        except ValidationError as error:
+            raise ValidationError({"code": error.messages})
+        if (
+            self.campus_id
+            and self.date
+            and self.duplicates(self.campus_id, self.date, self.code, self.enrollment_id).exists()
+        ):
+            raise ValidationError({"code": DUPLICATE_FICHA_MESSAGE})
+
+    def __str__(self):
+        return f"Ficha {self.code} — {self.enrollment}"

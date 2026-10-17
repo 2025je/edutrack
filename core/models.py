@@ -80,6 +80,7 @@ class User(AbstractUser):
     can_edit_call_notes = models.BooleanField(
         "Puede editar y eliminar el historial de llamadas", default=False
     )
+    can_assign_calls = models.BooleanField("Puede asignar llamadas", default=False)
 
     # Los usuarios se identifican solo por su nombre de usuario.
     first_name = None
@@ -97,3 +98,46 @@ class User(AbstractUser):
 
     def can_access_campus(self, campus):
         return self.is_superuser or self.campuses.filter(pk=campus.pk, active=True).exists()
+
+
+class ActivityLog(models.Model):
+    """Registro de auditoría de lo que hacen los usuarios en el sistema."""
+
+    class Action(models.TextChoices):
+        LOGIN = "login", "Inicio de sesión"
+        LOGIN_FAILED = "login_failed", "Intento de acceso fallido"
+        LOGOUT = "logout", "Cierre de sesión"
+        CREATE = "create", "Creación"
+        UPDATE = "update", "Edición"
+        DELETE = "delete", "Eliminación"
+        EXPORT = "export", "Exportación"
+        OTHER = "other", "Otra acción"
+
+    created_at = models.DateTimeField("Fecha y hora", auto_now_add=True, db_index=True)
+    user = models.ForeignKey(
+        "core.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="activity_logs",
+        verbose_name="Usuario",
+    )
+    username = models.CharField("Usuario (texto)", max_length=150, blank=True)
+    campus = models.ForeignKey(
+        Campus, null=True, blank=True, on_delete=models.SET_NULL, verbose_name="Sede"
+    )
+    action = models.CharField("Acción", max_length=20, choices=Action.choices, db_index=True)
+    description = models.CharField("Descripción", max_length=255)
+    method = models.CharField("Método", max_length=10, blank=True)
+    path = models.CharField("Ruta", max_length=500, blank=True)
+    ip_address = models.GenericIPAddressField("IP", null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "registro de actividad"
+        verbose_name_plural = "registro de actividades"
+
+    def __str__(self):
+        return (
+            f"{self.created_at:%Y-%m-%d %H:%M} · {self.username or 'anónimo'} · {self.description}"
+        )

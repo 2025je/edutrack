@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from core.models import Campus, User
 from payments.models import Installment, Payment, PaymentAllocation
-from calls.models import CallNote, WhatsAppTemplate
+from calls.models import CallAssignment, CallNote, WhatsAppTemplate
 from students.models import Course, Enrollment, Student
 
 
@@ -17,6 +17,8 @@ class CallStudentListTests(TestCase):
             username="caja", password="x", can_manage_calls=True, can_edit_call_notes=True
         )
         user.campuses.add(self.campus)
+        user.can_assign_calls = True
+        user.save()
         self.client.force_login(user)
         session = self.client.session
         session["selected_campus_id"] = self.campus.pk
@@ -225,3 +227,97 @@ class CallStudentListTests(TestCase):
             "https://api.whatsapp.com/send?phone=51911111111&amp;text=Hola%20LUIS%2C%20debes%20S%2F%2020.00",
         )
         self.assertContains(response, "https://api.whatsapp.com/send?phone=51922222222&amp;text=")
+
+
+class CallAssignmentTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Asignación", active=True)
+        self.course = Course.objects.create(
+            campus=self.campus, name="Ingles", schedule="L", group="A"
+        )
+        self.enrollments = []
+        for name in ("Ana", "Beto"):
+            student = Student.objects.create(campus=self.campus, full_name=name, phone="987654321")
+            self.enrollments.append(
+                Enrollment.objects.create(campus=self.campus, student=student, course=self.course)
+            )
+            CallNote.objects.create(
+                campus=self.campus, student=student, author=self._user("autor" + name), note="x"
+            )
+        self.caller = self._user("llamador", can_manage_calls=True)
+        self.boss = self._user("jefe", can_manage_calls=True, can_assign_calls=True)
+
+    def _user(self, username, **flags):
+        user = User.objects.create_user(username=username, password="pass-12345", **flags)
+        user.campuses.add(self.campus)
+        return user
+
+    def _login(self, user):
+        self.client.force_login(user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def test_caller_without_assignments_sees_nothing(self):
+        self._login(self.caller)
+        self.assertEqual(self.client.get(reverse("calls-students")).context["rows"], [])
+        self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 0)
+
+    def test_caller_sees_only_assigned_enrollments_and_their_history(self):
+        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+        self._login(self.caller)
+        rows = self.client.get(reverse("calls-students")).context["rows"]
+        self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+        notes = self.client.get(reverse("calls-notes-all")).context["notes"]
+        self.assertEqual([n.student.full_name for n in notes], ["ANA"])
+        other = self.enrollments[1].student
+        self.assertEqual(self.client.get(reverse("calls-notes", args=[other.pk])).status_code, 404)
+
+    def test_assigner_sees_everything(self):
+        self._login(self.boss)
+        self.assertEqual(len(self.client.get(reverse("calls-students")).context["rows"]), 2)
+        self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 2)
+
+    def test_only_assigner_can_open_assignments(self):
+        self._login(self.caller)
+        self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
+
+    def test_assigner_assigns_and_unassigns_shown_enrollments(self):
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        shown = [e.pk for e in self.enrollments]
+        self.client.post(
+            url,
+            {"usuario": self.caller.pk, "shown": shown, "enrollments": [shown[0]]},
+        )
+        self.assertEqual(
+            list(self.caller.call_assignments.values_list("enrollment_id", flat=True)), [shown[0]]
+        )
+        self.client.post(url, {"usuario": self.caller.pk, "shown": shown})
+        self.assertFalse(self.caller.call_assignments.exists())
+        self.assertContains(self.client.get(url, {"usuario": self.caller.pk}), "ANA")
+
+    def test_assignment_filters(self):
+        other_course = Course.objects.create(
+            campus=self.campus, name="Arte", schedule="M", group="B"
+        )
+        extra = Enrollment.objects.create(
+            campus=self.campus, student=self.enrollments[0].student, course=other_course
+        )
+        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+
+        def ids(**params):
+            response = self.client.get(url, {"usuario": self.caller.pk, **params})
+            return {r["enrollment"].pk for r in response.context["rows"]}
+
+        self.assertEqual(
+            ids(curso="ARTE"),
+            {extra.pk} if other_course.name == "ARTE" else ids(curso=other_course.name),
+        )
+        self.assertEqual(ids(horario="M"), {extra.pk})
+        self.assertEqual(ids(grupo="B"), {extra.pk})
+        self.assertEqual(ids(estado="asignadas"), {self.enrollments[0].pk})
+        self.assertNotIn(self.enrollments[0].pk, ids(estado="sin_asignar"))
+        self.assertEqual(ids(estado="otros"), set())

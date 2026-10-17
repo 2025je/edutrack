@@ -12,4 +12,5 @@
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Promotor</th><th>Estado</th></tr></thead><tbody>
 {% for promoter in promoters %}<tr><td>{{ promoter.name }}</td><td>{% if promoter.active %}Activo{% else %}Inactivo{% endif %}</td></tr>{% empty %}<tr><td colspan="2" class="center-align muted">No hay promotores registrados.</td></tr>{% endfor %}
 </tbody></table></div>
+{% include "shared/pagination.html" %}
 {% endblock %}

@@ -1,7 +1,7 @@
 from django.test import TestCase
 from django.urls import reverse
 
-from core.models import Campus, User
+from core.models import ActivityLog, Campus, User
 
 
 class CampusLogoTests(TestCase):
@@ -81,3 +81,48 @@ class CampusLogoTests(TestCase):
         )
 
         self.assertRedirects(response, reverse("dashboard"), fetch_redirect_response=False)
+
+
+class ActivityLogTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede A", active=True)
+        self.admin = User.objects.create_superuser(
+            username="ADMIN", email="a@x.com", password="x-Pass-12345"
+        )
+        self.worker = User.objects.create_user(
+            username="CAJERO", password="x-Pass-12345", can_register_payments=True
+        )
+        self.worker.campuses.add(self.campus)
+
+    def test_login_logout_and_failed_login_are_recorded(self):
+        self.client.post(reverse("login"), {"username": "CAJERO", "password": "mala"})
+        self.client.post(reverse("login"), {"username": "CAJERO", "password": "x-Pass-12345"})
+        self.client.post(reverse("logout"))
+        actions = list(ActivityLog.objects.order_by("id").values_list("action", "username"))
+        self.assertEqual(
+            actions,
+            [("login_failed", "CAJERO"), ("login", "CAJERO"), ("logout", "CAJERO")],
+        )
+
+    def test_successful_write_is_recorded_but_reads_and_errors_are_not(self):
+        self.client.force_login(self.worker)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.client.get(reverse("payment-list"))
+        self.assertEqual(ActivityLog.objects.count(), 0)
+        self.client.post(reverse("select-campus"), {"campus": self.campus.pk})
+        log = ActivityLog.objects.get()
+        self.assertEqual((log.username, log.campus), ("CAJERO", self.campus))
+        self.assertEqual(log.method, "POST")
+
+    def test_only_superusers_can_see_activity_view(self):
+        ActivityLog.objects.create(username="CAJERO", action="login", description="Inició sesión")
+        self.client.force_login(self.worker)
+        self.assertEqual(self.client.get(reverse("activity-log")).status_code, 403)
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activity-log"), {"user": "CAJERO", "action": "login"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Inició sesión")
+        response = self.client.get(reverse("activity-log"), {"action": "delete"})
+        self.assertNotContains(response, "Inició sesión")

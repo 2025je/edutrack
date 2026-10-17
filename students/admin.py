@@ -6,6 +6,7 @@ from .models import (
     UNASSIGNED_SCHEDULE_NAME,
     Course,
     Enrollment,
+    Ficha,
     Promoter,
     Schedule,
     Student,
@@ -28,7 +29,9 @@ class StudentAdminForm(forms.ModelForm):
         cleaned_data["first_name"] = first_name
         full_name = " ".join(part.strip() for part in (last_name, first_name) if part.strip())
         if full_name:
-            duplicate = Student.objects.filter(full_name__iexact=full_name)
+            duplicate = Student.objects.filter(
+                campus=cleaned_data.get("campus"), full_name__iexact=full_name
+            )
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
@@ -68,11 +71,28 @@ class CourseAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance.pk:
-            self.initial["schedule"] = Schedule.objects.filter(name=self.instance.schedule).first()
+        campus_id = (
+            self.data.get("campus")
+            or self.initial.get("campus")
+            or getattr(self.instance, "campus_id", None)
+        )
+        if campus_id:
+            self.fields["schedule"].queryset = self.fields["schedule"].queryset.filter(
+                campus_id=campus_id
+            )
+        else:
+            self.fields["schedule"].queryset = Schedule.objects.none()
+        if self.instance.pk and campus_id:
+            self.initial["schedule"] = Schedule.objects.filter(
+                campus_id=campus_id, name=self.instance.schedule
+            ).first()
 
     def clean_schedule(self):
-        return self.cleaned_data["schedule"].name
+        schedule = self.cleaned_data["schedule"]
+        campus = self.cleaned_data.get("campus")
+        if campus and schedule.campus_id != campus.pk:
+            raise forms.ValidationError("El horario debe pertenecer a la misma sede del curso.")
+        return schedule.name
 
 
 @admin.register(Course)
@@ -109,6 +129,8 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
+    list_display = ("name", "campus")
+    list_filter = ("campus",)
     search_fields = ("name",)
 
     def _is_locked(self, request, obj):
@@ -129,11 +151,20 @@ class ScheduleAdmin(admin.ModelAdmin):
 class EnrollmentAdmin(admin.ModelAdmin):
     list_display = ("student", "course", "record_code", "promoter_names", "campus", "active")
     list_filter = ("campus", "active")
-    search_fields = ("student__full_name", "course__name", "record_code", "promoter__name")
+    search_fields = ("student__full_name", "course__name", "ficha__code", "promoter__name")
 
     @admin.display(description="Promotores")
     def promoter_names(self, enrollment):
         return ", ".join(enrollment.promoter.values_list("name", flat=True)) or "—"
+
+
+@admin.register(Ficha)
+class FichaAdmin(admin.ModelAdmin):
+    list_display = ("code", "enrollment", "date", "campus")
+    list_filter = ("campus",)
+    search_fields = ("code", "enrollment__student__full_name")
+    raw_id_fields = ("enrollment",)
+    readonly_fields = ("campus", "date")
 
 
 @admin.register(Promoter)

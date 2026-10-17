@@ -14,7 +14,7 @@
                 {% endif %}
             </h1>
 
-            <form method="post" novalidate>
+            <form method="post" enctype="multipart/form-data" novalidate>
                 {% csrf_token %}
 
                 {% if form.non_field_errors %}
@@ -57,7 +57,24 @@
                 <div class="row">
                     {% for field in form %}
                         {% if field.is_hidden %}{{ field }}{% else %}
-                        <div class="col s12 m6 field">
+                        {% if "matriculas" not in request.path %}
+                            {% if field.name == "last_name" %}<h6 class="col s12 strong mt">Datos personales</h6>
+                            {% elif field.name == "phone_numbers" %}<h6 class="col s12 strong mt">Contacto</h6>
+                            {% elif field.name == "active" %}<h6 class="col s12 strong mt">Estado</h6>{% endif %}
+                        {% endif %}
+                        {% if "matriculas" in request.path %}
+                            {% if field.name == "course" %}<h6 class="col s12 strong mt">Datos de la matrícula</h6>
+                            {% elif field.name == "promoter" %}<h6 class="col s12 strong mt">Promotor</h6>
+                            {% elif field.name == "record_code" %}<h6 class="col s12 strong mt">Ficha</h6>
+                            {% elif field.name == "enrollment_fee" %}<h6 class="col s12 strong mt">Costos</h6>
+                            {% elif field.name == "active" %}<h6 class="col s12 strong mt">Estado</h6>{% endif %}
+                        {% endif %}
+                        {% if field.name == "record_code" %}
+                        <div class="col s12">
+                        <div id="ficha-section" style="margin-bottom:1rem;">
+                        <div id="ficha-fields" class="row" style="margin-bottom:0">
+                        {% endif %}
+                        <div class="col s12{% if field.name == "record_code" %} m4{% elif field.name == "record_image" %} m8{% elif field.name == "record_image_quality" or field.name == "promoter" or field.name == "active" %}{% else %} m6{% endif %} field"{% if field.name == "enrollment_fee" %} style="clear:left"{% endif %}>
                             {% if field.name == "promoter" and "matriculas" in request.path %}
                                 <label>{{ field.label }}</label>
                                 <div class="check-list">
@@ -72,6 +89,12 @@
                                         <span class="muted">No hay promotores activos disponibles.</span>
                                     {% endfor %}
                                 </div>
+                            {% elif field.name == "record_image_quality" %}
+                                <label>{{ field.label }}</label>
+                                <div id="record-quality-options" class="radio-inline">
+                                    {% for radio in field %}<label for="{{ radio.id_for_label }}"><input type="radio" name="{{ radio.data.name }}" id="{{ radio.id_for_label }}" value="{{ radio.data.value }}" {% if radio.data.selected %}checked{% endif %}><span>{{ radio.choice_label }}</span></label>{% endfor %}
+                                </div>
+                                <div class="help">{{ field.help_text }}</div>
                             {% elif field.field.widget.input_type == "checkbox" %}
                                 <p>
                                     <label for="{{ field.id_for_label }}">
@@ -118,14 +141,26 @@
                                 {% endif %}
                             {% endif %}
 
-                            {% if field.help_text %}
+                            {% if field.help_text and field.name != "record_image_quality" %}
                                 <div class="help">{{ field.help_text }}</div>
+                            {% endif %}
+
+                            {% if field.name == "record_image" %}
+                                <div id="record-image-preview" class="mt" {% if not object.ficha.image %}style="display:none"{% endif %}>
+                                    <img id="record-image-preview-img" alt="Vista previa de la ficha" src="{% if object.ficha.image %}{{ object.ficha.image.url }}{% endif %}" style="max-width:100%;max-height:260px;border:1px solid #ccc;border-radius:4px;display:block">
+                                    <div id="record-image-preview-info" class="help"></div>
+                                </div>
                             {% endif %}
 
                             {% for error in field.errors %}
                                 <div class="field-error">{{ error }}</div>
                             {% endfor %}
                         </div>
+                        {% if field.name == "record_image_quality" %}
+                        </div>
+                        </div>
+                        </div>
+                        {% endif %}
                         {% endif %}
                     {% endfor %}
                 </div>
@@ -303,34 +338,71 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 <script>
 (() => {
-    const hasRecord = document.getElementById("id_has_record");
     const recordCode = document.getElementById("id_record_code");
-    if (!hasRecord || !recordCode) return;
-    const sync = () => {
-        recordCode.disabled = !hasRecord.checked;
-        recordCode.required = hasRecord.checked;
-        if (!hasRecord.checked) recordCode.value = "";
+    const recordImage = document.getElementById("id_record_image");
+    const recordQuality = document.querySelectorAll("#record-quality-options input");
+    const preview = document.getElementById("record-image-preview");
+    const previewImg = document.getElementById("record-image-preview-img");
+    const previewInfo = document.getElementById("record-image-preview-info");
+    if (!recordCode) return;
+    // El código es un entero positivo: se descartan letras, símbolos y ceros iniciales al escribir o pegar.
+    recordCode.addEventListener("input", () => {
+        recordCode.value = recordCode.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 10);
+    });
+    recordCode.addEventListener("keypress", (e) => {
+        if (e.key.length === 1 && !/\d/.test(e.key)) e.preventDefault();
+    });
+    const originalSrc = previewImg ? previewImg.getAttribute("src") : "";
+    let objectUrl = null;
+    const fmt = (bytes) => bytes > 1048576 ? (bytes / 1048576).toFixed(2) + " MB" : Math.round(bytes / 1024) + " KB";
+    const showPreview = () => {
+        if (!recordImage || !previewImg) return;
+        if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+        const file = recordImage.files && recordImage.files[0];
+        if (!file) {
+            previewInfo.textContent = "";
+            if (originalSrc) { previewImg.src = originalSrc; preview.style.display = ""; }
+            else { previewImg.removeAttribute("src"); preview.style.display = "none"; }
+            return;
+        }
+        objectUrl = URL.createObjectURL(file);
+        previewImg.onload = () => {
+            previewInfo.textContent = `${file.name} · ${previewImg.naturalWidth}×${previewImg.naturalHeight} px · ${fmt(file.size)} · se guardará como JPEG`;
+        };
+        previewImg.src = objectUrl;
+        preview.style.display = "";
     };
-    hasRecord.addEventListener("change", sync);
+    if (recordImage) recordImage.addEventListener("change", showPreview);
+    // La imagen solo se habilita cuando hay un código de ficha.
+    const sync = () => {
+        const hasCode = recordCode.value.trim() !== "";
+        recordQuality.forEach((radio) => { radio.disabled = !hasCode; });
+        if (recordImage) {
+            recordImage.disabled = !hasCode;
+            if (!hasCode) { recordImage.value = ""; showPreview(); }
+        }
+    };
+    recordCode.addEventListener("input", sync);
     sync();
 })();
 {% if not object %}
 (() => {
-    const hasRecord = document.getElementById("id_has_record");
+    const recordCode = document.getElementById("id_record_code");
     const dateInput = document.getElementById("id_enrollment_date");
-    if (!hasRecord || !dateInput) return;
+    if (!recordCode || !dateInput) return;
+    const hasCode = () => recordCode.value.trim() !== "";
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const defaultDate = () => {
         const date = new Date();
-        if (hasRecord.checked) date.setDate(date.getDate() - ((date.getDay() + 1) % 7));
+        if (hasCode()) date.setDate(date.getDate() - ((date.getDay() + 1) % 7));
         return iso(date);
     };
     let edited = false;
     dateInput.addEventListener("input", () => { edited = true; });
-    hasRecord.addEventListener("change", () => {
+    recordCode.addEventListener("input", () => {
         if (!edited) dateInput.value = defaultDate();
     });
-    if (hasRecord.checked && !edited && !dateInput.value) dateInput.value = defaultDate();
+    if (hasCode() && !edited && !dateInput.value) dateInput.value = defaultDate();
 })();
 {% endif %}
 (() => {

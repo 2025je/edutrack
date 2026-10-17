@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Actividad de usuarios · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">Actividad de usuarios</h1><div class="muted">Registro de accesos y de las acciones que realizan los usuarios en el sistema. No se guardan los datos enviados en los formularios.</div></div>
+<form method="get" class="card card-pad no-print mb" data-live-filter>
+  <h6 class="strong" style="margin-top:0">Quién y qué</h6>
+  <div class="row" style="margin-bottom:0">
+    <div class="col s12 m4 field"><label for="f-user">Usuario</label><select id="f-user" name="user" class="browser-default"><option value="">Todos</option>{% for name in users_list %}<option value="{{ name }}" {% if request.GET.user == name %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+    <div class="col s12 m4 field"><label for="f-action">Tipo de acción</label><select id="f-action" name="action" class="browser-default"><option value="">Todas</option>{% for value, label in actions %}<option value="{{ value }}" {% if request.GET.action == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col s12 m4 field"><label for="f-campus">Sede</label><select id="f-campus" name="campus" class="browser-default"><option value="">Todas</option>{% for c in campuses %}<option value="{{ c.pk }}" {% if request.GET.campus == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+  </div>
+  <h6 class="strong">Cuándo y detalle</h6>
+  <div class="row" style="margin-bottom:0">
+    <div class="col s6 m3 field"><label for="f-from">Desde</label><input id="f-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+    <div class="col s6 m3 field"><label for="f-to">Hasta</label><input id="f-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+    <div class="col s12 m6 field"><label for="f-q">Descripción o ruta</label><input id="f-q" type="search" name="q" value="{{ request.GET.q }}" autocomplete="off"></div>
+  </div>
+  <p><label><input type="checkbox" name="exclude_self" value="1" {% if request.GET.exclude_self %}checked{% endif %}><span>Ocultar mi propia actividad</span></label></p>
+  <div class="flex gap items-center"><button class="btn" type="submit">Filtrar</button>{% if has_filters %}<a class="btn-flat grey-text text-darken-2" href="{% url 'activity-log' %}">Limpiar</a>{% endif %}</div>
+</form>
+<div data-live-region="results">
+<div class="card table-wrap"><table class="highlight"><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Sede</th><th>Acción</th><th>Descripción</th><th>Ruta</th><th>IP</th></tr></thead><tbody>
+{% for log in logs %}<tr>
+  <td style="white-space:nowrap">{{ log.created_at|date:"d/m/Y H:i:s" }}</td>
+  <td class="strong">{{ log.username|default:"—" }}</td>
+  <td>{{ log.campus.name|default:"—" }}</td>
+  <td><span class="chip {% if log.action == 'login_failed' or log.action == 'delete' %}red darken-1{% elif log.action == 'create' %}green darken-1{% elif log.action == 'update' %}blue darken-2{% else %}grey{% endif %}">{{ log.get_action_display }}</span></td>
+  <td>{{ log.description }}</td>
+  <td class="muted" style="word-break:break-all">{{ log.method }} {{ log.path }}</td>
+  <td>{{ log.ip_address|default:"—" }}</td>
+</tr>{% empty %}<tr><td colspan="7" class="center-align muted">No hay actividad registrada con estos criterios.</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="mt">{% include "shared/pagination.html" %}</div>
+</div>
+{% endblock %}

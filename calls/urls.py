@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    CallAssignmentView,
     CallNoteAllListView,
     CallNoteCreateView,
     CallNoteDeleteView,
@@ -21,5 +22,6 @@ urlpatterns = [
         name="calls-note-create",
     ),
     path("plantilla/", WhatsAppTemplateView.as_view(), name="calls-template"),
+    path("asignaciones/", CallAssignmentView.as_view(), name="calls-assignments"),
     path("alumnos/", CallStudentListView.as_view(), name="calls-students"),
 ]

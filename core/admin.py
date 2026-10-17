@@ -41,6 +41,7 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_promoters",
                     "can_manage_calls",
                     "can_edit_call_notes",
+                    "can_assign_calls",
                     "can_manage_campuses",
                     "can_manage_users",
                 )
@@ -58,6 +59,7 @@ class UserAdmin(BaseUserAdmin):
                     "can_manage_promoters",
                     "can_manage_calls",
                     "can_edit_call_notes",
+                    "can_assign_calls",
                     "can_manage_campuses",
                     "can_manage_users",
                 )

@@ -32,7 +32,14 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
-from .models import UNASSIGNED_COURSE_NAME, UNASSIGNED_SCHEDULE_NAME, Student, Enrollment, Course
+from .models import (
+    UNASSIGNED_COURSE_NAME,
+    UNASSIGNED_SCHEDULE_NAME,
+    Student,
+    Enrollment,
+    Course,
+    Ficha,
+)
 from .forms import StudentForm, EnrollmentForm
 
 
@@ -213,7 +220,7 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         "course": "course__name",
         "schedule": "course__schedule",
         "group": "course__group",
-        "record_code": "record_code",
+        "record_code": "ficha__code",
         "promoter": "promoter__name",
         "enrollment_date": "enrollment_date",
         "start_date": "course__start_date",
@@ -269,7 +276,7 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             .values("total")[:1]
         )
         qs = self.campus_queryset(
-            Enrollment.objects.select_related("campus", "student", "course")
+            Enrollment.objects.select_related("campus", "student", "course", "ficha")
             .annotate(
                 total_enrollment_cost=F("enrollment_fee") + F("monthly_fee"),
                 total_paid=Coalesce(
@@ -292,7 +299,7 @@ class EnrollmentListView(CampusScopedMixin, ListView):
         filters = {
             "student__full_name__unaccent__icontains": self.request.GET.get("student", "").strip(),
             "course__name__unaccent__icontains": self.request.GET.get("course", "").strip(),
-            "record_code__icontains": self.request.GET.get("record_code", "").strip(),
+            "ficha__code__icontains": self.request.GET.get("record_code", "").strip(),
             "promoter__name__unaccent__icontains": self.request.GET.get("promoter", "").strip(),
         }
         for field, value in filters.items():
@@ -326,6 +333,27 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             qs = qs.filter(total_debt__gt=0)
         elif debt_status == "without_debt":
             qs = qs.filter(total_debt=0)
+        document = self.request.GET.get("document", "").strip()
+        if document:
+            qs = qs.filter(student__document_number__icontains=document)
+        schedule = self.request.GET.get("schedule", "").strip()
+        if schedule:
+            qs = qs.filter(course__schedule__unaccent__icontains=schedule)
+        group = self.request.GET.get("group", "").strip()
+        if group:
+            qs = qs.filter(course__group__iexact=group)
+        record_status = self.request.GET.get("record_status", "")
+        if record_status == "with_record":
+            qs = qs.filter(ficha__isnull=False)
+        elif record_status == "without_record":
+            qs = qs.filter(ficha__isnull=True)
+        elif record_status == "with_image":
+            qs = qs.filter(ficha__isnull=False).exclude(ficha__image="")
+        active_status = self.request.GET.get("active_status", "")
+        if active_status == "active":
+            qs = qs.filter(active=True)
+        elif active_status == "inactive":
+            qs = qs.filter(active=False)
         qs = qs.distinct()
         sort = self.request.GET.get("sort", "created_at")
         direction = self.request.GET.get("direction", "desc")
@@ -455,13 +483,13 @@ class ToolsView(
                         f"El rango no puede superar {MAX_RECORD_CODE_CHECK_RANGE:,} códigos."
                     )
                 else:
-                    expected_codes = [str(code) for code in range(first_code, last_code + 1)]
+                    expected_codes = list(range(first_code, last_code + 1))
                     registered_codes = set(
-                        Enrollment.objects.filter(
+                        Ficha.objects.filter(
                             campus=get_selected_campus(self.request),
-                            enrollment_date=enrollment_date,
-                            record_code__in=expected_codes,
-                        ).values_list("record_code", flat=True)
+                            date=enrollment_date,
+                            code__in=expected_codes,
+                        ).values_list("code", flat=True)
                     )
                     context["missing_record_codes"] = [
                         code for code in expected_codes if code not in registered_codes
@@ -941,6 +969,7 @@ class CourseStudentTablesView(CampusScopedMixin, ListView):
     model = Course
     template_name = "students/course_student_tables.html"
     context_object_name = "courses"
+    paginate_by = 10
 
     def get_queryset(self):
         return course_students_queryset(self.request)
@@ -948,6 +977,9 @@ class CourseStudentTablesView(CampusScopedMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["search_query"] = self.request.GET.get("q", "").strip()
+        params = self.request.GET.copy()
+        params.pop("page", None)
+        context["pagination_query"] = params.urlencode()
         context["total_students"] = (
             Enrollment.objects.filter(
                 campus=get_selected_campus(self.request), active=True, student__active=True

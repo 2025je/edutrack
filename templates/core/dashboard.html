@@ -5,14 +5,46 @@
 </div>
 <div class="row">
   {% if user.is_superuser or user.can_manage_students %}
+  <div class="col s12"><h6 class="strong">Alumnos y matrículas</h6></div>
   <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Estudiantes</div><div class="stat">{{ student_count }}</div></div></div>
   <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Matrículas activas</div><div class="stat">{{ enrollment_count }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Matrículas del mes</div><div class="stat">{{ enrollments_month }}</div><small class="muted">Hoy: {{ enrollments_today }}</small></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Matrículas con ficha</div><div class="stat">{{ ficha_count }}</div></div></div>
   {% endif %}
   {% if user.is_superuser or user.can_register_payments %}
+  <div class="col s12"><h6 class="strong">Pagos y deudas</h6></div>
   <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Pagos confirmados</div><div class="stat-md">S/ {{ payments_total|floatformat:2 }}</div><small class="muted">Acumulado histórico</small></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Cobrado este mes</div><div class="stat-md">S/ {{ payments_month|floatformat:2 }}</div><small class="muted">Hoy: S/ {{ payments_today|floatformat:2 }}</small></div></div>
   <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Saldo pendiente</div><div class="stat-md">S/ {{ pending_total|floatformat:2 }}</div><small class="muted">Cuotas activas</small></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Cuotas vencidas</div><div class="stat">{{ overdue_count }}</div></div></div>
+  {% endif %}
+  {% if user.is_superuser or user.can_manage_calls %}
+  <div class="col s12"><h6 class="strong">Llamadas</h6></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">{% if calls_scope_all %}Matrículas en llamadas{% else %}Matrículas asignadas a mí{% endif %}</div><div class="stat">{{ call_enrollments }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Llamadas hoy</div><div class="stat">{{ calls_today }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Llamadas del mes</div><div class="stat">{{ calls_month }}</div><small class="muted">{% if calls_scope_all %}De todo el equipo{% else %}Registradas por mí{% endif %}</small></div></div>
+  {% endif %}
+  {% if user.is_superuser or user.can_manage_promoters or user.can_manage_users %}
+  <div class="col s12"><h6 class="strong">Administración</h6></div>
+  {% endif %}
+  {% if user.is_superuser or user.can_manage_promoters %}
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Cursos activos</div><div class="stat">{{ course_count }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Promotores activos</div><div class="stat">{{ promoter_count }}</div></div></div>
+  {% endif %}
+  {% if user.is_superuser or user.can_manage_users %}
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Usuarios activos</div><div class="stat">{{ user_count }}</div></div></div>
   {% endif %}
 </div>
+{% if recent_enrollments or recent_payments %}
+<div class="row">
+  {% if recent_enrollments %}
+  <div class="col s12 l6"><div class="card card-pad"><h2>Últimas matrículas</h2><ul class="mb-0" style="list-style:none;padding:0">{% for e in recent_enrollments %}<li class="py">{{ e.student.full_name }} <span class="muted">· {{ e.course.name }} · {{ e.enrollment_date|date:"d/m/Y" }}</span></li>{% endfor %}</ul></div></div>
+  {% endif %}
+  {% if recent_payments %}
+  <div class="col s12 l6"><div class="card card-pad"><h2>Últimos pagos</h2><ul class="mb-0" style="list-style:none;padding:0">{% for p in recent_payments %}<li class="py">{{ p.enrollment.student.full_name }} <span class="muted">· S/ {{ p.amount|floatformat:2 }} · {{ p.created_at|date:"d/m/Y H:i" }}</span></li>{% endfor %}</ul></div></div>
+  {% endif %}
+</div>
+{% endif %}
 <div class="card card-pad"><h2>Accesos rápidos</h2><div class="flex wrap gap">
   {% if user.is_superuser or user.can_manage_students %}
   <a class="btn-flat blue-text" href="{% url 'student-create' %}">Registrar estudiante</a>

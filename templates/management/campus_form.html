@@ -5,10 +5,13 @@
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     {{ form.non_field_errors }}
+    <h6 class="strong">Datos de la sede</h6>
     <label for="{{ form.name.id_for_label }}">Nombre de la sede</label>
     {{ form.name }}{% for error in form.name.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <label for="{{ form.address.id_for_label }}">Dirección</label>
     {{ form.address }}{% for error in form.address.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <p><label for="{{ form.active.id_for_label }}">{{ form.active }}<span>Sede activa</span></label></p>
+    <h6 class="strong mt">Identidad visual</h6>
     <label for="{{ form.logo.id_for_label }}">Logo</label>
     {{ form.logo }}{% for error in form.logo.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <div id="logo-preview-box" style="margin:8px 0;{% if not object.logo %}display:none{% endif %}">
@@ -35,10 +38,9 @@
       });
     })();
     </script>
-    <p><label for="{{ form.active.id_for_label }}">{{ form.active }}<span>Sede activa</span></label></p>
     {% if not object %}
     <div class="row mb-0">
-      <h2>Volantes (PDF o imagen)</h2>
+      <h6 class="col s12 strong mt">Volantes (PDF o imagen)</h6>
       <p class="muted col s12">Opcional: puedes subir un volante ahora y agregar más al editar la sede.</p>
       {% include "management/_flyer_fields.html" %}
     </div>

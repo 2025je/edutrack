@@ -1,31 +1,67 @@
 {% extends "base.html" %}{% block title %}{% if object %}Editar pago{% else %}Registrar pago{% endif %} · EduTrack{% endblock %}
 {% block content %}<div class="row"><div class="col s12 xl10 offset-xl1"><div class="card card-pad">
-<h1>{% if object %}Editar pago{% else %}Registrar pago{% endif %}</h1><p class="muted">Solo se muestran matrículas con deuda pendiente. Busca por nombre del alumno o curso.</p>
-<form method="get" class="mb" data-live-filter>
-  <label for="payment-search">Buscar matrícula pendiente</label>
-  <div class="flex gap items-center">
-    <input id="payment-search" type="search" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Nombre del alumno o curso" style="margin:0" autocomplete="off">
-    <button class="btn" type="submit">Buscar</button>
-    {% if request.GET.q %}<a class="btn-flat grey-text text-darken-2" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
-  </div>
-</form>
-<div data-live-region="empty-note">{% if not form.fields.enrollment.queryset.exists %}<div class="note note-info">No se encontraron matrículas con deuda pendiente{% if request.GET.q %} para la búsqueda indicada{% endif %}.</div>{% endif %}</div>
-<form method="post">{% csrf_token %}
+<h1>{% if object %}Editar pago{% else %}Registrar pago{% endif %}</h1>
+{% if enrollment %}<p class="muted">Paso 2 de 2: completa los datos del recibo.</p>{% endif %}
+<style>.section-title{font-size:1.2rem;font-weight:600;margin:1.75rem 0 1rem;padding-bottom:.4rem;border-bottom:1px solid rgba(128,138,155,.35)}.pay-summary{display:flex;flex-wrap:wrap;gap:1rem 2rem;padding:1rem;border:1px solid rgba(128,138,155,.4);border-radius:6px}.pay-summary dt{font-size:.8rem;opacity:.7}.pay-summary dd{margin:0;font-weight:600}</style>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
 {% if form.non_field_errors %}<div class="note note-danger">{{ form.non_field_errors }}</div>{% endif %}
-{% for field in form %}<div class="field">
-{% if field.name == "enrollment" %}
-<label>{{ field.label }}</label>
-<div data-live-region="enrollment-table" class="table-wrap" style="border:1px solid #e0e0e0;border-radius:4px">
-<table class="highlight">
-<thead><tr><th class="center-align" scope="col">Seleccionar</th><th scope="col">Estudiante</th><th scope="col">Curso</th><th class="right-align" scope="col">Costo matrícula</th><th class="right-align" scope="col">Mensualidad</th><th class="right-align" scope="col">Deuda</th></tr></thead>
-<tbody>
-{% for enrollment in field.field.queryset %}<tr><td class="center-align"><label><input type="radio" name="{{ field.html_name }}" id="id_{{ field.html_name }}_{{ enrollment.pk }}" value="{{ enrollment.pk }}" {% if field.field.required %}required{% endif %} {% if field.value|stringformat:"s" == enrollment.pk|stringformat:"s" %}checked{% endif %}><span aria-label="Seleccionar {{ enrollment.student.full_name }}"></span></label></td><td>{{ enrollment.student.full_name }}</td><td>{{ enrollment.course.name }}</td><td class="right-align">S/ {{ enrollment.enrollment_fee|floatformat:2 }}</td><td class="right-align">S/ {{ enrollment.monthly_fee|floatformat:2 }}</td><td class="right-align strong">S/ {{ enrollment.pending_balance|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas pendientes disponibles.</td></tr>{% endfor %}
-</tbody></table></div>
+{% if enrollment %}
+<h2 class="section-title" style="margin-top:1rem">Matrícula a pagar</h2>
+<dl class="pay-summary" style="margin:0">
+<div><dt>Estudiante</dt><dd>{{ enrollment.student.full_name }}</dd></div>
+<div><dt>DNI</dt><dd>{{ enrollment.student.document_number|default:"—" }}</dd></div>
+<div><dt>Curso</dt><dd>{{ enrollment.course.name }}</dd></div>
+<div><dt>Costo matrícula</dt><dd>S/ {{ enrollment.enrollment_fee|floatformat:2 }}</dd></div>
+<div><dt>Mensualidad</dt><dd>S/ {{ enrollment.monthly_fee|floatformat:2 }}</dd></div>
+<div><dt>Deuda pendiente</dt><dd>S/ {{ enrollment.pending_balance|floatformat:2 }}</dd></div>
+</dl>
+<div style="margin-top:.5rem"><a class="btn-flat blue-text" href="{% url 'payment-create' %}"><i class="material-icons left" aria-hidden="true">arrow_back</i>Elegir otra matrícula</a></div>
+{{ form.enrollment }}{% for error in form.enrollment.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+{% endif %}
+<div class="row" style="margin-bottom:0">
+{% for field in form %}{% if field.name != "enrollment" or object %}{% if field.name == "enrollment" %}<div class="col s12"><h2 class="section-title">Matrícula</h2></div>{% elif field.name == "receipt_number" %}<div class="col s12"><h2 class="section-title">Datos del recibo</h2></div>{% elif field.name == "reference" %}<div class="col s12"><h2 class="section-title">Información adicional</h2></div>{% elif field.name == "voucher" %}<div class="col s12"><h2 class="section-title">Voucher</h2></div>{% endif %}<div class="col s12{% if field.name == 'receipt_number' or field.name == 'amount' or field.name == 'reference' or field.name == 'notes' %} m6{% endif %} field"{% if field.name == "voucher_quality" %} hidden{% endif %}>
+{% if field.name == "voucher" %}
+<div style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-start">
+<div style="flex:1 1 320px;min-width:0"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}</div>
+<div style="flex:0 1 auto"><label>{{ form.voucher_quality.label }}</label>
+<div class="radio-inline">{% for radio in form.voucher_quality %}<label for="{{ radio.id_for_label }}"><input type="radio" name="{{ radio.data.name }}" id="{{ radio.id_for_label }}" value="{{ radio.data.value }}" {% if radio.data.selected %}checked{% endif %}><span>{{ radio.choice_label }}</span></label>{% endfor %}</div>
+<div class="help">{{ form.voucher_quality.help_text }}</div></div>
+</div>
+<div id="voucher-preview" class="mt" {% if not object.voucher %}style="display:none"{% endif %}><img id="voucher-preview-img" alt="Vista previa del voucher" src="{% if object.voucher %}{{ object.voucher.url }}{% endif %}" style="max-width:100%;max-height:260px;border:1px solid #ccc;border-radius:4px;display:block"><div id="voucher-preview-info" class="help"></div></div>
+{% elif field.name == "voucher_quality" %}
 {% else %}
 <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+{% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
 {% endif %}
-{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>{% endfor %}
-<div class="note note-warning small">Verifica la matrícula y el importe antes de confirmar. Los recibos quedan auditados.</div>
-<button class="btn">{% if object %}Guardar cambios{% else %}Confirmar pago y registrar recibo{% endif %}</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Cancelar</a>
+{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>{% endif %}{% endfor %}
+</div>
+<div class="note note-warning small">Verifica el importe antes de confirmar. Los recibos quedan auditados.</div>
+<div class="flex gap mt"><button class="btn">{% if object %}Guardar cambios{% else %}Confirmar pago y registrar recibo{% endif %}</button> <a class="btn-flat grey-text text-darken-2" href="{% if object %}{% url 'payment-list' %}{% else %}{% url 'payment-create' %}{% endif %}">Cancelar</a></div>
 </form></div></div></div>
+<script>
+(() => {
+    const input = document.getElementById("id_voucher");
+    const box = document.getElementById("voucher-preview");
+    const img = document.getElementById("voucher-preview-img");
+    const info = document.getElementById("voucher-preview-info");
+    if (!input || !img) return;
+    const original = img.getAttribute("src");
+    let url = null;
+    const fmt = (b) => b > 1048576 ? (b / 1048576).toFixed(2) + " MB" : Math.round(b / 1024) + " KB";
+    input.addEventListener("change", () => {
+        if (url) { URL.revokeObjectURL(url); url = null; }
+        const file = input.files && input.files[0];
+        if (!file) {
+            info.textContent = "";
+            if (original) { img.src = original; box.style.display = ""; }
+            else { img.removeAttribute("src"); box.style.display = "none"; }
+            return;
+        }
+        url = URL.createObjectURL(file);
+        img.onload = () => { info.textContent = `${file.name} · ${img.naturalWidth}×${img.naturalHeight} px · ${fmt(file.size)} · se guardará como JPEG`; };
+        img.src = url;
+        box.style.display = "";
+    });
+})();
+</script>
 {% endblock %}

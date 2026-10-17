@@ -5,15 +5,17 @@
   <div><h1>Llamadas a alumnos</h1><div class="muted">Cursos matriculados, deuda por curso y teléfono de contacto en la sede seleccionada.</div></div>
   <button class="btn-flat grey-text text-darken-2 no-print" onclick="window.print()">Imprimir lista</button>
   <a class="btn-flat blue-text no-print" href="{% url 'calls-notes-all' %}">Historial de llamadas</a>
+  {% if user.is_superuser or user.can_assign_calls %}<a class="btn-flat blue-text no-print" href="{% url 'calls-assignments' %}">Asignar llamadas</a>{% endif %}
   <a class="btn-flat blue-text no-print" href="{% url 'calls-template' %}">Plantilla de WhatsApp</a>
 </div>
-<form method="get" class="row no-print">
+<form method="get" class="row no-print" data-live-filter>
   <div class="col s12 m6"><input type="search" name="q" value="{{ search_query }}" placeholder="Buscar alumno o teléfono" autocomplete="off"></div>
   <div class="col s12 m6">
     <label><input type="checkbox" name="deuda" value="1" {% if only_debt %}checked{% endif %}><span>Solo con deuda</span></label>
     <button class="btn">Buscar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Limpiar</a>
   </div>
 </form>
+<div data-live-region="results">
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Alumno</th><th>Teléfono</th><th>Curso</th><th class="right-align">Matrícula</th><th class="right-align">Mensualidad</th><th class="right-align">Costo total</th><th>Recibos</th><th class="right-align">Deuda del curso</th><th class="right-align">Deuda total</th><th class="no-print">Historial de llamadas</th></tr></thead><tbody>
 {% for row in rows %}
   {% for item in row.courses %}
@@ -29,4 +31,5 @@
 {% empty %}<tr><td colspan="10" class="center-align muted">No hay alumnos con estos criterios.</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="mt">{% include "shared/pagination.html" %}</div>
+</div>
 {% endblock %}

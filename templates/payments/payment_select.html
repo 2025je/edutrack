@@ -1,0 +1,56 @@
+{% extends "base.html" %}{% block title %}Registrar pago · EduTrack{% endblock %}
+{% block content %}<div class="row"><div class="col s12 xl10 offset-xl1"><div class="card card-pad">
+<h1>Registrar pago</h1>
+<p class="muted">Paso 1 de 2: busca la matrícula con deuda pendiente y pulsa «Pagar» para registrar el recibo.</p>
+<style>.section-title{font-size:1.2rem;font-weight:600;margin:1.75rem 0 1rem;padding-bottom:.4rem;border-bottom:1px solid rgba(128,138,155,.35)}.sub-title{font-size:.95rem;font-weight:600;margin:1rem 0 .25rem;opacity:.85}</style>
+<form method="get" class="mb" data-live-filter>
+  {% with g=request.GET %}
+  <h2 class="section-title" style="margin-top:1rem">Alumno y curso</h2>
+  <div class="row" style="margin-bottom:0">
+    <div class="col s12 m6 field"><label for="payment-search">Alumno o curso</label><input id="payment-search" type="search" name="q" value="{{ g.q|default:'' }}" placeholder="Nombre del alumno o curso" autocomplete="off"></div>
+    <div class="col s12 m6 field"><label for="f-dni">DNI del alumno</label><input id="f-dni" type="text" name="dni" value="{{ g.dni|default:'' }}" inputmode="numeric" autocomplete="off"></div>
+    <div class="col s12 m6 field"><label for="f-course">Curso</label><select id="f-course" name="course" class="browser-default"><option value="">Todos</option>{% for c in filter_courses %}<option value="{{ c.pk }}" {% if g.course == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}{% if c.schedule %} · {{ c.schedule }}{% endif %}</option>{% endfor %}</select></div>
+    <div class="col s6 m3 field"><label for="f-schedule">Horario</label><input id="f-schedule" type="text" name="schedule" value="{{ g.schedule|default:'' }}" autocomplete="off"></div>
+    <div class="col s6 m3 field"><label for="f-group">Grupo / aula</label><input id="f-group" type="text" name="group" value="{{ g.group|default:'' }}" autocomplete="off"></div>
+  </div>
+  <h2 class="section-title">Matrícula</h2>
+  <div class="row" style="margin-bottom:0">
+    <div class="col s12 m4 field"><label for="f-promoter">Promotor</label><select id="f-promoter" name="promoter" class="browser-default"><option value="">Todos</option>{% for p in filter_promoters %}<option value="{{ p.pk }}" {% if g.promoter == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+    <div class="col s12 m4 field"><label for="f-ficha">Código de ficha</label><input id="f-ficha" type="number" min="1" name="ficha" value="{{ g.ficha|default:'' }}"></div>
+    <div class="col s6 m2 field"><label for="f-date-from">Matrícula desde</label><input id="f-date-from" type="date" name="date_from" value="{{ g.date_from|default:'' }}"></div>
+    <div class="col s6 m2 field"><label for="f-date-to">Matrícula hasta</label><input id="f-date-to" type="date" name="date_to" value="{{ g.date_to|default:'' }}"></div>
+  </div>
+  <h2 class="section-title">Deuda</h2>
+  <div class="row" style="margin-bottom:0">
+    <div class="col s6 m3 field"><label for="f-debt-min">Deuda mínima (S/)</label><input id="f-debt-min" type="number" min="0" step="0.01" name="debt_min" value="{{ g.debt_min|default:'' }}"></div>
+    <div class="col s6 m3 field"><label for="f-debt-max">Deuda máxima (S/)</label><input id="f-debt-max" type="number" min="0" step="0.01" name="debt_max" value="{{ g.debt_max|default:'' }}"></div>
+  </div>
+  {% if g.student %}<input type="hidden" name="student" value="{{ g.student }}">{% endif %}
+  <div class="flex gap items-center">
+    <button class="btn" type="submit">Buscar</button>
+    {% if has_filters %}<a class="btn-flat grey-text text-darken-2" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Cancelar</a>
+  </div>
+  {% endwith %}
+</form>
+
+<h2 class="section-title">Matrículas con deuda pendiente</h2>
+<div data-live-region="pay-results">
+<div class="table-wrap">
+<table class="highlight">
+<thead><tr><th scope="col">Estudiante</th><th scope="col">DNI</th><th scope="col">Curso</th><th scope="col">Fecha matrícula</th><th class="right-align" scope="col">Costo matrícula</th><th class="right-align" scope="col">Mensualidad</th><th class="right-align" scope="col">Deuda</th><th class="center-align" scope="col">Pagar</th></tr></thead>
+<tbody>
+{% for e in enrollments %}<tr>
+<td>{{ e.student.full_name }}</td>
+<td>{{ e.student.document_number|default:"—" }}</td>
+<td>{{ e.course.name }}</td>
+<td>{{ e.enrollment_date|date:"d/m/Y" }}</td>
+<td class="right-align">S/ {{ e.enrollment_fee|floatformat:2 }}</td>
+<td class="right-align">S/ {{ e.monthly_fee|floatformat:2 }}</td>
+<td class="right-align strong">S/ {{ e.pending_balance|floatformat:2 }}</td>
+<td class="center-align"><a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula de {{ e.student.full_name }}"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a></td>
+</tr>{% empty %}<tr><td colspan="8" class="center-align muted">No se encontraron matrículas con deuda pendiente{% if has_filters %} para los filtros indicados{% endif %}.</td></tr>{% endfor %}
+</tbody></table></div>
+{% include "shared/pagination.html" %}
+</div>
+</div></div></div>{% endblock %}

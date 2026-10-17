@@ -19,10 +19,23 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.utils.dateparse import parse_date
-from django.views.generic import FormView, ListView, DetailView, UpdateView, DeleteView
+from django.views.generic import (
+    FormView,
+    ListView,
+    DetailView,
+    UpdateView,
+    DeleteView,
+    TemplateView,
+)
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
-from students.models import Enrollment
-from .forms import PaymentForm, PaymentUpdateForm
+from core.pagination import paginate_context
+from students.models import Course, Enrollment, Promoter
+from .forms import (
+    PaymentForm,
+    PaymentUpdateForm,
+    filter_pending_enrollments,
+    pending_enrollments_for_campus,
+)
 from .models import Payment, PaymentAllocation, Installment, receipt_number_validator
 
 
@@ -75,6 +88,22 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
         status = self.request.GET.get("status", "")
         if status in Payment.Status.values:
             qs = qs.filter(status=status)
+        course = self.request.GET.get("course", "").strip()
+        if course:
+            qs = qs.filter(enrollment__course__name__unaccent__icontains=course)
+        cashier = self.request.GET.get("cashier", "").strip()
+        if cashier:
+            qs = qs.filter(cashier__username__icontains=cashier)
+        reference = self.request.GET.get("reference", "").strip()
+        if reference:
+            qs = qs.filter(reference__icontains=reference)
+        for parameter, lookup in (("amount_min", "amount__gte"), ("amount_max", "amount__lte")):
+            value = self.request.GET.get(parameter, "").strip()
+            if value:
+                try:
+                    qs = qs.filter(**{lookup: Decimal(value)})
+                except ArithmeticError:
+                    qs = qs.none()
 
         sort = self.request.GET.get("sort", "date")
         direction = self.request.GET.get("direction", "desc")
@@ -136,16 +165,111 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
         return context
 
 
+class PaymentSelectView(SelectedCampusViewMixin, TemplateView):
+    """Paso previo: buscar la matrícula con deuda y elegir cuál pagar."""
+
+    template_name = "payments/payment_select.html"
+
+    def get(self, request, *args, **kwargs):
+        # Compatibilidad con los enlaces antiguos ?enrollment=<id>.
+        enrollment_id = request.GET.get("enrollment", "").strip()
+        if enrollment_id.isdigit():
+            return redirect("payment-create-for", enrollment_id=int(enrollment_id))
+        return super().get(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        campus = get_selected_campus(self.request)
+        base = pending_enrollments_for_campus(campus)
+        rows = (
+            filter_pending_enrollments(base, self.request.GET)
+            .select_related("student", "course")
+            .prefetch_related("promoter")
+            .order_by("student__full_name", "course__name")
+        )
+        context.update(paginate_context(self.request, rows, per_page=15))
+        context["enrollments"] = context["page_obj"].object_list
+        context["filter_courses"] = (
+            Course.objects.filter(enrollments__in=base).distinct().order_by("name", "schedule")
+        )
+        context["filter_promoters"] = (
+            Promoter.objects.filter(enrollments__in=base).distinct().order_by("name")
+        )
+        filter_names = (
+            "q",
+            "dni",
+            "course",
+            "promoter",
+            "schedule",
+            "group",
+            "ficha",
+            "date_from",
+            "date_to",
+            "debt_min",
+            "debt_max",
+            "student",
+        )
+        context["has_filters"] = any(self.request.GET.get(name) for name in filter_names)
+        context["more_filters_open"] = any(
+            self.request.GET.get(name)
+            for name in (
+                "schedule",
+                "group",
+                "ficha",
+                "date_from",
+                "date_to",
+                "debt_min",
+                "debt_max",
+            )
+        )
+        return context
+
+
 class PaymentCreateView(SelectedCampusViewMixin, FormView):
     template_name = "payments/payment_form.html"
     form_class = PaymentForm
     success_url = reverse_lazy("payment-list")
 
+    def _load_enrollment(self):
+        campus = get_selected_campus(self.request)
+        self.pending_enrollment = (
+            pending_enrollments_for_campus(campus)
+            .select_related("student", "course")
+            .filter(pk=self.kwargs["enrollment_id"])
+            .first()
+            if campus
+            else None
+        )
+        if self.pending_enrollment is None:
+            messages.warning(
+                self.request, "Esa matrícula no tiene deuda pendiente o no está disponible."
+            )
+            return redirect("payment-create")
+        return None
+
+    def get(self, request, *args, **kwargs):
+        return self._load_enrollment() or super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self._load_enrollment() or super().post(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["enrollment"] = self.pending_enrollment
+        return context
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         kwargs["request"] = self.request
+        kwargs["enrollment"] = self.pending_enrollment
         return kwargs
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["enrollment"] = self.pending_enrollment.pk
+        initial["amount"] = self.pending_enrollment.pending_balance
+        return initial
 
     def form_valid(self, form):
         enrollment = form.cleaned_data["enrollment"]
@@ -195,6 +319,7 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
                     amount=amount,
                     reference=form.cleaned_data["reference"],
                     notes=form.cleaned_data["notes"],
+                    voucher=form.voucher_file() or "",
                 )
                 remaining = amount
                 for installment, balance in outstanding:
@@ -287,9 +412,16 @@ class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
             payment.amount = amount
             payment.reference = form.cleaned_data["reference"]
             payment.notes = form.cleaned_data["notes"]
-            payment.save(
-                update_fields=["receipt_number", "enrollment", "amount", "reference", "notes"]
-            )
+            old_voucher = payment.voucher.name
+            new_voucher = form.voucher_file()
+            fields = ["receipt_number", "enrollment", "amount", "reference", "notes"]
+            if new_voucher is not None:
+                payment.voucher = new_voucher or ""
+                fields.append("voucher")
+            payment.save(update_fields=fields)
+            if new_voucher is not None and old_voucher and old_voucher != payment.voucher.name:
+                storage = payment.voucher.storage
+                transaction.on_commit(lambda: storage.delete(old_voucher))
             PaymentAllocation.objects.filter(payment=payment).delete()
             remaining = amount
             for installment, balance in outstanding:

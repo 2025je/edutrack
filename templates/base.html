@@ -14,8 +14,8 @@
   <style>
     body{background:#f5f7fb}
     main{padding:1.5rem 1rem 3rem}
-    .has-side main,.has-side header{padding-left:300px}
-    @media only screen and (max-width:992px){.has-side main,.has-side header{padding-left:0}}
+    .has-side main,.has-side header{padding-left:calc(300px + 2rem);padding-right:2rem}
+    @media only screen and (max-width:992px){.has-side main,.has-side header{padding-left:1rem;padding-right:1rem}}
     .container-wide{max-width:1200px;margin:0 auto}
     main h1{font-size:1.8rem;margin:0 0 .5rem;line-height:1.2}
     main h2{font-size:1.3rem;margin:0 0 .75rem;line-height:1.2}
@@ -201,6 +201,10 @@
       font:inherit;
     }
     textarea{min-height:5rem;padding:.6rem .75rem}
+    /* Botones junto a campos de búsqueda: misma altura que el campo y alineados con él. */
+    form.row .col>.btn,form.row .col>.btn-flat{height:2.7rem;line-height:2.7rem;vertical-align:top;box-sizing:border-box}
+    .field-row-end{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end}
+    .field-row-end>.btn,.field-row-end>.btn-flat{height:2.7rem;line-height:2.7rem;margin-bottom:12px}
     input:focus:not([readonly]),textarea:focus:not([readonly]),select.browser-default:focus{
       border:1px solid var(--md-primary)!important;
       box-shadow:0 0 0 2px rgba(64,81,181,.16)!important;
@@ -343,6 +347,13 @@
     html[data-theme=dark] main .card{background:#20232b;border-color:#343946;box-shadow:0 1px 3px rgba(0,0,0,.2)}
     html[data-theme=dark] main form.row:not(.mb-0){background:#1d2027;border-color:#343946}
     html[data-theme=dark] main form label,html[data-theme=dark] main .field label{color:#c4cbd7}
+    .radio-inline{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.25rem 0 .5rem}
+    .radio-inline label{display:inline-flex;align-items:center;border:1px solid #d5d9e0;border-radius:6px;padding:.5rem 1rem;margin:0}
+    .radio-inline label span{color:inherit;padding-left:28px;height:auto;line-height:1.4rem}
+    html[data-theme=dark] .radio-inline label{border-color:#3d4452;color:#e3e7ee}
+    .radio-inline input+span,.radio-inline input:disabled+span,.radio-inline input:disabled:not(:checked)+span,.radio-inline input:disabled:checked+span{color:#c4cbd7!important}
+    html:not([data-theme=dark]) .radio-inline input+span{color:#333!important}
+    .radio-inline:has(input:disabled){opacity:.5}
     html[data-theme=dark] main input:not([type]),html[data-theme=dark] main input[type=text],html[data-theme=dark] main input[type=number],html[data-theme=dark] main input[type=date],html[data-theme=dark] main input[type=search],html[data-theme=dark] main input[type=password],html[data-theme=dark] main input[type=email],html[data-theme=dark] main input[type=tel],html[data-theme=dark] main input[type=url],html[data-theme=dark] main textarea,html[data-theme=dark] main select.browser-default{background:#17191f}
     html[data-theme=dark] main table thead th{background:#252933;color:#c4cbd7}
     html[data-theme=dark] main table td{border-bottom-color:#343946}
@@ -603,6 +614,9 @@
     {% if user.is_superuser or user.can_manage_users %}
     <li><a href="{% url 'user-list' %}"><i class="material-icons">group</i>Usuarios</a></li>
     {% endif %}
+    {% if user.is_superuser %}
+    <li><a href="{% url 'activity-log' %}"><i class="material-icons">history</i>Actividad</a></li>
+    {% endif %}
     {% if user.is_staff %}
     <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
     {% endif %}
@@ -647,6 +661,29 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   document.querySelectorAll("textarea").forEach(function (el) { el.classList.add("materialize-textarea"); });
 });
+</script>
+<script>
+// Convierte a mayúsculas lo que se escribe en campos de texto (excepto usuario, correo, contraseña y URLs).
+(function () {
+  var isLogin = /login|acceso|ingresar/i.test(location.pathname);
+  var skipNames = isLogin ? /(username|email|password|url|token)/i : /(email|password|url|token)/i;
+  function applies(el) {
+    if (el.tagName === "TEXTAREA") return !el.hasAttribute("data-no-upper");
+    if (el.tagName !== "INPUT" || el.hasAttribute("data-no-upper")) return false;
+    var t = (el.getAttribute("type") || "text").toLowerCase();
+    if (t !== "text" && t !== "search") return false;
+    return !skipNames.test(el.name || "") && !skipNames.test(el.autocomplete || "");
+  }
+  document.addEventListener("input", function (e) {
+    var el = e.target;
+    if (!applies(el) || e.isComposing) return;
+    var up = el.value.toUpperCase();
+    if (up === el.value) return;
+    var s = el.selectionStart, end = el.selectionEnd;
+    el.value = up;
+    try { el.setSelectionRange(s, end); } catch (err) {}
+  }, true);
+})();
 </script>
 <script>
 // Filtrado en vivo: el formulario con data-live-filter actualiza las zonas data-live-region sin recargar.

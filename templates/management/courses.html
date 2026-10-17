@@ -7,7 +7,8 @@
 		{% csrf_token %}
 		{% for error in form.non_field_errors %}<div class="col s12"><div class="note note-warning">{{ error }}</div></div>{% endfor %}
 		{% for field in form %}
-		<div class="col s12 m6 l4"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+		{% if field.name == "name" %}<h6 class="col s12 strong mt">Datos del curso</h6>{% elif field.name == "start_date" %}<h6 class="col s12 strong mt">Inicio y capacidad</h6>{% elif field.name == "enrollment_fee" %}<h6 class="col s12 strong mt">Costos</h6>{% endif %}
+		<div class="col s12 m6 l4"{% if field.name == "enrollment_fee" or field.name == "start_date" or field.name == "name" %} style="clear:left"{% endif %}><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
 		{% endfor %}
 		<div class="col s12"><button class="btn" type="submit">Crear curso</button></div>
 	</form>
@@ -15,6 +16,7 @@
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Curso</th><th>Horario</th><th>Grupo</th><th>Inicio</th><th>Capacidad</th><th>Matrícula</th><th>Mensualidad</th><th>Estado</th><th class="right-align">Acciones</th></tr></thead><tbody>
 {% for course in courses %}<tr><td>{{ course.name }}</td><td>{{ course.schedule }}</td><td>{{ course.group }}</td><td>{{ course.start_date_display }}</td><td>{{ course.capacity_display }}</td><td>{{ course.enrollment_fee_display }}</td><td>{{ course.monthly_fee_display }}</td><td>{% if course.active %}Activo{% else %}Inactivo{% endif %}</td><td class="right-align">{% if course.name != "POR ASIGNAR" %}<a class="blue-text" href="{% url 'course-update' course.pk %}">Editar</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="9" class="center-align muted">No hay cursos registrados.</td></tr>{% endfor %}
 </tbody></table></div>
+{% include "shared/pagination.html" %}
 <script>
 (function () {
 	var select = document.getElementById("{{ form.schedule.id_for_label }}");

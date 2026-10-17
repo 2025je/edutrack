@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from core.models import Campus, User
 from payments.models import Installment, Payment, PaymentAllocation
 from students.forms import PhoneListWidget
-from students.models import Course, Enrollment, Promoter, Schedule, Student
+from students.models import Course, Enrollment, Ficha, Promoter, Schedule, Student
 
 
 class CourseStudentExportTests(TestCase):
@@ -221,7 +221,6 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
-                "has_record": "on",
                 "record_code": "202601",
                 "promoter": [],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -233,7 +232,7 @@ class StudentEnrollmentCrudTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.enrollment.refresh_from_db()
-        self.assertEqual(self.enrollment.record_code, "202601")
+        self.assertEqual(self.enrollment.record_code, 202601)
 
     def test_enrollment_record_code_accepts_only_numbers_or_empty(self):
         response = self.client.post(
@@ -241,7 +240,6 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
-                "has_record": "on",
                 "record_code": "F-2026-01",
                 "promoter": [],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -256,7 +254,7 @@ class StudentEnrollmentCrudTests(TestCase):
         self.enrollment.refresh_from_db()
         self.assertEqual(self.enrollment.record_code, "")
 
-    def test_record_code_depends_on_has_record_flag(self):
+    def test_ficha_exists_only_when_record_code_is_given(self):
         base = {
             "course": self.course.pk,
             "student": self.student.pk,
@@ -267,20 +265,133 @@ class StudentEnrollmentCrudTests(TestCase):
             "active": "on",
         }
         url = reverse("enrollment-update", args=[self.enrollment.pk])
-        for data in (
-            {"has_record": "on", "record_code": ""},
-            {"has_record": "on", "record_code": "0"},
-            {"record_code": "15"},
-        ):
+        for data in ({"record_code": "0"}, {"record_code": "-3"}, {"record_code": "abc"}):
             response = self.client.post(url, {**base, **data})
             self.assertEqual(response.status_code, 200, data)
             self.assertTrue(response.context["form"].errors.get("record_code"), data)
 
-        response = self.client.post(url, {**base, "has_record": "on", "record_code": "15"})
+        # Sin código no se crea ficha.
+        self.assertEqual(self.client.post(url, {**base, "record_code": ""}).status_code, 302)
+        self.assertFalse(Ficha.objects.filter(enrollment=self.enrollment).exists())
+        response = self.client.post(url, {**base, "record_code": "15"})
         self.assertEqual(response.status_code, 302)
         self.enrollment.refresh_from_db()
         self.assertTrue(self.enrollment.has_record)
-        self.assertEqual(self.enrollment.record_code, "15")
+        self.assertEqual(self.enrollment.record_code, 15)
+
+    def test_ficha_image_is_optional_and_can_be_replaced_and_removed(self):
+        import io
+        import shutil
+        import tempfile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+        from PIL import Image
+
+        def png(name):
+            buffer = io.BytesIO()
+            Image.new("RGB", (4, 4), "red").save(buffer, "PNG")
+            return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
+
+        base = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "record_code": "77",
+            "promoter": [],
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-update", args=[self.enrollment.pk])
+        media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media, ignore_errors=True)
+        with override_settings(MEDIA_ROOT=media):
+            self.assertEqual(self.client.post(url, base).status_code, 302)
+            ficha = Ficha.objects.get(enrollment=self.enrollment)
+            self.assertFalse(ficha.image)
+
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {**base, "record_image": png("a.png")})
+            self.assertEqual(response.status_code, 302)
+            ficha.refresh_from_db()
+            first = ficha.image.name
+            self.assertTrue(first.startswith("fichas/"))
+            self.assertTrue(first.endswith(".jpg"))
+            with ficha.image.open("rb") as handle:
+                self.assertEqual(Image.open(handle).format, "JPEG")
+
+            big = io.BytesIO()
+            import random
+
+            noise = Image.frombytes(
+                "RGB", (400, 400), bytes(random.randrange(256) for _ in range(400 * 400 * 3))
+            )
+            noise.save(big, "PNG")
+            sizes = {}
+            for quality in ("90", "60"):
+                upload = SimpleUploadedFile("n.png", big.getvalue(), content_type="image/png")
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.client.post(
+                        url, {**base, "record_image": upload, "record_image_quality": quality}
+                    )
+                ficha.refresh_from_db()
+                sizes[quality] = ficha.image.size
+            self.assertLess(sizes["60"], sizes["90"])
+            first = ficha.image.name
+
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(url, {**base, "record_image": png("b.png")})
+            ficha.refresh_from_db()
+            self.assertNotEqual(ficha.image.name, first)
+            self.assertFalse(ficha.image.storage.exists(first))
+
+            self.client.post(url, base)
+            ficha.refresh_from_db()
+            self.assertTrue(ficha.image)
+
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(url, {**base, "record_image-clear": "on"})
+            ficha.refresh_from_db()
+            self.assertFalse(ficha.image)
+
+    def test_clearing_record_code_deletes_ficha_and_image_requires_code(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        Ficha.objects.create(
+            enrollment=self.enrollment,
+            campus=self.campus,
+            date=self.enrollment.enrollment_date,
+            code="8",
+        )
+        base = {
+            "course": self.course.pk,
+            "student": self.student.pk,
+            "promoter": [],
+            "enrollment_date": self.enrollment.enrollment_date.isoformat(),
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        url = reverse("enrollment-update", args=[self.enrollment.pk])
+        response = self.client.post(
+            url, {**base, "record_image": SimpleUploadedFile("x.png", b"x", "image/png")}
+        )
+        self.assertIn("record_image", response.context["form"].errors)
+        self.assertEqual(self.client.post(url, {**base, "record_code": ""}).status_code, 302)
+        self.assertFalse(Ficha.objects.filter(enrollment=self.enrollment).exists())
+
+    def test_changing_enrollment_date_updates_ficha_date(self):
+        ficha = Ficha.objects.create(
+            enrollment=self.enrollment,
+            campus=self.campus,
+            date=self.enrollment.enrollment_date,
+            code="9",
+        )
+        self.enrollment.enrollment_date = date(2026, 1, 5)
+        self.enrollment.save()
+        ficha.refresh_from_db()
+        self.assertEqual(ficha.date, date(2026, 1, 5))
 
     def test_editing_enrollment_recalculates_installments(self):
         data = {
@@ -379,6 +490,23 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(invalid_response.status_code, 200)
         self.assertContains(invalid_response, "Este campo es obligatorio.")
 
+    def test_student_names_are_unique_per_campus(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        same_name_at_other_campus = Student.objects.create(
+            campus=other_campus,
+            full_name=self.student.full_name,
+            phone="987654321",
+        )
+        self.assertEqual(same_name_at_other_campus.full_name, self.student.full_name)
+
+        duplicate_at_same_campus = Student(
+            campus=self.campus,
+            full_name=self.student.full_name,
+            phone="987654321",
+        )
+        with self.assertRaises(ValidationError):
+            duplicate_at_same_campus.full_clean()
+
     def test_only_unassigned_course_allows_repeated_enrollments(self):
         unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
         for _ in range(2):
@@ -437,10 +565,14 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertNotContains(response, "Cursos en los que ya está matriculado")
 
     def test_record_code_cannot_repeat_on_same_enrollment_date(self):
-        self.enrollment.has_record = True
-        self.enrollment.record_code = "500"
         self.enrollment.enrollment_date = date(2026, 9, 29)
         self.enrollment.save()
+        Ficha.objects.create(
+            enrollment=self.enrollment,
+            campus=self.campus,
+            date=self.enrollment.enrollment_date,
+            code="500",
+        )
         other = Student.objects.create(campus=self.campus, full_name="Alumno ficha repetida")
         other_course = Course.objects.create(
             campus=self.campus, name="Otro curso", enrollment_fee=10, monthly_fee=10
@@ -448,7 +580,6 @@ class StudentEnrollmentCrudTests(TestCase):
         data = {
             "course": other_course.pk,
             "student": other.pk,
-            "has_record": "on",
             "record_code": "500",
             "promoter": [],
             "enrollment_date": "2026-09-29",
@@ -520,7 +651,6 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": new_student.pk,
-                "has_record": "on",
                 "record_code": "202602",
                 "promoter": [],
                 "enrollment_date": "2026-09-29",
@@ -580,7 +710,6 @@ class StudentEnrollmentCrudTests(TestCase):
             {
                 "course": self.course.pk,
                 "student": self.student.pk,
-                "has_record": "on",
                 "record_code": "202603",
                 "promoter": [first_promoter.pk, second_promoter.pk],
                 "enrollment_date": self.enrollment.enrollment_date.isoformat(),
@@ -653,10 +782,7 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertContains(response, 'aria-label="Dar de baja matrícula"')
         response = self.client.get(reverse("payment-create"), {"student": self.student.pk})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            str(response.context["form"]["enrollment"].value()),
-            str(self.enrollment.pk),
-        )
+        self.assertEqual([e.pk for e in response.context["enrollments"]], [self.enrollment.pk])
 
     def test_student_list_shows_active_enrollment_count_and_highlights_zero(self):
         student_without_enrollments = Student.objects.create(
@@ -949,9 +1075,12 @@ class StudentEnrollmentCrudTests(TestCase):
 
     def test_enrollment_filters_cover_student_course_record_code_and_promoter(self):
         promoter = Promoter.objects.create(name="Promotor de prueba", active=True)
-        self.enrollment.record_code = "42"
-        self.enrollment.record_code = "42"
-        self.enrollment.save(update_fields=["record_code"])
+        Ficha.objects.create(
+            enrollment=self.enrollment,
+            campus=self.campus,
+            date=self.enrollment.enrollment_date,
+            code="42",
+        )
         self.enrollment.promoter.add(promoter)
 
         filters = {
@@ -974,23 +1103,27 @@ class StudentEnrollmentCrudTests(TestCase):
                 campus=self.campus,
                 full_name=f"Alumno de ficha {record_code}",
             )
-            Enrollment.objects.create(
+            enrollment = Enrollment.objects.create(
                 campus=self.campus,
                 student=student,
                 course=self.course,
-                record_code=record_code,
                 enrollment_date=check_date,
+            )
+            Ficha.objects.create(
+                enrollment=enrollment, campus=self.campus, date=check_date, code=record_code
             )
         other_date_student = Student.objects.create(
             campus=self.campus,
             full_name="Alumno de otra fecha",
         )
-        Enrollment.objects.create(
+        other_enrollment = Enrollment.objects.create(
             campus=self.campus,
             student=other_date_student,
             course=self.course,
-            record_code="3",
             enrollment_date=date(2026, 10, 15),
+        )
+        Ficha.objects.create(
+            enrollment=other_enrollment, campus=self.campus, date=date(2026, 10, 15), code="3"
         )
 
         response = self.client.get(
@@ -1005,7 +1138,7 @@ class StudentEnrollmentCrudTests(TestCase):
 
         self.assertEqual(
             response.context["missing_record_codes"],
-            ["3", "6", "7", "8", "9", "10"],
+            [3, 6, 7, 8, 9, 10],
         )
         self.assertContains(response, "3, 6, 7, 8, 9, 10")
 
@@ -1149,11 +1282,16 @@ class StudentEnrollmentCrudTests(TestCase):
                 campus=self.campus,
                 full_name=f"Alumno paginado {index}",
             )
-            Enrollment.objects.create(
+            enrollment = Enrollment.objects.create(
                 campus=self.campus,
                 student=student,
                 course=self.course,
-                record_code="999",
+            )
+            Ficha.objects.create(
+                enrollment=enrollment,
+                campus=self.campus,
+                date=enrollment.enrollment_date,
+                code=f"999{index}",
             )
 
         response = self.client.get(reverse("enrollment-list"), {"record_code": "999"})
@@ -1313,7 +1451,9 @@ class UnassignedCourseTests(TestCase):
             regular.full_clean()
         for field in ("start_date", "capacity", "enrollment_fee", "monthly_fee"):
             self.assertIn(field, context.exception.message_dict)
-        self.assertTrue(Schedule.objects.filter(name="PENDIENTE DE ASIGNACION").exists())
+        self.assertTrue(
+            Schedule.objects.filter(campus=campus, name="PENDIENTE DE ASIGNACION").exists()
+        )
 
     def test_only_superuser_can_modify_unassigned_course(self):
         from django.contrib.admin.sites import site
@@ -1322,7 +1462,7 @@ class UnassignedCourseTests(TestCase):
 
         campus = Campus.objects.create(name="Sede Admin")
         course = Course.objects.get(campus=campus, name="POR ASIGNAR")
-        schedule = Schedule.objects.get(name="PENDIENTE DE ASIGNACION")
+        schedule = Schedule.objects.get(campus=campus, name="PENDIENTE DE ASIGNACION")
         staff = User.objects.create_user("staff", password="x", is_staff=True)
         staff.user_permissions.set(Permission.objects.filter(content_type__app_label="students"))
         admin_user = User.objects.create_superuser("root", password="x")
@@ -1379,6 +1519,6 @@ class CourseUniquenessTests(TestCase):
 
     def test_default_schedules_are_available_in_the_catalog(self):
         self.assertEqual(
-            set(Schedule.objects.values_list("name", flat=True)),
+            set(Schedule.objects.filter(campus=self.campus).values_list("name", flat=True)),
             {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM", "PENDIENTE DE ASIGNACION"},
         )

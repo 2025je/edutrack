@@ -1,3 +1,5 @@
+import os
+
 from django import forms
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -11,6 +13,7 @@ PERMISSION_FIELDS = [
     "can_manage_promoters",
     "can_manage_calls",
     "can_edit_call_notes",
+    "can_assign_calls",
     "can_manage_campuses",
     "can_manage_users",
 ]
@@ -39,6 +42,23 @@ class CampusFlyerForm(forms.ModelForm):
                 }
             )
         }
+
+    def __init__(self, *args, optional=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Opcional: el navegador no exige los campos; la vista valida solo si se llenó alguno.
+        self.use_required_attribute = not optional
+        self.fields["title"].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        title = (cleaned.get("title") or "").strip()
+        file = cleaned.get("file")
+        if file and not title:
+            title = os.path.splitext(os.path.basename(file.name))[0][:120]
+        if title and not file and "file" not in self.errors:
+            self.add_error("file", "Seleccione el archivo del volante.")
+        cleaned["title"] = title
+        return cleaned
 
 
 class UserCreateForm(forms.ModelForm):
@@ -128,8 +148,8 @@ class CourseForm(forms.ModelForm):
             "name",
             "schedule",
             "group",
-            "capacity",
             "start_date",
+            "capacity",
             "enrollment_fee",
             "monthly_fee",
         ]
@@ -144,6 +164,13 @@ class CourseForm(forms.ModelForm):
     def __init__(self, *args, campus=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.campus = campus
+        self.fields["schedule"].queryset = (
+            Schedule.objects.filter(campus=campus)
+            .exclude(name=UNASSIGNED_SCHEDULE_NAME)
+            .order_by("name")
+            if campus
+            else Schedule.objects.none()
+        )
 
     def clean_name(self):
         return " ".join(self.cleaned_data["name"].split()).upper()
@@ -190,9 +217,13 @@ class ScheduleForm(forms.ModelForm):
             ),
         }
 
+    def __init__(self, *args, campus=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.campus = campus
+
     def clean_name(self):
         name = " ".join(self.cleaned_data["name"].split()).upper()
-        if Schedule.objects.filter(name__iexact=name).exists():
+        if self.campus and Schedule.objects.filter(campus=self.campus, name__iexact=name).exists():
             raise ValidationError("Ya existe un horario con ese nombre.")
         return name
 

@@ -1,14 +1,16 @@
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, When
 from django.shortcuts import get_object_or_404, redirect
+from django.utils.dateparse import parse_date
 from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
-from core.models import Campus, CampusFlyer, User
+from core.models import ActivityLog, Campus, CampusFlyer, User
+from core.pagination import paginate_context
 from students.models import (
     UNASSIGNED_COURSE_NAME,
     UNASSIGNED_SCHEDULE_NAME,
@@ -49,10 +51,13 @@ def manageable_users(editor):
 class CampusListView(CampusManagementMixin, ListView):
     template_name = "management/campus_list.html"
     context_object_name = "campuses"
+    paginate_by = 20
 
     def get_queryset(self):
-        return Campus.objects.annotate(users_count=Count("users", distinct=True)).prefetch_related(
-            "flyers"
+        return (
+            Campus.objects.annotate(users_count=Count("users", distinct=True))
+            .prefetch_related("flyers")
+            .order_by("name")
         )
 
 
@@ -64,13 +69,13 @@ class CampusCreateView(CampusManagementMixin, CreateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context.setdefault("flyer_form", CampusFlyerForm(prefix="flyer"))
+        context.setdefault("flyer_form", CampusFlyerForm(prefix="flyer", optional=True))
         return context
 
     def post(self, request, *args, **kwargs):
         self.object = None
         form = self.get_form()
-        flyer_form = CampusFlyerForm(request.POST, request.FILES, prefix="flyer")
+        flyer_form = CampusFlyerForm(request.POST, request.FILES, prefix="flyer", optional=True)
         # El volante es opcional: solo se valida si se llenó algún campo.
         flyer_given = flyer_form.has_changed()
         if form.is_valid() and (not flyer_given or flyer_form.is_valid()):
@@ -200,7 +205,7 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
         context["form"] = form or CourseForm(
             campus=campus, initial={"schedule": self.request.GET.get("schedule")}
         )
-        context["courses"] = (
+        courses = (
             Course.objects.filter(campus=campus)
             .annotate(
                 is_unassigned_course=Case(
@@ -211,6 +216,8 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
             )
             .order_by("is_unassigned_course", "name", "schedule", "group")
         )
+        context.update(paginate_context(self.request, courses, 25))
+        context["courses"] = context["page_obj"]
         return context
 
     def post(self, request, *args, **kwargs):
@@ -246,14 +253,20 @@ class ScheduleCreateView(CatalogManagerMixin, TemplateView):
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["form"] = form or ScheduleForm()
-        context["schedules"] = Schedule.objects.order_by("name")
+        campus = get_selected_campus(self.request)
+        context["form"] = form or ScheduleForm(campus=campus)
+        schedules = Schedule.objects.filter(campus=campus).order_by("name")
+        context.update(paginate_context(self.request, schedules, 25))
+        context["schedules"] = context["page_obj"]
         return context
 
     def post(self, request, *args, **kwargs):
-        form = ScheduleForm(request.POST)
+        campus = get_selected_campus(request)
+        form = ScheduleForm(request.POST, campus=campus)
         if form.is_valid():
-            schedule = form.save()
+            schedule = form.save(commit=False)
+            schedule.campus = campus
+            schedule.save()
             messages.success(request, f"Horario «{schedule.name}» creado.")
             return redirect(f"{reverse('course-list')}?schedule={schedule.pk}")
         return self.render_to_response(self.get_context_data(form=form))
@@ -266,9 +279,13 @@ class PromoterView(CatalogManagerMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         campus = get_selected_campus(self.request)
         context["form"] = form or PromoterForm()
-        context["promoters"] = Promoter.objects.filter(
-            Q(campuses=campus) | Q(campuses__isnull=True)
-        ).distinct()
+        promoters = (
+            Promoter.objects.filter(Q(campuses=campus) | Q(campuses__isnull=True))
+            .distinct()
+            .order_by("name")
+        )
+        context.update(paginate_context(self.request, promoters, 25))
+        context["promoters"] = context["page_obj"]
         return context
 
     def post(self, request, *args, **kwargs):
@@ -279,3 +296,50 @@ class PromoterView(CatalogManagerMixin, TemplateView):
             messages.success(request, f"Promotor «{promoter.name}» creado.")
             return redirect("promoter-list")
         return self.render_to_response(self.get_context_data(form=form))
+
+
+class ActivityLogView(LoginRequiredMixin, UserPassesTestMixin, ListView):
+    """Bitácora de actividades de los usuarios; solo para administradores."""
+
+    template_name = "management/activity_log.html"
+    context_object_name = "logs"
+    paginate_by = 50
+
+    def test_func(self):
+        return self.request.user.is_superuser
+
+    def get_queryset(self):
+        get = self.request.GET
+        logs = ActivityLog.objects.select_related("user", "campus")
+        username = get.get("user", "").strip()
+        if username:
+            logs = logs.filter(username__iexact=username)
+        if get.get("action") in ActivityLog.Action.values:
+            logs = logs.filter(action=get["action"])
+        if get.get("campus", "").isdigit():
+            logs = logs.filter(campus_id=int(get["campus"]))
+        text = get.get("q", "").strip()
+        if text:
+            logs = logs.filter(Q(description__icontains=text) | Q(path__icontains=text))
+        date_from = parse_date(get.get("date_from", ""))
+        date_to = parse_date(get.get("date_to", ""))
+        if date_from:
+            logs = logs.filter(created_at__date__gte=date_from)
+        if date_to:
+            logs = logs.filter(created_at__date__lte=date_to)
+        if get.get("exclude_self"):
+            logs = logs.exclude(user=self.request.user)
+        return logs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        get = self.request.GET
+        context["actions"] = ActivityLog.Action.choices
+        context["campuses"] = Campus.objects.order_by("name")
+        context["users_list"] = User.objects.order_by("username").values_list("username", flat=True)
+        filter_names = ("user", "action", "campus", "q", "date_from", "date_to", "exclude_self")
+        context["has_filters"] = any(get.get(name) for name in filter_names)
+        params = get.copy()
+        params.pop("page", None)
+        context["pagination_query"] = params.urlencode()
+        return context
