@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Pagos · EduTrack{% endblock %}
 {% block content %}
-<div class="flex between items-center wrap gap mb"><h1 class="mb-0">Pagos y recibos</h1>{% if perms.payments.add_payment %}<a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}</div>
+<div class="flex between items-center wrap gap mb"><h1 class="mb-0">Pagos y recibos</h1><div class="flex gap wrap">{% if perms.core.export_reports %}<a class="btn green" data-live-export="{% url 'payment-excel' %}" href="{% url 'payment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a>{% endif %}{% if perms.payments.add_payment %}<a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}</div></div>
 <form method="get" class="row" data-live-filter data-filter-collapse>
 	<h6 class="col s12 strong">Recibo</h6>
 	<div class="col s12 m6 l3" data-primary><label for="payment-receipt">Número de recibo</label><input id="payment-receipt" name="receipt" value="{{ request.GET.receipt }}" placeholder="Filtrar por recibo"></div>

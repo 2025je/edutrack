@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
-  
+
   <link rel="stylesheet" href="{% asset 'css/base.css' %}">
   <link rel="stylesheet" href="{% asset 'css/theme.css' %}">
 </head>
@@ -22,7 +22,7 @@
       {% if user.is_authenticated %}<a href="#" data-target="slide-out" class="sidenav-trigger" aria-label="Abrir menú"><i class="material-icons">menu</i></a>{% endif %}
       <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}"><img src="{% static 'img/logo.svg' %}" alt="" width="36" height="36" style="margin-right:10px">EduTrack</a>
       <ul class="right">
-      {% if user.is_authenticated and selected_campus and perms.students.view_student or user.is_authenticated and selected_campus and perms.payments.view_payment %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}      
+      {% if user.is_authenticated and selected_campus and perms.students.view_student or user.is_authenticated and selected_campus and perms.payments.view_payment %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}
             <li class="header-user hide-on-med-and-down"><span title="Fecha actual"><i class="material-icons" aria-hidden="true">calendar_today</i>{% now "d/m/Y" %}</span></li>
             {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
             <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar tema" title="Automático"><i class="material-icons">brightness_auto</i></button></li>
@@ -43,9 +43,4 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script src="{% asset 'js/app.js' %}"></script>
-
-
-
-
-
 </body></html>

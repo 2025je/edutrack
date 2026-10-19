@@ -75,7 +75,7 @@
 		<div class="actions-stack">
 			{% if perms.payments.add_payment %}
 				{% if e.pk in payable_enrollment_ids %}
-				<a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
+				{% if perms.payments.view_payment %}<a class="btn-small action-btn grey darken-1" href="{% url 'enrollment-statement' e.pk %}" aria-label="Estado de cuenta" title="Estado de cuenta"><i class="material-icons" aria-hidden="true">receipt_long</i>Cuenta</a>{% endif %}<a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
 				{% endif %}
 			{% endif %}
 			{% if perms.students.change_enrollment or perms.students.add_enrollment and e.is_pending %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula">			<i class="material-icons" aria-hidden="true">edit</i>{% if not e.student_id %}Asignar Estudiante{% elif not e.course_id %}Asignar curso{% else %}Editar{% endif %}</a>{% endif %}

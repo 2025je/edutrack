@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Estado de cuenta · EduTrack{% endblock %}
+{% block content %}
+<div class="flex between items-center mb no-print"><a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">← Volver a matrículas</a><button class="btn" onclick="window.print()">Imprimir estado de cuenta</button></div>
+<div class="row"><div class="col s12 l10 offset-l1"><div class="card card-pad">
+<div class="center-align" style="border-bottom:1px solid #e0e0e0;padding-bottom:1rem;margin-bottom:1.5rem"><div class="small muted" style="text-transform:uppercase">{{ enrollment.campus.name }}</div><h1 class="mt">ESTADO DE CUENTA</h1><div class="small muted">Emitido el {{ today|date:"d/m/Y" }}</div></div>
+<div class="mb"><small class="muted">Estudiante</small><div class="strong">{{ enrollment.student_label }}</div><div>{{ enrollment.course_label }}{% if enrollment.course_id and enrollment.course.schedule %} · {{ enrollment.course.schedule }}{% endif %}</div>{% if enrollment.student_id and enrollment.student.phone %}<div class="small">Celular: {{ enrollment.student.phone }}</div>{% endif %}<div class="small">Código de ficha: {{ enrollment.record_code|default:"—" }}</div></div>
+
+<h2 class="mt">Cuotas</h2>
+<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Vencimiento</th><th class="right-align">Importe</th><th class="right-align">Pagado</th><th class="right-align">Saldo</th><th>Estado</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.installment.concept }}</td><td>{{ row.installment.due_date|date:"d/m/Y" }}</td><td class="right-align">S/ {{ row.installment.amount|floatformat:2 }}</td><td class="right-align">S/ {{ row.paid|floatformat:2 }}</td><td class="right-align{% if row.balance > 0 %} danger strong{% endif %}">S/ {{ row.balance|floatformat:2 }}</td><td>{% if row.balance <= 0 %}Pagada{% elif row.overdue %}<span class="danger strong">Vencida</span>{% else %}Pendiente{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="center-align muted">Esta matrícula no tiene cuotas.</td></tr>{% endfor %}
+</tbody><tfoot><tr class="strong"><td colspan="2">TOTAL</td><td class="right-align">S/ {{ total_billed|floatformat:2 }}</td><td class="right-align">S/ {{ total_paid|floatformat:2 }}</td><td class="right-align">S/ {{ total_balance|floatformat:2 }}</td><td></td></tr></tfoot></table></div>
+
+<h2 class="mt">Pagos registrados</h2>
+<div class="table-wrap"><table><thead><tr><th>Recibo</th><th>Fecha</th><th>Cajero</th><th>Estado</th><th class="right-align">Importe</th></tr></thead><tbody>
+{% for payment in payments %}<tr><td>{{ payment.receipt_number }}</td><td>{{ payment.created_at|date:"d/m/Y H:i" }}</td><td>{{ payment.cashier.get_full_name|default:payment.cashier.username }}</td><td>{{ payment.get_status_display }}</td><td class="right-align">S/ {{ payment.amount|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="5" class="center-align muted">Aún no hay pagos.</td></tr>{% endfor %}
+</tbody></table></div>
+
+<div class="center-align small muted" style="border-top:1px solid #e0e0e0;margin-top:2.5rem;padding-top:1rem">Documento interno de control. No constituye comprobante de pago tributario autorizado por SUNAT. Los pagos anulados no se consideran en el saldo.</div>
+</div></div></div>
+{% endblock %}

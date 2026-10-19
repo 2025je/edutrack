@@ -1,0 +1,99 @@
+apiVersion: 1
+
+# Alertas basadas en los logs de Loki. Para recibir avisos por correo, Telegram, etc.,
+# configura un "contact point" en Grafana > Alerting (ver README).
+groups:
+  - orgId: 1
+    name: edutrack
+    folder: EduTrack
+    interval: 1m
+    rules:
+      - uid: edutrack-http-5xx
+        title: Errores 500 en la aplicación
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: La aplicación devolvió errores 5xx en los últimos 5 minutos.
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="nginx"} |~ `" 5[0-9][0-9] ` [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last, settings: {mode: replaceNN, replaceWithValue: 0}}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+
+      - uid: edutrack-backup-failed
+        title: Fallo en el respaldo automático
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: El servicio de respaldos registró un error (volcado, verificación o copia externa).
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: {from: 86400, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="backup"} |= `ERROR` [24h]))
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last, settings: {mode: replaceNN, replaceWithValue: 0}}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+
+      - uid: edutrack-backup-missing
+        title: No hay respaldos recientes
+        condition: C
+        for: 0s
+        noDataState: Alerting
+        execErrState: OK
+        annotations:
+          summary: El servicio de respaldos no registró ningún respaldo correcto en las últimas 30 horas.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: {from: 108000, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="backup"} |= `Restauración verificada` [30h]))
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last, settings: {mode: replaceNN, replaceWithValue: 0}}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: lt, params: [1]}

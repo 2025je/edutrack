@@ -1,9 +1,28 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "solo-desarrollo-cambiar-en-produccion")
-DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
+
+
+def env_flag(name, default=False):
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEBUG = env_flag("DJANGO_DEBUG")
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+INSECURE_KEYS = {
+    "",
+    "solo-desarrollo-cambiar-en-produccion",
+    "cambia-esta-clave-por-una-larga-y-aleatoria",
+}
+if SECRET_KEY in INSECURE_KEYS:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "Define DJANGO_SECRET_KEY con una clave larga y aleatoria (o DJANGO_DEBUG=True en desarrollo)."
+        )
+    SECRET_KEY = "solo-desarrollo-cambiar-en-produccion"
 ALLOWED_HOSTS = [
     h.strip()
     for h in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
@@ -113,8 +132,25 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = True
 X_FRAME_OPTIONS = "SAMEORIGIN"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+# Con HTTPS detrás de un proxy (DJANGO_HTTPS=True): cookies seguras, redirección y HSTS.
+if env_flag("DJANGO_HTTPS"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = [r"^salud/$"]
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_flag("DJANGO_HSTS_SUBDOMAINS")
+
+# Bloqueo temporal tras demasiados intentos de acceso fallidos.
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))
 
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"

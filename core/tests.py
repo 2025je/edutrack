@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
@@ -341,3 +346,75 @@ class RoleGroupMatrixTests(TestCase):
         self.assertFalse(user.is_superuser)
         for name in ("user-list", "user-create", "campus-list", "campus-create"):
             self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+
+
+class SecurityTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username="cajera", password="clave-correcta-123")
+
+    def login(self, password):
+        return self.client.post(
+            reverse("login"), {"username": "cajera", "password": password}, REMOTE_ADDR="10.0.0.5"
+        )
+
+    def test_login_is_locked_after_repeated_failures(self):
+        for _ in range(5):
+            self.assertNotContains(self.login("mala"), "Demasiados intentos")
+        locked = self.login("clave-correcta-123")
+        self.assertContains(locked, "Demasiados intentos")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_successful_login_resets_the_counter(self):
+        for _ in range(3):
+            self.login("mala")
+        self.assertEqual(self.login("clave-correcta-123").status_code, 302)
+        self.client.logout()
+        for _ in range(4):
+            self.login("mala")
+        self.assertEqual(self.login("clave-correcta-123").status_code, 302)
+
+    def test_lockout_does_not_affect_other_users(self):
+        User.objects.create_user(username="otro", password="clave-correcta-123")
+        for _ in range(6):
+            self.login("mala")
+        response = self.client.post(
+            reverse("login"),
+            {"username": "otro", "password": "clave-correcta-123"},
+            REMOTE_ADDR="10.0.0.5",
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_health_endpoint_is_public(self):
+        response = self.client.get(reverse("health"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_media_requires_login_and_hides_unknown_files(self):
+        self.assertEqual(self.client.get("/media/vouchers/x.png").status_code, 302)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get("/media/vouchers/x.png").status_code, 404)
+        self.assertEqual(self.client.get("/media/campus_logos/x.png").status_code, 200)
+
+    def test_production_refuses_to_start_without_a_secret_key(self):
+        env = {k: v for k, v in os.environ.items() if k != "DJANGO_SECRET_KEY"}
+        env.update(DJANGO_DEBUG="False", DJANGO_SETTINGS_MODULE="config.settings")
+        result = subprocess.run(
+            [sys.executable, "-c", "import config.settings"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_SECRET_KEY", result.stderr)
+
+
+class DashboardCacheTests(TestCase):
+    def test_version_changes_when_data_changes(self):
+        from core.dashboard_cache import current_version
+        from students.models import Student
+
+        campus = Campus.objects.create(name="Sede cache", active=True)
+        before = current_version()
+        Student.objects.create(campus=campus, full_name="Alumno cache")
+        self.assertGreater(current_version(), before)

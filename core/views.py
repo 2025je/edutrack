@@ -13,6 +13,7 @@ from django.urls import reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import TemplateView
 from .campus import available_campuses, get_selected_campus
+from .dashboard_cache import cached_group
 from .permission_labels import describe
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -81,6 +82,56 @@ def select_campus(request):
     )
 
 
+def academic_stats(campus, today):
+    month_start = today.replace(day=1)
+    enrollments = Enrollment.objects.filter(campus=campus, active=True)
+    return {
+        "student_count": Student.objects.filter(campus=campus).count(),
+        "enrollment_count": enrollments.count(),
+        "enrollments_month": enrollments.filter(enrollment_date__gte=month_start).count(),
+        "enrollments_today": enrollments.filter(enrollment_date=today).count(),
+        "ficha_count": enrollments.filter(ficha__isnull=False).count(),
+        "course_count": Course.objects.filter(campus=campus, active=True).count(),
+        "promoter_count": Promoter.objects.filter(campuses=campus, active=True).count(),
+    }
+
+
+def financial_stats(campus, today):
+    month_start = today.replace(day=1)
+    confirmed = Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED)
+    installments = Installment.objects.filter(
+        enrollment__campus=campus, active=True, enrollment__active=True
+    ).annotate(
+        paid_total=Coalesce(
+            Subquery(
+                PaymentAllocation.objects.filter(
+                    installment=OuterRef("pk"), payment__status=Payment.Status.CONFIRMED
+                )
+                .values("installment")
+                .annotate(t=Sum("amount"))
+                .values("t")[:1]
+            ),
+            Value(Decimal("0.00")),
+        )
+    )
+    totals = installments.aggregate(total=Sum("amount"), paid=Sum("paid_total"))
+    return {
+        "payments_total": confirmed.aggregate(total=Sum("amount"))["total"] or 0,
+        "payments_today": confirmed.filter(created_at__date=today).aggregate(total=Sum("amount"))[
+            "total"
+        ]
+        or 0,
+        "payments_month": confirmed.filter(created_at__date__gte=month_start).aggregate(
+            total=Sum("amount")
+        )["total"]
+        or 0,
+        "pending_total": (totals["total"] or 0) - (totals["paid"] or 0),
+        "overdue_count": installments.filter(
+            due_date__lt=today, paid_total__lt=F("amount")
+        ).count(),
+    }
+
+
 class DashboardView(LoginRequiredMixin, TemplateView):
     template_name = "core/dashboard.html"
 
@@ -100,49 +151,35 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         user = self.request.user
         today = timezone.localdate()
         month_start = today.replace(day=1)
+        campus_id = campus.pk
+        stats = {}
+        if (
+            can_see_enrollments
+            or user.has_perm("students.view_course")
+            or user.has_perm("students.view_promoter")
+        ):
+            stats = cached_group(
+                "academic", campus_id, today, lambda: academic_stats(campus, today)
+            )
         if can_see_enrollments:
-            enrollments = Enrollment.objects.filter(campus=campus, active=True)
-            ctx["student_count"] = Student.objects.filter(campus=campus).count()
-            ctx["enrollment_count"] = enrollments.count()
-            ctx["enrollments_month"] = enrollments.filter(enrollment_date__gte=month_start).count()
-            ctx["enrollments_today"] = enrollments.filter(enrollment_date=today).count()
-            ctx["ficha_count"] = enrollments.filter(ficha__isnull=False).count()
-            ctx["recent_enrollments"] = enrollments.select_related("student", "course").order_by(
-                "-created_at"
-            )[:5]
+            for key in (
+                "student_count",
+                "enrollment_count",
+                "enrollments_month",
+                "enrollments_today",
+                "ficha_count",
+            ):
+                ctx[key] = stats[key]
+            ctx["recent_enrollments"] = (
+                Enrollment.objects.filter(campus=campus, active=True)
+                .select_related("student", "course")
+                .order_by("-created_at")[:5]
+            )
         confirmed = Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED)
         if can_see_financials:
-            ctx["payments_total"] = confirmed.aggregate(total=Sum("amount"))["total"] or 0
-            ctx["payments_today"] = (
-                confirmed.filter(created_at__date=today).aggregate(total=Sum("amount"))["total"]
-                or 0
+            ctx.update(
+                cached_group("financial", campus_id, today, lambda: financial_stats(campus, today))
             )
-            ctx["payments_month"] = (
-                confirmed.filter(created_at__date__gte=month_start).aggregate(total=Sum("amount"))[
-                    "total"
-                ]
-                or 0
-            )
-            installments = Installment.objects.filter(
-                enrollment__campus=campus, active=True, enrollment__active=True
-            ).annotate(
-                paid_total=Coalesce(
-                    Subquery(
-                        PaymentAllocation.objects.filter(
-                            installment=OuterRef("pk"), payment__status=Payment.Status.CONFIRMED
-                        )
-                        .values("installment")
-                        .annotate(t=Sum("amount"))
-                        .values("t")[:1]
-                    ),
-                    Value(Decimal("0.00")),
-                )
-            )
-            totals = installments.aggregate(total=Sum("amount"), paid=Sum("paid_total"))
-            ctx["pending_total"] = (totals["total"] or 0) - (totals["paid"] or 0)
-            ctx["overdue_count"] = installments.filter(
-                due_date__lt=today, paid_total__lt=F("amount")
-            ).count()
         if can_see_payments:
             ctx["recent_payments"] = confirmed.select_related("enrollment__student").order_by(
                 "-created_at"
@@ -159,9 +196,9 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             ctx["calls_month"] = notes.filter(created_at__date__gte=month_start).count()
             ctx["calls_scope_all"] = can_view_all_calls(user)
         if user.has_perm("students.view_course"):
-            ctx["course_count"] = Course.objects.filter(campus=campus, active=True).count()
+            ctx["course_count"] = stats["course_count"]
         if user.has_perm("students.view_promoter"):
-            ctx["promoter_count"] = Promoter.objects.filter(campuses=campus, active=True).count()
+            ctx["promoter_count"] = stats["promoter_count"]
         if user.has_perm("core.view_user"):
             ctx["user_count"] = User.objects.filter(is_active=True).count()
         return ctx

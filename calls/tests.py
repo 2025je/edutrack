@@ -270,6 +270,17 @@ class CallAssignmentTests(TestCase):
         other = self.enrollments[1].student
         self.assertEqual(self.client.get(reverse("calls-notes", args=[other.pk])).status_code, 404)
 
+    def test_assignment_page_lists_assigned_and_table_without_user(self):
+        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        page = self.client.get(url)
+        self.assertEqual(len(page.context["rows"]), 2)
+        self.assertContains(page, "Selecciona un usuario para poder asignar")
+        page = self.client.get(url, {"usuario": self.caller.pk, "curso": "Ingles"})
+        self.assertContains(page, "Llamadas ya asignadas a llamador (1)")
+        self.assertEqual(len(page.context["assigned_list"]), 1)
+
     def test_assigner_sees_everything(self):
         self._login(self.boss)
         self.assertEqual(len(self.client.get(reverse("calls-students")).context["rows"]), 2)

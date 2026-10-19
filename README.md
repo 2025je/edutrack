@@ -203,6 +203,18 @@ Revisiones locales: `uv run ruff check .` y `uv run pyright`. Los hooks de pre-c
 
 Las dependencias están en `pyproject.toml` y bloqueadas en `uv.lock`; usa `uv add paquete`, `uv remove paquete` o `uv add --dev paquete` para actualizarlas. GitHub Actions instala con uv y ejecuta Ruff, las comprobaciones y las pruebas en cada push y pull request, con PostgreSQL 15, Redis y Python 3.12 y 3.13.
 
+### Seguridad y operaci?n
+
+- `DJANGO_SECRET_KEY` es obligatoria cuando `DJANGO_DEBUG=False`; con la clave de ejemplo la app no arranca. Gen?rala con `python -c "import secrets;print(secrets.token_urlsafe(50))"`.
+- Los archivos de `/media/` (comprobantes y fichas) requieren sesi?n y pertenecer a la sede; nginx los entrega tras la autorizaci?n de Django.
+- Tras `LOGIN_MAX_ATTEMPTS` intentos fallidos, el par IP + usuario se bloquea `LOGIN_LOCKOUT_SECONDS` segundos.
+- Con HTTPS delante de nginx, define `DJANGO_HTTPS=True` (y opcionalmente `DJANGO_HSTS_SECONDS`).
+- `/salud/` devuelve el estado de la app y la base de datos; `web` y `nginx` tienen healthcheck y `web` ejecuta `migrate` al iniciar.
+- Respaldos externos: define `BACKUP_OFFSITE_PATH` (carpeta del host) o `BACKUP_RCLONE_REMOTE` con las variables `RCLONE_CONFIG_*`.
+- Las alertas de Grafana (errores 5xx, fallos de respaldo, restauraci?n sin verificar) se cargan solas; falta configurar un *contact point* en Grafana > Alerting.
+- El CI ya prueba contra PostgreSQL 15. En local con SQLite fallan algunas pruebas por la funci?n `UNACCENT`; no son regresiones.
+- En desarrollo sin Docker usa `DJANGO_DEBUG=True` o define `DJANGO_SECRET_KEY`.
+
 ## Respaldos y producción
 
 El servicio `backup` respalda cada día la base de datos (`pg_dump`) y los archivos subidos en `./backups/`. Tras cada respaldo restaura el volcado en una base temporal y compara tablas y filas; el resultado queda en `backups/STATUS`. Se conservan los últimos `BACKUP_KEEP` respaldos. Guarda además una copia de `backups/` fuera del servidor.

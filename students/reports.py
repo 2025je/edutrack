@@ -1,10 +1,12 @@
 from decimal import Decimal
 
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.views.generic import TemplateView
 
 from core.campus import get_selected_campus
+from core.excel import xlsx_response
 from payments.models import Payment
 
 from .models import EMPTY_VALUE, Course, Enrollment, Promoter
@@ -17,6 +19,16 @@ def month_label(value):
 
 def money(value):
     return f"{(value or Decimal('0')):.2f}"
+
+
+def as_number(value):
+    """Convierte textos num?ricos de un informe en n?meros para que Excel los sume."""
+    if isinstance(value, str):
+        try:
+            return int(value) if value.isdigit() else Decimal(value)
+        except ArithmeticError:
+            return value
+    return value
 
 
 class SimpleReportView(CampusScopedMixin, TemplateView):
@@ -32,6 +44,29 @@ class SimpleReportView(CampusScopedMixin, TemplateView):
     def build(self, campus):
         """Devuelve (filas, fila_de_totales o None)."""
         raise NotImplementedError
+
+    def get(self, request, *args, **kwargs):
+        if request.GET.get("export") != "xlsx":
+            return super().get(request, *args, **kwargs)
+        if not request.user.has_perm("core.export_reports"):
+            raise PermissionDenied("No tienes permiso para exportar informes.")
+        campus = get_selected_campus(request)
+        rows, totals = self.build(campus)
+
+        def convert(row):
+            return [
+                as_number(value) if index in self.numeric_columns else value
+                for index, value in enumerate(row)
+            ]
+
+        return xlsx_response(
+            request.resolver_match.url_name.removeprefix("report-").replace("-", "_"),
+            self.title,
+            f"Sede: {campus.name}",
+            self.columns,
+            [convert(row) for row in rows],
+            totals=convert(totals) if totals else None,
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

@@ -3,15 +3,27 @@
 {% block content %}
 <div class="mb"><h1 class="mb-0">Asignar llamadas</h1><div class="muted">Elige qué matrículas verá cada usuario en «Alumnos y deudas». Quienes asignan llamadas ven todas.</div></div>
 <div class="card card-pad">
-  <form method="get" class="row mb-0" data-live-filter data-filter-collapse>
-    <h6 class="col s12 strong">Usuario</h6>
-    <div class="col s12 m6" data-primary data-nochip><label for="usuario">Usuario</label>
-      <select id="usuario" name="usuario" class="browser-default">
-        <option value="">Selecciona un usuario</option>
-        {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
-      </select>
-      {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
-    </div>
+  <div class="row mb-0"><div class="col s12 m6"><label for="usuario">Usuario que realizar? las llamadas</label>
+    <select id="usuario" name="usuario" form="assign-filters" class="browser-default">
+      <option value="">Selecciona un usuario</option>
+      {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
+    </select>
+    {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
+  </div></div>
+</div>
+<div data-live-region="assigned">
+{% if target %}
+<details class="card card-pad mt"><summary class="strong">Llamadas ya asignadas a {{ target.username }} ({{ assigned_list|length }})</summary>
+  {% if assigned_list %}
+  <div class="table-wrap mt" style="max-height:320px;overflow:auto"><table class="highlight"><thead><tr><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th></tr></thead><tbody>
+  {% for a in assigned_list %}<tr><td>{{ a.enrollment.student_label }}</td><td>{{ a.enrollment.course_label }}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.schedule }}{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.group }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="muted mt mb-0">Este usuario a?n no tiene llamadas asignadas.</p>{% endif %}
+</details>
+{% endif %}
+</div>
+<div class="card card-pad mt">
+  <form id="assign-filters" method="get" class="row mb-0" data-live-filter data-filter-collapse>
     <h6 class="col s12 strong">Alumno y curso</h6>
     <div class="col s12 m6 l3" data-primary><label for="q">Alumno o curso</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
     <div class="col s12 m6 l3" data-primary><label for="curso">Curso</label>
@@ -37,23 +49,44 @@
   </form>
 </div>
 <div data-live-region="results">
-{% if target %}
 <p class="muted mt">{{ total_results }} matrícula{{ total_results|pluralize }} encontrada{{ total_results|pluralize }}.</p>
 <form method="post">
   {% csrf_token %}
   <input type="hidden" name="usuario" value="{{ target.pk }}">
-  <div class="card table-wrap"><table class="highlight"><thead><tr><th class="center-align">Asignar</th><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
+  <input type="hidden" name="volver" value="{{ pagination_query }}">
+  <div class="card table-wrap"><table class="highlight"><thead><tr><th class="center-align"><label title="Marcar o desmarcar todas las de esta página"><input type="checkbox" data-check-all {% if not target %}disabled{% endif %}><span>Todas</span></label></th><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
   {% for row in rows %}<tr>
-    <td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>
+    <td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}{% if not target %} disabled{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>
     <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
   </tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
   </tbody></table></div>
-  <button class="btn" type="submit">Guardar asignaciones de esta página</button>
+  {% if target %}<button class="btn" type="submit">Guardar asignaciones de esta página</button>{% else %}<span class="muted">Selecciona un usuario para poder asignar.</span>{% endif %}
   <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver</a>
 </form>
 <div class="mt">{% include "shared/pagination.html" %}</div>
-{% else %}
-<p class="muted mt">Selecciona un usuario para ver y modificar sus matrículas asignadas.</p>
-{% endif %}
 </div>
+<script>
+(function () {
+  var select = document.getElementById("usuario");
+  var form = document.getElementById("assign-filters");
+  if (select && form) select.addEventListener("change", function () { form.requestSubmit(); });
+  function boxes() { return document.querySelectorAll("input[name=enrollments]:not(:disabled)"); }
+  function syncAll() {
+    var all = document.querySelector("[data-check-all]");
+    if (!all) return;
+    var list = boxes(), on = 0;
+    list.forEach(function (b) { if (b.checked) on++; });
+    all.checked = list.length > 0 && on === list.length;
+    all.indeterminate = on > 0 && on < list.length;
+  }
+  document.addEventListener("change", function (event) {
+    if (event.target.matches("[data-check-all]")) {
+      boxes().forEach(function (b) { b.checked = event.target.checked; });
+    }
+    if (event.target.matches("[data-check-all], input[name=enrollments]")) syncAll();
+  });
+  document.addEventListener("live-filter:updated", syncAll);
+  syncAll();
+})();
+</script>
 {% endblock %}

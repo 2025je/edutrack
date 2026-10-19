@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Recibo {{ payment.receipt_number }}{% endblock %}
 {% block content %}
-<div class="flex between items-center mb no-print"><a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">← Volver a pagos</a><button class="btn" onclick="window.print()">Imprimir recibo</button></div>
+<div class="flex between items-center mb no-print"><a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">← Volver a pagos</a><div class="flex gap"><a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-statement' payment.enrollment_id %}">Estado de cuenta</a><button class="btn" onclick="window.print()">Imprimir recibo</button></div></div>
 <div class="row"><div class="col s12 l8 offset-l2"><div class="card card-pad">
 <div class="center-align" style="border-bottom:1px solid #e0e0e0;padding-bottom:1rem;margin-bottom:1.5rem"><div class="small muted" style="text-transform:uppercase">Comprobante interno de pago</div><h1 class="mt">RECIBO DE CAJA</h1><div class="strong" style="font-size:1.2rem">{{ payment.receipt_number }}</div><div>{{ payment.campus.name }}</div></div>
 <div class="row"><div class="col s6"><small class="muted">Fecha de emisión</small><div>{{ payment.created_at|date:"d/m/Y H:i" }}</div></div><div class="col s6 right-align"><small class="muted">Estado</small><div class="strong">{{ payment.get_status_display }}</div></div></div>

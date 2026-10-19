@@ -18,6 +18,7 @@ from django.db.models.functions import Cast, Coalesce, Substr
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.generic import (
     FormView,
@@ -28,6 +29,7 @@ from django.views.generic import (
     TemplateView,
 )
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
+from core.excel import xlsx_response
 from core.pagination import paginate_context
 from students.models import Course, Enrollment, Promoter
 from .forms import (
@@ -529,6 +531,8 @@ class PendingDebtsView(SelectedCampusViewMixin, ListView):
             .select_related("enrollment__student", "enrollment__course", "enrollment__campus")
             .order_by("due_date", "enrollment__student__full_name")
         )
+        if self.request.GET.get("vencidas") == "1":
+            qs = qs.filter(due_date__lt=timezone.localdate())
         q = self.request.GET.get("q", "").strip()
         if q:
             qs = qs.filter(
@@ -544,4 +548,161 @@ class PendingDebtsView(SelectedCampusViewMixin, ListView):
         rows = self.get_queryset().values_list("pending_balance", flat=True)
         context["pending_grand_total"] = sum(rows, Decimal("0.00"))
         context["search_query"] = self.request.GET.get("q", "").strip()
+        context["only_overdue"] = self.request.GET.get("vencidas") == "1"
+        params = self.request.GET.copy()
+        params.pop("page", None)
+        context["pagination_query"] = params.urlencode()
+        if self.request.user.has_perm("calls.view_callnote"):
+            self.attach_reminders(context["debts"])
+        return context
+
+    def attach_reminders(self, debts):
+        """Enlaces de WhatsApp con la plantilla de la sede para recordar cada cuota."""
+        from calls.models import WhatsAppTemplate
+        from calls.views import build_phone_links
+
+        campus = get_selected_campus(self.request)
+        template, _ = WhatsAppTemplate.objects.get_or_create(campus=campus)
+        for debt in debts:
+            student = debt.enrollment.student
+            debt.reminder_links = []
+            if student is not None:
+                courses = [{"course_label": debt.concept, "debt": debt.pending_balance}]
+                debt.reminder_links = build_phone_links(
+                    template, campus, student, courses, debt.pending_balance
+                )
+
+
+class PaymentExcelExportView(PaymentListView):
+    """Exporta a Excel los pagos con los mismos filtros y orden del listado."""
+
+    required_permission = ("payments.view_payment", "core.export_reports")
+
+    def get(self, request, *args, **kwargs):
+        self.request = request
+        payments = self.get_queryset()
+        rows = [
+            [
+                p.receipt_number,
+                timezone.localtime(p.created_at).replace(tzinfo=None),
+                p.enrollment.student_label,
+                p.enrollment.course_label,
+                p.amount,
+                p.get_status_display(),
+                p.cashier.get_full_name() or p.cashier.username,
+                p.reference,
+            ]
+            for p in payments
+        ]
+        confirmed = sum(
+            (p.amount for p in payments if p.status == Payment.Status.CONFIRMED), Decimal("0.00")
+        )
+        return xlsx_response(
+            "pagos",
+            "Pagos",
+            f"Sede: {get_selected_campus(request).name}",
+            [
+                "N.? de recibo",
+                "Fecha y hora",
+                "Estudiante",
+                "Curso",
+                "Importe",
+                "Estado",
+                "Cajero",
+                "Referencia",
+            ],
+            rows,
+            money=(4,),
+            dates=(1,),
+            totals=["Total confirmado", "", "", "", confirmed, "", "", ""],
+        )
+
+
+class PendingDebtsExcelView(PendingDebtsView):
+    """Exporta a Excel las cuotas con saldo pendiente (seg?n la b?squeda actual)."""
+
+    required_permission = ("core.view_pending_balances", "core.export_reports")
+
+    def get(self, request, *args, **kwargs):
+        self.request = request
+        debts = list(self.get_queryset())
+        rows = [
+            [
+                d.enrollment.student_label,
+                d.enrollment.student.phone if d.enrollment.student_id else "",
+                d.enrollment.course_label,
+                d.concept,
+                d.due_date,
+                d.amount,
+                d.paid_total,
+                d.pending_balance,
+            ]
+            for d in debts
+        ]
+        total = sum((d.pending_balance for d in debts), Decimal("0.00"))
+        return xlsx_response(
+            "deudas_pendientes",
+            "Deudas pendientes",
+            f"Sede: {get_selected_campus(request).name}",
+            [
+                "Estudiante",
+                "Celular",
+                "Curso / grupo",
+                "Concepto",
+                "Vencimiento",
+                "Importe",
+                "Pagado",
+                "Saldo pendiente",
+            ],
+            rows,
+            money=(5, 6, 7),
+            dates=(4,),
+            totals=["Saldo pendiente total", "", "", "", "", "", "", total],
+        )
+
+
+class EnrollmentStatementView(SelectedCampusViewMixin, DetailView):
+    """Estado de cuenta imprimible de una matr?cula: cuotas, pagos y saldo."""
+
+    model = Enrollment
+    template_name = "payments/statement.html"
+    context_object_name = "enrollment"
+    pk_url_kwarg = "enrollment_id"
+
+    def get_queryset(self):
+        return Enrollment.objects.filter(campus=get_selected_campus(self.request)).select_related(
+            "student", "course", "campus"
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        enrollment = self.object
+        paid_by_installment = dict(
+            PaymentAllocation.objects.filter(
+                installment__enrollment=enrollment, payment__status=Payment.Status.CONFIRMED
+            )
+            .values_list("installment")
+            .annotate(total=Sum("amount"))
+        )
+        today = timezone.localdate()
+        rows = []
+        for installment in enrollment.installments.filter(active=True).order_by("due_date", "id"):
+            paid = paid_by_installment.get(installment.pk, Decimal("0.00"))
+            balance = installment.amount - paid
+            rows.append(
+                {
+                    "installment": installment,
+                    "paid": paid,
+                    "balance": balance,
+                    "overdue": balance > 0 and installment.due_date < today,
+                }
+            )
+        context.update(
+            rows=rows,
+            total_billed=sum((r["installment"].amount for r in rows), Decimal("0.00")),
+            total_paid=sum((r["paid"] for r in rows), Decimal("0.00")),
+            total_balance=sum((r["balance"] for r in rows), Decimal("0.00")),
+            payments=enrollment.payments.select_related("cashier").order_by("created_at"),
+            today=today,
+        )
         return context

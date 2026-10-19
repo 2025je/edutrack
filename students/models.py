@@ -253,6 +253,11 @@ class Enrollment(models.Model):
         ordering = ["-course__start_date", "student__full_name"]
         verbose_name = "matrícula"
         verbose_name_plural = "matrículas"
+        indexes = [
+            models.Index(
+                fields=["campus", "active", "enrollment_date"], name="enroll_campus_active_date"
+            ),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(student__isnull=False) | models.Q(course__isnull=False),

@@ -582,3 +582,4 @@
       body{background:#fff;padding-top:0}.card{box-shadow:none}
       .has-side main,main{padding-left:0!important}
     }
+.saved-filters .btn-small,.saved-filters .btn-flat{margin:0;height:36px;line-height:36px;padding:0 14px}

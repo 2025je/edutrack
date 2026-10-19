@@ -61,6 +61,38 @@ verify_dump() {
   return "$status"
 }
 
+offsite_copy() {
+  # Copia el respaldo recién verificado fuera de este servidor. Es opcional:
+  #   BACKUP_OFFSITE_DIR     carpeta montada (disco externo, NAS, carpeta sincronizada)
+  #   BACKUP_RCLONE_REMOTE   destino de rclone, p. ej. "s3:mi-bucket/edutrack" (ver README)
+  # Devuelve distinto de cero si algún destino falla.
+  dump="$1"; media="$2"; status=0
+  if [ -n "${BACKUP_OFFSITE_DIR:-}" ]; then
+    if [ -d "$BACKUP_OFFSITE_DIR" ] && mkdir -p "$BACKUP_OFFSITE_DIR/db" "$BACKUP_OFFSITE_DIR/media"; then
+      cp "$dump" "$BACKUP_OFFSITE_DIR/db/" && log "Copia externa (carpeta): $BACKUP_OFFSITE_DIR/db/$(basename "$dump")." || status=1
+      [ -n "$media" ] && [ -f "$media" ] && { cp "$media" "$BACKUP_OFFSITE_DIR/media/" || status=1; }
+      prune "$BACKUP_OFFSITE_DIR/db" "*.dump"
+      prune "$BACKUP_OFFSITE_DIR/media" "*.tar.gz"
+    else
+      log "ERROR: la carpeta externa $BACKUP_OFFSITE_DIR no está disponible."
+      status=1
+    fi
+  fi
+  if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
+    command -v rclone >/dev/null 2>&1 || apk add --no-cache rclone >/dev/null 2>&1
+    if command -v rclone >/dev/null 2>&1 \
+      && rclone copy "$dump" "$BACKUP_RCLONE_REMOTE/db" \
+      && { [ -z "$media" ] || [ ! -f "$media" ] || rclone copy "$media" "$BACKUP_RCLONE_REMOTE/media"; }; then
+      log "Copia externa (rclone): $BACKUP_RCLONE_REMOTE."
+      rclone delete "$BACKUP_RCLONE_REMOTE" --min-age "${BACKUP_REMOTE_DAYS:-30}d" >/dev/null 2>&1
+    else
+      log "ERROR: la copia externa con rclone falló."
+      status=1
+    fi
+  fi
+  return "$status"
+}
+
 backup_once() {
   stamp=$(date -u +%Y%m%d_%H%M%S)
   mkdir -p "$BACKUP_DIR/db" "$BACKUP_DIR/media"
@@ -75,6 +107,7 @@ backup_once() {
   mv "$file.partial" "$file"
   log "Base de datos respaldada: $file ($(du -h "$file" | cut -f1))."
 
+  media=""
   if [ -d "$MEDIA_DIR" ] && [ -n "$(ls -A "$MEDIA_DIR" 2>/dev/null)" ]; then
     media="$BACKUP_DIR/media/media_$stamp.tar.gz"
     if tar -czf "$media.partial" -C "$MEDIA_DIR" .; then
@@ -82,6 +115,7 @@ backup_once() {
       log "Archivos subidos respaldados: $media."
     else
       rm -f "$media.partial"
+      media=""
       log "ERROR: no se pudo respaldar media."
     fi
   fi
@@ -91,6 +125,9 @@ backup_once() {
   else
     echo "FALLIDO $stamp verificacion" > "$BACKUP_DIR/STATUS"
     return 1
+  fi
+  if ! offsite_copy "$file" "$media"; then
+    echo "FALLIDO $stamp copia-externa" > "$BACKUP_DIR/STATUS"
   fi
   prune "$BACKUP_DIR/db" "*.dump"
   prune "$BACKUP_DIR/media" "*.tar.gz"

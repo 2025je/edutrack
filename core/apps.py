@@ -7,3 +7,6 @@ class CoreConfig(AppConfig):
 
     def ready(self):
         from . import activity  # noqa: F401  (conecta las señales de auditoría)
+        from .dashboard_cache import connect_signals
+
+        connect_signals()

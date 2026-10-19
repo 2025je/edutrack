@@ -26,6 +26,11 @@ class Installment(models.Model):
         ordering = ["due_date", "id"]
         verbose_name = "cuota"
         verbose_name_plural = "cuotas"
+        indexes = [
+            models.Index(
+                fields=["enrollment", "active", "due_date"], name="installment_enroll_due"
+            ),
+        ]
 
     @property
     def paid_amount(self):
@@ -85,6 +90,11 @@ class Payment(models.Model):
         ordering = ["-created_at"]
         verbose_name = "pago"
         verbose_name_plural = "pagos"
+        indexes = [
+            models.Index(
+                fields=["campus", "status", "-created_at"], name="payment_campus_status_date"
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["campus", "receipt_number"],

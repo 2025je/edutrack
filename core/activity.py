@@ -40,6 +40,13 @@ URL_ACTIONS = {
 # Vistas de solo lectura que sí interesa auditar.
 LOGGED_GET_URL_NAMES = {"enrollment-excel", "course-student-export", "payment-receipt"}
 GET_ACTIONS = {"payment-receipt": (ActivityLog.Action.OTHER, "Consultó un recibo")}
+URL_ACTIONS["payment-excel"] = (ActivityLog.Action.EXPORT, "Exportó pagos a Excel")
+URL_ACTIONS["pending-debts-excel"] = (
+    ActivityLog.Action.EXPORT,
+    "Exportó deudas pendientes a Excel",
+)
+GET_ACTIONS["enrollment-statement"] = (ActivityLog.Action.OTHER, "Consult? un estado de cuenta")
+LOGGED_GET_URL_NAMES |= {"payment-excel", "pending-debts-excel", "enrollment-statement"}
 
 
 def client_ip(request):
@@ -97,9 +104,15 @@ class ActivityLogMiddleware:
         ):
             return
         if request.method in SAFE_METHODS:
-            if url_name not in LOGGED_GET_URL_NAMES or response.status_code >= 400:
+            is_report_export = (
+                url_name.startswith("report-") and request.GET.get("export") == "xlsx"
+            )
+            if is_report_export and response.status_code < 400:
+                action, label = ActivityLog.Action.EXPORT, "Exportó un informe a Excel"
+            elif url_name not in LOGGED_GET_URL_NAMES or response.status_code >= 400:
                 return
-            action, label = URL_ACTIONS.get(url_name) or GET_ACTIONS[url_name]
+            else:
+                action, label = URL_ACTIONS.get(url_name) or GET_ACTIONS[url_name]
         else:
             # Una respuesta 200 a un POST es un formulario con errores; solo se auditan los éxitos.
             if not 300 <= response.status_code < 400:

@@ -1,3 +1,4 @@
+from django.http import QueryDict
 from collections import defaultdict
 from decimal import Decimal
 from urllib.parse import quote, urlencode
@@ -527,9 +528,20 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             params["deuda"] = "1"
         if target:
             params["usuario"] = target.pk
+        assigned_list = (
+            CallAssignment.objects.filter(
+                user=target, enrollment__campus=get_selected_campus(self.request)
+            )
+            .filter(enrollment__active=True)
+            .select_related("enrollment__student", "enrollment__course")
+            .order_by("enrollment__student__full_name", "enrollment_id")
+            if target
+            else []
+        )
         context.update(
             users=self.get_users(),
             target=target,
+            assigned_list=assigned_list,
             page_obj=page,
             is_paginated=page.paginator.num_pages > 1,
             rows=[
@@ -576,4 +588,7 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             for pk in chosen - existing
         )
         messages.success(request, f"Asignaciones de {target.username} actualizadas.")
-        return redirect(f"{request.path}?{request.GET.urlencode() or 'usuario=' + str(target.pk)}")
+        keep = QueryDict(request.POST.get("volver", "")).copy()
+        keep.pop("page", None)
+        keep["usuario"] = str(target.pk)
+        return redirect(f"{request.path}?{keep.urlencode()}")

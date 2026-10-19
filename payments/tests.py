@@ -1,10 +1,12 @@
 from datetime import date, datetime
+from io import BytesIO
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from openpyxl import load_workbook
 from django.utils import timezone
 
 from core.models import Campus
@@ -81,6 +83,79 @@ class PaymentCrudTests(TestCase):
             sum(1 for i in installments if i.balance > 0 and i.due_date < today),
         )
         self.assertEqual(response.context["overdue_count"], 2)
+
+    def test_dashboard_stats_refresh_after_a_new_payment(self):
+        self.user.is_superuser = True
+        self.user.save()
+        first = self.client.get(reverse("dashboard")).context["payments_total"]
+        payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="D77",
+            amount=25,
+        )
+        PaymentAllocation.objects.create(payment=payment, installment=self.installment, amount=25)
+        second = self.client.get(reverse("dashboard")).context
+        self.assertEqual(second["payments_total"], first + 25)
+        self.assertEqual(second["pending_total"], Decimal("55.00"))
+
+    def test_payment_list_exports_filtered_excel(self):
+        response = self.client.get(reverse("payment-excel"), {"receipt": "D1"})
+        self.assertEqual(response.status_code, 200)
+        sheet = load_workbook(BytesIO(response.content)).active
+        values = [cell.value for row in sheet.iter_rows(min_row=5) for cell in row]
+        self.assertIn("D1", values)
+        none = self.client.get(reverse("payment-excel"), {"receipt": "NOEXISTE"})
+        sheet = load_workbook(BytesIO(none.content)).active
+        self.assertNotIn("D1", [c.value for row in sheet.iter_rows(min_row=5) for c in row])
+
+    def test_payment_export_requires_export_permission(self):
+        revoke(self.user, "manage_students")
+        self.assertEqual(self.client.get(reverse("payment-excel")).status_code, 403)
+
+    def test_pending_debts_export_and_overdue_filter(self):
+        Installment.objects.create(
+            enrollment=self.enrollment, concept="Futura", amount=30, due_date=date(2999, 1, 1)
+        )
+        response = self.client.get(reverse("pending-debts-excel"))
+        sheet = load_workbook(BytesIO(response.content)).active
+        concepts = [row[3].value for row in sheet.iter_rows(min_row=5)]
+        self.assertIn("Futura", concepts)
+        overdue = self.client.get(reverse("pending-debts"), {"vencidas": "1"})
+        names = [d.concept for d in overdue.context["debts"]]
+        self.assertIn("Cuota inicial", names)
+        self.assertNotIn("Futura", names)
+
+    def test_enrollment_statement_shows_installments_and_payments(self):
+        response = self.client.get(reverse("enrollment-statement", args=[self.enrollment.pk]))
+        self.assertContains(response, "ESTADO DE CUENTA")
+        self.assertContains(response, "Cuota inicial")
+        self.assertContains(response, "D1")
+        self.assertEqual(response.context["total_balance"], Decimal("80.00"))
+
+    def test_enrollment_statement_is_limited_to_the_selected_campus(self):
+        other = Campus.objects.create(name="Otra sede", active=True)
+        student = Student.objects.create(campus=other, full_name="Alumno ajeno")
+        foreign = Enrollment.objects.create(campus=other, student=student)
+        response = self.client.get(reverse("enrollment-statement", args=[foreign.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_voucher_is_served_only_to_users_of_its_campus(self):
+        self.payment.voucher = "vouchers/prueba.png"
+        self.payment.save()
+        url = "/media/vouchers/prueba.png"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Accel-Redirect"], "/_protected_media/vouchers/prueba.png")
+        outsider = create_user(username="outsider", password="x" * 12)
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)
+
+    def test_media_path_rejects_traversal(self):
+        self.assertEqual(self.client.get("/media/vouchers/../../etc/passwd").status_code, 404)
 
     def test_payment_can_be_updated_and_reallocated(self):
         response = self.client.get(reverse("payment-update", args=[self.payment.pk]))
