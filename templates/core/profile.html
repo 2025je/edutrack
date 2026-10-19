@@ -1,0 +1,48 @@
+{% extends "base.html" %}{% block title %}Mi perfil · EduTrack{% endblock %}
+{% block content %}
+<style>.perm-list{margin:.25rem 0 0;padding:0;list-style:none}.perm-list li{padding:.3rem 0;border-bottom:1px solid rgba(120,132,154,.18);font-size:.92rem}.perm-list li:last-child{border-bottom:0}</style>
+<div class="mb"><h1 class="mb-0">Mi perfil</h1><div class="muted">Datos de tu cuenta, tus accesos y cambio de contraseña.</div></div>
+<div class="row">
+  <div class="col s12 l6">
+    <div class="card card-pad">
+      <h6 class="strong">Cuenta</h6>
+      <table class="no-hover" data-no-sort>
+        <tbody>
+          <tr><th>Usuario</th><td>{{ user.username }}</td></tr>
+          <tr><th>Correo</th><td>{{ user.email|default:"—" }}</td></tr>
+          <tr><th>Estado</th><td>{% if user.is_active %}Activo{% else %}Inactivo{% endif %}</td></tr>
+          <tr><th>Último acceso</th><td>{{ user.last_login|date:"d/m/Y H:i"|default:"—" }}</td></tr>
+          <tr><th>Rol</th><td>{% if user.is_superuser %}Superusuario{% elif groups %}{% for group in groups %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}Sin grupo asignado{% endif %}</td></tr>
+          <tr><th>Sedes</th><td>{% if user.is_superuser %}Todas{% else %}{% for campus in campuses %}{{ campus.name }}{% if not forloop.last %}, {% endif %}{% empty %}Ninguna{% endfor %}{% endif %}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card card-pad">
+      <h6 class="strong">Permisos</h6>
+      {% if user.is_superuser %}
+        <p class="muted mb-0">Tu cuenta es de superusuario y tiene acceso a todo el sistema.</p>
+      {% else %}
+        {% for module, items in permission_modules %}
+          <div class="strong" style="margin-top:1rem">{{ module }}</div>
+          <ul class="perm-list">{% for item in items %}<li><strong>{{ item.name }}</strong>{% if item.detail %}<span class="muted"> — {{ item.detail }}</span>{% endif %}</li>{% endfor %}</ul>
+        {% empty %}
+          <p class="muted mb-0">Aún no tienes permisos asignados. Contacta al administrador.</p>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="col s12 l6">
+    <div class="card card-pad">
+      <h6 class="strong">Cambiar contraseña</h6>
+      <form method="post" autocomplete="off">
+        {% csrf_token %}
+        {% for error in form.non_field_errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+        {% for field in form %}
+          <div style="margin-bottom:.75rem"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+        {% endfor %}
+        <button class="btn" type="submit">Actualizar contraseña</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

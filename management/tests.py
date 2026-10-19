@@ -3,6 +3,7 @@ import shutil
 import tempfile
 
 from core.models import Campus, User
+from core.testing import create_user, feature_group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -11,9 +12,7 @@ from students.models import Course, Promoter, Schedule
 
 class CampusManagementTests(TestCase):
     def setUp(self):
-        self.manager = User.objects.create_user(
-            username="gestor", password="x-clave-123", can_manage_campuses=True
-        )
+        self.manager = create_user(username="gestor", password="x-clave-123", manage_campuses=True)
         self.client.force_login(self.manager)
         media = tempfile.mkdtemp()
         override = override_settings(MEDIA_ROOT=media)
@@ -22,14 +21,14 @@ class CampusManagementTests(TestCase):
         self.addCleanup(shutil.rmtree, media, ignore_errors=True)
 
     def test_requires_permission(self):
-        other = User.objects.create_user(username="sinpermiso", password="x-clave-123")
+        other = create_user(username="sinpermiso", password="x-clave-123")
         self.client.force_login(other)
         for name in ("campus-list", "campus-create"):
             self.assertEqual(self.client.get(reverse(name)).status_code, 403)
 
     def test_sidebar_section_depends_on_permission(self):
         self.assertContains(self.client.get(reverse("campus-list")), reverse("campus-create"))
-        other = User.objects.create_user(username="sinpermiso", password="x-clave-123")
+        other = create_user(username="sinpermiso", password="x-clave-123")
         self.client.force_login(other)
         self.assertNotContains(self.client.get(reverse("select-campus")), reverse("campus-list"))
 
@@ -111,8 +110,8 @@ class CampusManagementTests(TestCase):
 
 class CampusFlyerTests(TestCase):
     def setUp(self):
-        self.manager = User.objects.create_user(
-            username="gestor", password="clave-segura-123", can_manage_campuses=True
+        self.manager = create_user(
+            username="gestor", password="clave-segura-123", manage_campuses=True
         )
         self.client.force_login(self.manager)
         self.campus = Campus.objects.create(name="Sede F")
@@ -170,7 +169,7 @@ class CampusFlyerTests(TestCase):
         self.assertFalse(os.path.exists(path))
 
     def test_requires_permission_and_post_only(self):
-        other = User.objects.create_user(username="sin", password="clave-segura-123")
+        other = create_user(username="sin", password="clave-segura-123")
         self.client.force_login(other)
         response = self.client.post(self.url, {"title": "X", "file": self.pdf()})
         self.assertEqual(response.status_code, 403)
@@ -184,7 +183,7 @@ class PromoterCreationTests(TestCase):
         self.campus = Campus.objects.create(name="Sede Promotores", active=True)
 
     def login(self, **permissions):
-        user = User.objects.create_user(username="promo", password="x-test-pass-1", **permissions)
+        user = create_user(username="promo", password="x-test-pass-1", **permissions)
         user.campuses.add(self.campus)
         self.client.force_login(user)
         session = self.client.session
@@ -192,7 +191,7 @@ class PromoterCreationTests(TestCase):
         session.save()
 
     def test_user_with_permission_creates_promoter_for_selected_campus(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         response = self.client.post(reverse("promoter-list"), {"name": "  Ana   Pérez "})
 
@@ -201,7 +200,7 @@ class PromoterCreationTests(TestCase):
         self.assertEqual(list(promoter.campuses.all()), [self.campus])
 
     def test_duplicate_promoter_name_is_rejected(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         Promoter.objects.create(name="Ana Pérez")
 
         response = self.client.post(reverse("promoter-list"), {"name": "ana pérez"})
@@ -212,7 +211,7 @@ class PromoterCreationTests(TestCase):
         self.assertEqual(custom.get().name, "ANA PÉREZ")
 
     def test_user_without_permission_cannot_access_promoters(self):
-        self.login(can_manage_students=True, can_register_payments=True)
+        self.login(manage_students=True, register_payments=True)
 
         self.assertEqual(self.client.get(reverse("promoter-list")).status_code, 403)
         self.assertEqual(self.client.post(reverse("promoter-list"), {"name": "X"}).status_code, 403)
@@ -225,7 +224,7 @@ class CourseCreationTests(TestCase):
         self.schedule = Schedule.objects.create(campus=self.campus, name="Lunes 8:00")
 
     def login(self, **permissions):
-        user = User.objects.create_user(username="cursos", password="x-test-pass-1", **permissions)
+        user = create_user(username="cursos", password="x-test-pass-1", **permissions)
         user.campuses.add(self.campus)
         self.client.force_login(user)
         session = self.client.session
@@ -246,7 +245,7 @@ class CourseCreationTests(TestCase):
         return data
 
     def test_user_with_permission_creates_course_for_selected_campus(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         response = self.client.post(reverse("course-list"), self.data())
 
@@ -256,7 +255,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(course.schedule, "LUNES 8:00")
 
     def test_course_form_hides_unassigned_schedule(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         response = self.client.get(reverse("course-list"))
 
@@ -266,7 +265,7 @@ class CourseCreationTests(TestCase):
         )
 
     def test_course_form_offers_new_schedule_option(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         response = self.client.get(reverse("course-list"))
 
@@ -274,7 +273,7 @@ class CourseCreationTests(TestCase):
         self.assertContains(response, "data-uppercase")
 
     def test_schedules_are_available_only_at_their_campus(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         other_campus = Campus.objects.create(name="Otra Sede Cursos", active=True)
         other_schedule = Schedule.objects.create(campus=other_campus, name="Lunes 8:00")
 
@@ -290,14 +289,14 @@ class CourseCreationTests(TestCase):
         self.assertFalse(Course.objects.filter(name="INGLÉS").exists())
 
     def test_catalog_name_inputs_convert_text_to_uppercase(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         for url_name in ("schedule-create", "promoter-list"):
             with self.subTest(url_name=url_name):
                 self.assertContains(self.client.get(reverse(url_name)), "data-uppercase")
 
     def test_user_with_permission_creates_schedule_used_by_new_courses(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
 
         response = self.client.post(reverse("schedule-create"), {"name": "  Sábado   9:00 "})
 
@@ -312,7 +311,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(Course.objects.get(name="INGLÉS").schedule, "SÁBADO 9:00")
 
     def test_duplicate_schedule_is_rejected(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         before = Schedule.objects.count()
 
         response = self.client.post(reverse("schedule-create"), {"name": "lunes 8:00"})
@@ -321,7 +320,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(Schedule.objects.count(), before)
 
     def test_same_schedule_name_is_allowed_at_another_campus(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         other_campus = Campus.objects.create(name="Otra Sede Cursos", active=True)
         user = User.objects.get(username="cursos")
         user.campuses.add(other_campus)
@@ -338,7 +337,7 @@ class CourseCreationTests(TestCase):
         )
 
     def test_user_without_permission_cannot_create_schedules(self):
-        self.login(can_manage_students=True)
+        self.login(manage_students=True)
 
         self.assertEqual(self.client.get(reverse("schedule-create")).status_code, 403)
         self.assertEqual(
@@ -346,7 +345,7 @@ class CourseCreationTests(TestCase):
         )
 
     def test_course_start_date_can_be_updated(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         self.client.post(reverse("course-list"), self.data())
         course = Course.objects.get(name="INGLÉS")
         url = reverse("course-update", args=[course.pk])
@@ -384,7 +383,7 @@ class CourseCreationTests(TestCase):
         self.assertTrue(invalid.context["form"].errors.get("enrollment_fee"))
 
     def test_unassigned_course_cannot_be_edited_even_by_superuser(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         course = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
         url = reverse("course-update", args=[course.pk])
 
@@ -399,7 +398,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(self.client.get(url).status_code, 404)
 
     def test_unassigned_course_start_date_is_locked_for_non_superusers(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         course = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
 
         response = self.client.get(reverse("course-update", args=[course.pk]))
@@ -407,7 +406,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_duplicate_course_is_rejected(self):
-        self.login(can_manage_promoters=True)
+        self.login(manage_promoters=True)
         self.client.post(reverse("course-list"), self.data())
 
         response = self.client.post(reverse("course-list"), self.data(name="inglés"))
@@ -416,7 +415,7 @@ class CourseCreationTests(TestCase):
         self.assertEqual(Course.objects.exclude(name="POR ASIGNAR").count(), 1)
 
     def test_user_without_permission_cannot_create_courses(self):
-        self.login(can_manage_students=True, can_register_payments=True)
+        self.login(manage_students=True, register_payments=True)
 
         self.assertEqual(self.client.get(reverse("course-list")).status_code, 403)
         self.assertEqual(self.client.post(reverse("course-list"), self.data()).status_code, 403)
@@ -425,8 +424,8 @@ class CourseCreationTests(TestCase):
 
 class UserCreateTests(TestCase):
     def setUp(self):
-        self.manager = User.objects.create_user(
-            username="gestor", password="clave-segura-123", can_manage_users=True
+        self.manager = create_user(
+            username="gestor", password="clave-segura-123", manage_users=True
         )
         self.client.force_login(self.manager)
         self.campus = Campus.objects.create(name="Sede A")
@@ -437,13 +436,13 @@ class UserCreateTests(TestCase):
             "password1": "Clave-muy-Segura-987",
             "password2": "Clave-muy-Segura-987",
             "campuses": [self.campus.pk],
-            "can_register_payments": "on",
+            "groups": [feature_group("register_payments").pk],
         }
         data.update(extra)
         return data
 
     def test_requires_permission(self):
-        other = User.objects.create_user(username="sinpermiso", password="clave-segura-123")
+        other = create_user(username="sinpermiso", password="clave-segura-123")
         self.client.force_login(other)
         self.assertEqual(self.client.get(reverse("user-create")).status_code, 403)
         self.assertEqual(self.client.get(reverse("user-list")).status_code, 403)
@@ -458,8 +457,8 @@ class UserCreateTests(TestCase):
         self.assertRedirects(response, reverse("user-list"))
         user = User.objects.get(username="nuevo")
         self.assertTrue(user.check_password("Clave-muy-Segura-987"))
-        self.assertTrue(user.can_register_payments)
-        self.assertFalse(user.can_manage_students)
+        self.assertTrue(user.has_perm("payments.add_payment"))
+        self.assertFalse(user.has_perm("students.add_enrollment"))
         self.assertFalse(user.is_staff or user.is_superuser)
         self.assertEqual(set(user.campuses.all()), {self.campus})
 
@@ -483,14 +482,14 @@ class UserCreateTests(TestCase):
 
 class UserUpdateTests(TestCase):
     def setUp(self):
-        self.manager = User.objects.create_user(
-            username="gestor", password="clave-segura-123", can_manage_users=True
+        self.manager = create_user(
+            username="gestor", password="clave-segura-123", manage_users=True
         )
         self.client.force_login(self.manager)
         self.a = Campus.objects.create(name="A")
         self.b = Campus.objects.create(name="B")
-        self.target = User.objects.create_user(
-            username="cajero", password="Vieja-clave-123", can_manage_students=True
+        self.target = create_user(
+            username="cajero", password="Vieja-clave-123", manage_students=True
         )
         self.target.campuses.set([self.a])
         self.url = reverse("user-update", args=[self.target.pk])
@@ -500,7 +499,7 @@ class UserUpdateTests(TestCase):
             "username": "cajero",
             "is_active": "on",
             "campuses": [self.b.pk],
-            "can_register_payments": "on",
+            "groups": [feature_group("register_payments").pk],
         }
         data.update(extra)
         return data
@@ -515,8 +514,8 @@ class UserUpdateTests(TestCase):
         self.assertRedirects(response, reverse("user-list"))
         self.target.refresh_from_db()
         self.assertEqual(self.target.username, "cajero2")
-        self.assertTrue(self.target.can_register_payments)
-        self.assertFalse(self.target.can_manage_students)
+        self.assertTrue(self.target.has_perm("payments.add_payment"))
+        self.assertFalse(self.target.has_perm("students.add_enrollment"))
         self.assertEqual(set(self.target.campuses.all()), {self.b})
         self.assertTrue(self.target.check_password("Vieja-clave-123"))
 
@@ -540,16 +539,16 @@ class UserUpdateTests(TestCase):
         self.target.refresh_from_db()
         self.assertFalse(self.target.is_active)
         own = reverse("user-update", args=[self.manager.pk])
-        response = self.client.post(own, {"username": "gestor", "can_manage_users": "on"})
+        response = self.client.post(
+            own, {"username": "gestor", "groups": [feature_group("manage_users").pk]}
+        )
         self.assertEqual(response.status_code, 200)
         self.manager.refresh_from_db()
         self.assertTrue(self.manager.is_active)
 
     def test_superusers_and_staff_cannot_be_edited_by_managers(self):
         admin = User.objects.create_superuser(username="root", password="clave-segura-123")
-        staff = User.objects.create_user(
-            username="staff", password="clave-segura-123", is_staff=True
-        )
+        staff = create_user(username="staff", password="clave-segura-123", is_staff=True)
         for user in (admin, staff):
             self.assertEqual(
                 self.client.get(reverse("user-update", args=[user.pk])).status_code, 404

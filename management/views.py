@@ -32,11 +32,12 @@ from .forms import (
 
 
 class CampusManagementMixin(FeaturePermissionMixin):
-    permission_field = "can_manage_campuses"
+    required_permission = "core.change_campus"
 
 
 class CatalogManagerMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin):
-    permission_field = "can_manage_promoters"
+    required_permission = "students.view_course"
+    method_permissions = {"POST": "students.add_course"}
 
 
 def manageable_users(editor):
@@ -49,6 +50,7 @@ def manageable_users(editor):
 
 
 class CampusListView(CampusManagementMixin, ListView):
+    required_permission = "core.view_campus"
     template_name = "management/campus_list.html"
     context_object_name = "campuses"
     paginate_by = 20
@@ -62,6 +64,7 @@ class CampusListView(CampusManagementMixin, ListView):
 
 
 class CampusCreateView(CampusManagementMixin, CreateView):
+    required_permission = "core.add_campus"
     model = Campus
     form_class = CampusForm
     template_name = "management/campus_form.html"
@@ -141,10 +144,11 @@ class CampusFlyerDeleteView(CampusManagementMixin, View):
 
 
 class UserManagementMixin(FeaturePermissionMixin):
-    permission_field = "can_manage_users"
+    required_permission = "core.manage_user_access"
 
 
 class UserListView(UserManagementMixin, ListView):
+    required_permission = "core.view_user"
     template_name = "management/user_list.html"
     context_object_name = "users"
     paginate_by = 25
@@ -233,6 +237,8 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
 
 
 class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
+    required_permission = "students.change_course"
+    method_permissions = {}
     template_name = "management/course_edit.html"
     form_class = CourseStartDateForm
     success_url = reverse_lazy("course-list")
@@ -249,6 +255,8 @@ class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
 
 
 class ScheduleCreateView(CatalogManagerMixin, TemplateView):
+    required_permission = "students.add_course"
+    method_permissions = {}
     template_name = "management/schedule_form.html"
 
     def get_context_data(self, form=None, **kwargs):
@@ -273,6 +281,8 @@ class ScheduleCreateView(CatalogManagerMixin, TemplateView):
 
 
 class PromoterView(CatalogManagerMixin, TemplateView):
+    required_permission = "students.view_promoter"
+    method_permissions = {"POST": "students.add_promoter"}
     template_name = "management/promoters.html"
 
     def get_context_data(self, form=None, **kwargs):

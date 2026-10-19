@@ -10,7 +10,7 @@
 <div class="flex wrap between items-center gap mb">
   <div><h1 class="mb-0">Sedes</h1><div class="muted">Crea y edita las sedes del sistema.</div></div>
   <div class="no-print">
-    <a class="btn" href="{% url 'campus-create' %}"><i class="material-icons left">add</i>Nueva sede</a>
+    {% if perms.core.add_campus %}<a class="btn" href="{% url 'campus-create' %}"><i class="material-icons left">add</i>Nueva sede</a>{% endif %}
   </div>
 </div>
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Logo</th><th>Sede</th><th>Dirección</th><th>Volantes</th><th>Estado</th><th class="right-align">Usuarios</th><th class="no-print">Acciones</th></tr></thead><tbody>
@@ -21,7 +21,7 @@
   <td>{% for flyer in campus.flyers.all %}<a class="flyer-preview" href="{{ flyer.file.url }}" target="_blank" rel="noopener" title="{{ flyer.title }}">{% if flyer.is_image %}<img src="{{ flyer.file.url }}" alt="Vista previa de {{ flyer.title }}" loading="lazy">{% else %}<iframe src="{{ flyer.file.url }}#toolbar=0&navpanes=0&view=FitH" title="Vista previa de {{ flyer.title }}" loading="lazy" tabindex="-1"></iframe>{% endif %}<span class="small">{{ flyer.title }}</span></a>{% empty %}<span class="muted">—</span>{% endfor %}</td>
   <td>{% if campus.active %}Activa{% else %}<span class="muted">Inactiva</span>{% endif %}</td>
   <td class="right-align">{{ campus.users_count }}</td>
-  <td class="no-print"><a class="blue-text" href="{% url 'campus-update' campus.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a></td>
+  <td class="no-print">{% if perms.core.change_campus %}<a class="blue-text" href="{% url 'campus-update' campus.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a>{% endif %}</td>
 </tr>{% empty %}<tr><td colspan="7" class="center-align muted">No hay sedes registradas.</td></tr>{% endfor %}
 </tbody></table></div>
 {% include "shared/pagination.html" %}

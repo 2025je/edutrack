@@ -47,7 +47,7 @@ MAX_RECORD_CODE_CHECK_RANGE = 10_000
 
 
 class CampusScopedMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin):
-    permission_field = "can_manage_students"
+    required_permission = "students.view_student"
 
     def campus_queryset(self, qs, field="campus"):
         campus = get_selected_campus(self.request)
@@ -106,7 +106,7 @@ class StudentListView(CampusScopedMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["payable_student_ids"] = set()
-        if self.request.user.is_superuser or self.request.user.can_register_payments:
+        if self.request.user.has_perm("payments.add_payment"):
             from payments.forms import pending_enrollments_for_campus
 
             context["payable_student_ids"] = set(
@@ -140,6 +140,7 @@ class StudentListView(CampusScopedMixin, ListView):
 
 
 class StudentCreateView(CampusScopedMixin, CreateView):
+    required_permission = "students.add_student"
     model = Student
     form_class = StudentForm
     template_name = "students/form.html"
@@ -159,6 +160,7 @@ class StudentCreateView(CampusScopedMixin, CreateView):
 
 
 class StudentUpdateView(CampusScopedMixin, UpdateView):
+    required_permission = "students.change_student"
     model = Student
     form_class = StudentForm
     template_name = "students/form.html"
@@ -181,6 +183,7 @@ class StudentUpdateView(CampusScopedMixin, UpdateView):
 
 
 class StudentDeleteView(CampusScopedMixin, DeleteView):
+    required_permission = "core.deactivate_student"
     model = Student
     template_name = "students/student_confirm_delete.html"
     success_url = reverse_lazy("student-list")
@@ -210,6 +213,7 @@ class StudentDeleteView(CampusScopedMixin, DeleteView):
 
 
 class EnrollmentListView(CampusScopedMixin, ListView):
+    required_permission = "students.view_enrollment"
     model = Enrollment
     template_name = "students/enrollment_list.html"
     context_object_name = "enrollments"
@@ -427,7 +431,7 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             enrollment.has_outstanding_debt = enrollment.active and enrollment.total_debt > 0
             enrollment.has_no_debt = enrollment.active and enrollment.total_debt == 0
         context["payable_enrollment_ids"] = set()
-        if self.request.user.is_superuser or self.request.user.can_register_payments:
+        if self.request.user.has_perm("payments.add_payment"):
             from payments.forms import pending_enrollments_for_campus
 
             context["payable_enrollment_ids"] = set(
@@ -446,7 +450,7 @@ class ToolsView(
     def dispatch(self, request, *args, **kwargs):
         user = request.user
         if user.is_authenticated and not (
-            user.is_superuser or user.can_manage_students or user.can_register_payments
+            user.has_perm("students.add_enrollment") or user.has_perm("payments.add_payment")
         ):
             from django.core.exceptions import PermissionDenied
 
@@ -456,7 +460,7 @@ class ToolsView(
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user = self.request.user
-        context["can_check_record_codes"] = user.is_superuser or user.can_manage_students
+        context["can_check_record_codes"] = user.has_perm("students.add_enrollment")
         context["missing_record_codes"] = None
         context["record_code_check_error"] = None
         context["record_code_check_date"] = self.request.GET.get(
@@ -494,7 +498,7 @@ class ToolsView(
                     context["missing_record_codes"] = [
                         code for code in expected_codes if code not in registered_codes
                     ]
-        context["can_check_receipts"] = user.is_superuser or user.can_register_payments
+        context["can_check_receipts"] = user.has_perm("payments.add_payment")
         context["missing_receipts"] = None
         context["receipt_check_error"] = None
         context["receipt_start"] = self.request.GET.get("receipt_start", "").strip()
@@ -561,6 +565,8 @@ class StudentEnrollmentListView(EnrollmentListView):
 
 
 class EnrollmentExcelExportView(EnrollmentListView):
+    required_permission = ("students.view_enrollment", "core.export_reports")
+
     def get(self, request, *args, **kwargs):
         self.request = request
         enrollments = list(
@@ -681,6 +687,7 @@ class EnrollmentExcelExportView(EnrollmentListView):
 
 
 class EnrollmentCreateView(CampusScopedMixin, CreateView):
+    required_permission = "students.add_enrollment"
     model = Enrollment
     form_class = EnrollmentForm
     template_name = "students/form.html"
@@ -793,6 +800,7 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
 
 
 class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
+    required_permission = "students.change_enrollment"
     model = Enrollment
     form_class = EnrollmentForm
     template_name = "students/form.html"
@@ -899,6 +907,7 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
 
 
 class EnrollmentDeleteView(CampusScopedMixin, DeleteView):
+    required_permission = "core.deactivate_enrollment"
     model = Enrollment
     template_name = "students/enrollment_confirm_delete.html"
     success_url = reverse_lazy("enrollment-list")
@@ -964,6 +973,7 @@ def course_students_queryset(request):
 
 
 class CourseStudentTablesView(CampusScopedMixin, ListView):
+    required_permission = "core.view_academic_reports"
     """Muestra una tabla independiente por curso para la sede seleccionada."""
 
     model = Course
@@ -992,6 +1002,8 @@ class CourseStudentTablesView(CampusScopedMixin, ListView):
 
 
 class CourseStudentExportView(CampusScopedMixin, View):
+    required_permission = ("core.view_academic_reports", "core.export_reports")
+
     def get(self, request, *args, **kwargs):
         workbook = Workbook()
         courses = list(course_students_queryset(request).filter(student_count__gt=0))
@@ -1104,6 +1116,7 @@ class CourseStudentExportView(CampusScopedMixin, View):
 
 
 class AvailableStudentsForCourseView(CampusScopedMixin, ListView):
+    required_permission = "students.add_enrollment"
     """Devuelve por AJAX los alumnos de la sede aún no inscritos al curso."""
 
     def get(self, request, *args, **kwargs):

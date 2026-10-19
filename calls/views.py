@@ -7,11 +7,17 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import ListView, TemplateView
 
-from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
-from core.models import User
+from core.campus import (
+    FeaturePermissionMixin,
+    SelectedCampusRequiredMixin,
+    get_selected_campus,
+    users_with_perm,
+)
 from core.pagination import paginate_context
 from payments.forms import pending_enrollments_for_campus
 from payments.models import Installment, Payment, PaymentAllocation
@@ -51,7 +57,7 @@ def build_phone_links(template, campus, student, courses, total):
 
 
 def can_view_all_calls(user):
-    return user.is_superuser or user.can_assign_calls
+    return user.has_perm("core.view_all_calls")
 
 
 def visible_students(request):
@@ -76,7 +82,7 @@ def visible_enrollments(request):
 
 
 class StudentNotesMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
-    permission_field = "can_manage_calls"
+    required_permission = "calls.view_callnote"
 
     def get_student(self):
         return get_object_or_404(visible_students(self.request), pk=self.kwargs["student_id"])
@@ -161,6 +167,7 @@ class CallNoteListView(StudentNotesMixin, TemplateView):
 
 
 class CallNoteCreateView(StudentNotesMixin, TemplateView):
+    required_permission = "calls.add_callnote"
     template_name = "calls/note_form.html"
 
     def get_context_data(self, form=None, **kwargs):
@@ -184,7 +191,7 @@ class CallNoteCreateView(StudentNotesMixin, TemplateView):
 
 
 class CallNoteMutationMixin(StudentNotesMixin):
-    permission_field = "can_edit_call_notes"
+    required_permission = "core.edit_call_notes"
     """Edición y eliminación de un registro de la sede seleccionada."""
 
     def get_note(self):
@@ -247,7 +254,7 @@ class CallNoteDeleteView(CallNoteMutationMixin, TemplateView):
 
 
 class WhatsAppTemplateView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
-    permission_field = "can_manage_calls"
+    required_permission = "calls.add_callnote"
     template_name = "calls/template_form.html"
 
     def get_template(self):
@@ -284,7 +291,7 @@ class WhatsAppTemplateView(FeaturePermissionMixin, SelectedCampusRequiredMixin, 
 class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, ListView):
     """Alumnos con sus cursos matriculados, deuda por curso y teléfonos para llamar."""
 
-    permission_field = "can_manage_calls"
+    required_permission = "calls.view_callnote"
     template_name = "calls/student_list.html"
     context_object_name = "rows"
     paginate_by = 50
@@ -377,22 +384,72 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
         return context
 
 
+class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
+    """Resumen de llamadas por usuario en un rango de fechas, limitado a la sede seleccionada."""
+
+    required_permission = "core.view_call_reports"
+    template_name = "calls/report.html"
+
+    def get_dates(self):
+        today = timezone.localdate()
+        start = parse_date(self.request.GET.get("desde", "")) or today.replace(day=1)
+        end = parse_date(self.request.GET.get("hasta", "")) or today
+        return (end, start) if start > end else (start, end)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        start, end = self.get_dates()
+        notes = CallNote.objects.filter(
+            campus=get_selected_campus(self.request),
+            created_at__date__gte=start,
+            created_at__date__lte=end,
+        )
+        if not can_view_all_calls(self.request.user):
+            notes = notes.filter(author=self.request.user)
+        by_response = {key: Count("pk", filter=Q(response=key)) for key in CallNote.Response.values}
+        rows = list(
+            notes.values("author__username")
+            .annotate(
+                total=Count("pk"),
+                students=Count("student", distinct=True),
+                will=by_response[CallNote.Response.WILL_ATTEND],
+                wont=by_response[CallNote.Response.WONT_ATTEND],
+                other=by_response[CallNote.Response.OTHER],
+            )
+            .order_by("-total", "author__username")
+        )
+        context.update(
+            start=start,
+            end=end,
+            rows=rows,
+            totals=notes.aggregate(
+                total=Count("pk"),
+                students=Count("student", distinct=True),
+                will=by_response[CallNote.Response.WILL_ATTEND],
+                wont=by_response[CallNote.Response.WONT_ATTEND],
+                other=by_response[CallNote.Response.OTHER],
+            ),
+            scope_all=can_view_all_calls(self.request.user),
+        )
+        return context
+
+
 class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
     """Permite elegir qué matrículas ve cada usuario con acceso a llamadas."""
 
-    permission_field = "can_assign_calls"
+    required_permission = "core.assign_calls"
     template_name = "calls/assignments.html"
     per_page = 50
 
     def get_users(self):
         campus = get_selected_campus(self.request)
-        return User.objects.filter(
-            is_active=True,
-            is_superuser=False,
-            can_manage_calls=True,
-            can_assign_calls=False,
-            campuses=campus,
-        ).order_by("username")
+        assigners = users_with_perm("core.assign_calls").values("pk")
+        return (
+            users_with_perm("calls.add_callnote")
+            .filter(is_superuser=False, campuses=campus)
+            .exclude(pk__in=assigners)
+            .order_by("username")
+        )
 
     def get_target(self):
         raw = self.request.GET.get("usuario") or self.request.POST.get("usuario") or ""

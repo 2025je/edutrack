@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% block title %}Promotores · EduTrack{% endblock %}
 {% block content %}
 <div class="mb"><h1 class="mb-0">Promotores</h1><div class="muted">Los promotores creados se asignan a la sede seleccionada.</div></div>
+{% if perms.students.add_promoter %}
 <div class="card card-pad">
 	<h2>Nuevo promotor</h2>
 	<form method="post" class="row mb-0">
@@ -9,6 +10,7 @@
 		<div class="col s12 m4"><button class="btn" type="submit">Crear promotor</button></div>
 	</form>
 </div>
+{% endif %}
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Promotor</th><th>Estado</th></tr></thead><tbody>
 {% for promoter in promoters %}<tr><td>{{ promoter.name }}</td><td>{% if promoter.active %}Activo{% else %}Inactivo{% endif %}</td></tr>{% empty %}<tr><td colspan="2" class="center-align muted">No hay promotores registrados.</td></tr>{% endfor %}
 </tbody></table></div>

@@ -33,50 +33,19 @@ class UserAdmin(BaseUserAdmin):
         ("Fechas importantes", {"fields": ("last_login", "date_joined")}),
         (
             "Acceso al sistema",
-            {
-                "fields": (
-                    "campuses",
-                    "can_manage_students",
-                    "can_register_payments",
-                    "can_manage_promoters",
-                    "can_manage_calls",
-                    "can_edit_call_notes",
-                    "can_assign_calls",
-                    "can_manage_campuses",
-                    "can_manage_users",
-                )
-            },
+            {"fields": ("campuses",)},
         ),
     )
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         (
             "Acceso al sistema",
-            {
-                "fields": (
-                    "campuses",
-                    "can_manage_students",
-                    "can_register_payments",
-                    "can_manage_promoters",
-                    "can_manage_calls",
-                    "can_edit_call_notes",
-                    "can_assign_calls",
-                    "can_manage_campuses",
-                    "can_manage_users",
-                )
-            },
+            {"fields": ("campuses",)},
         ),
     )
     filter_horizontal = ("groups", "user_permissions", "campuses")
     search_fields = ("username", "email")
     list_display = (
         "username",
-        "can_manage_students",
-        "can_register_payments",
-        "can_manage_promoters",
-        "can_manage_calls",
-        "can_edit_call_notes",
-        "can_manage_campuses",
-        "can_manage_users",
         "is_staff",
         "is_active",
     )

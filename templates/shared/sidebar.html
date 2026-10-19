@@ -1,0 +1,207 @@
+<ul id="slide-out" class="sidenav sidenav-fixed">
+<li class="sidenav-scroll"><ul>
+  <li class="sidenav-spacer" aria-hidden="true"></li>
+  {% if selected_campus %}
+  <li class="sidebar-campus">
+    <form method="post" action="{% url 'select-campus' %}">{% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <details>
+        <summary aria-label="Cambiar de sede">
+          <span class="campus-label">Campus actual</span>
+          <span class="campus-current">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% else %}<i class="material-icons" aria-hidden="true">apartment</i>{% endif %}<strong>{{ selected_campus.name }}</strong>{% if available_campuses|length > 1 %}<i class="material-icons campus-swap" aria-hidden="true">unfold_more</i>{% endif %}</span>
+        </summary>
+        {% if available_campuses|length > 1 %}
+        <ul class="campus-list">
+          {% for campus in available_campuses %}
+          <li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{{ campus.name }}</button></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </details>
+    </form>
+  </li>
+  {% endif %}
+  <li><div class="subheader">General</div></li>
+  <li><a href="{% url 'dashboard' %}"><i class="material-icons">dashboard</i>Panel principal</a></li>
+  {% if perms.students.view_student or perms.payments.view_payment %}<li class="hide-on-med-and-up"><a href="{% url 'global-search' %}"><i class="material-icons">search</i>Buscar</a></li>{% endif %}
+
+  {% if perms.students.view_student or perms.students.view_course or perms.students.view_enrollment or perms.students.view_promoter %}
+  <li><div class="subheader">Académico</div></li>
+  {% if perms.students.view_student %}<li><a href="{% url 'student-list' %}"><i class="material-icons">school</i>Estudiantes</a></li>{% endif %}
+  {% if perms.students.view_course %}<li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>{% endif %}
+  {% if perms.students.view_enrollment %}<li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>{% endif %}
+  {% if perms.students.view_promoter %}<li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>{% endif %}
+  {% endif %}
+
+  {% if perms.payments.view_payment or perms.payments.add_payment or perms.core.view_pending_balances %}
+  <li><div class="subheader">Caja</div></li>
+  {% if perms.payments.view_payment %}
+  <li><a href="{% url 'payment-list' %}"><i class="material-icons">receipt_long</i>Pagos</a></li>
+  {% elif perms.payments.add_payment %}
+  <li><a href="{% url 'payment-create' %}"><i class="material-icons">payments</i>Registrar pago</a></li>
+  {% endif %}
+  {% if perms.core.view_pending_balances %}
+  <li><a href="{% url 'installment-list' %}"><i class="material-icons">event_note</i>Cuotas</a></li>
+  <li><a href="{% url 'pending-debts' %}"><i class="material-icons">money_off</i>Saldos pendientes</a></li>
+  {% endif %}
+  {% endif %}
+
+  {% if perms.calls.view_callnote or perms.core.view_call_reports %}
+  <li><div class="subheader">Llamadas</div></li>
+  {% if perms.calls.view_callnote %}
+  <li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Seguimiento</a></li>
+  <li><a href="{% url 'calls-notes-all' %}"><i class="material-icons">forum</i>Historial</a></li>
+  {% endif %}
+  {% if perms.core.view_call_reports %}<li><a href="{% url 'calls-report' %}"><i class="material-icons">assessment</i>Reporte de llamadas</a></li>{% endif %}
+  {% endif %}
+
+  {% if perms.core.view_academic_reports or perms.students.add_enrollment or perms.payments.add_payment %}
+  <li><div class="subheader">Informes</div></li>
+  {% if perms.core.view_academic_reports %}<li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>{% endif %}
+  {% if perms.students.add_enrollment or perms.payments.add_payment %}<li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>{% endif %}
+  {% endif %}
+
+  {% if perms.core.view_campus or perms.core.view_user or user.is_superuser or user.is_staff %}
+  <li><div class="subheader">Sistema</div></li>
+  {% if perms.core.view_campus %}<li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>{% endif %}
+  {% if perms.core.view_user %}<li><a href="{% url 'user-list' %}"><i class="material-icons">group</i>Usuarios</a></li>{% endif %}
+  {% if user.is_superuser %}<li><a href="{% url 'activity-log' %}"><i class="material-icons">history</i>Actividad</a></li>{% endif %}
+  {% if user.is_staff %}<li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>{% endif %}
+  {% endif %}
+
+</ul></li>
+  <li class="sidenav-account">
+    <a class="account-box{% if request.resolver_match.url_name == 'profile' %} active{% endif %}" href="{% url 'profile' %}" title="Mi perfil">
+      <span class="account-avatar" aria-hidden="true"><i class="material-icons">person_outline</i></span>
+      <span class="account-info">
+        <strong>{{ user.get_full_name|default:user.username }}</strong>
+        <span>{% for group in user.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}{% if user.is_superuser %}Superusuario{% else %}Permisos asignados{% endif %}{% endfor %}</span>
+      </span>
+      <i class="material-icons account-gear" aria-hidden="true">settings</i>
+    </a>
+  </li>
+</ul>
+<style>
+  .sidenav .sidebar-campus{padding:8px 16px 4px}
+  .sidenav .sidebar-campus details{background:#eef0fa;border-radius:12px;padding:10px 14px}
+  .sidenav .sidebar-campus summary{list-style:none;cursor:pointer}
+  .sidenav .sidebar-campus summary::-webkit-details-marker{display:none}
+  .sidenav .sidebar-campus .campus-label{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#78849a}
+  .sidenav .sidebar-campus .campus-current{display:flex;align-items:center;gap:10px;margin-top:4px;color:inherit}
+  .sidenav .sidebar-campus .campus-current strong{flex:1;font-size:.98rem;line-height:1.25}
+  .sidenav .sidebar-campus .campus-current i{margin:0;height:auto;line-height:1;color:#68778a}
+  .sidenav .sidebar-campus .campus-logo{width:24px;height:24px;object-fit:contain;border-radius:4px;flex:none}
+  .sidenav .sidebar-campus .campus-list{margin:8px 0 0;padding:0;border-top:1px solid rgba(120,132,154,.3)}
+  .sidenav .sidebar-campus .campus-list button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 4px;font:inherit;font-size:.9rem;color:inherit;cursor:pointer;border-radius:6px}
+  .sidenav .sidebar-campus .campus-list button:hover{background:rgba(120,132,154,.18)}
+  .sidenav .sidebar-campus .campus-list button.active{font-weight:700}
+  html[data-theme=dark] .sidenav .sidebar-campus details{background:#232a38}
+  html[data-theme=dark] .sidenav .sidebar-campus .campus-current{color:#fff}
+  .sidenav li>a.active{background:#e3e7fb;color:var(--md-primary,#4051b5);font-weight:600}
+  .sidenav li>a.active>i.material-icons{color:var(--md-primary,#4051b5)}
+  .sidenav.sidenav-fixed{display:flex;flex-direction:column;overflow:hidden}
+  .sidenav li.sidenav-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;line-height:normal}
+  .sidenav li.sidenav-scroll>ul{margin:0;padding:0}
+  .sidenav li.sidenav-account{flex:none;padding:0;border-top:1px solid rgba(120,132,154,.3);line-height:normal;background:inherit}
+  .sidenav li.sidenav-account>a.account-box{display:flex;align-items:center;gap:12px;height:auto;line-height:normal;padding:12px 16px;font-size:.85rem;color:inherit}
+  .sidenav .account-avatar{flex:none;width:42px;height:42px;border-radius:50%;background:#e3e7fb;display:flex;align-items:center;justify-content:center}
+  .sidenav .account-avatar i{margin:0;height:auto;line-height:1;color:#68778a}
+  .sidenav .account-info{flex:1;min-width:0;display:block}
+  .sidenav .account-info strong{display:block;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sidenav .account-info span{display:block;color:#78849a;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sidenav .account-box i.account-gear{flex:none;margin:0;height:auto;line-height:1;color:#78849a}
+  html[data-theme=dark] .sidenav .account-avatar{background:#2f3a4d}
+  html[data-theme=dark] .sidenav li>a.active{background:#2a2e39;color:#fff}
+  html[data-theme=dark] .sidenav li>a.active>i.material-icons{color:#f48fb1}
+</style>
+<style>
+  main.is-loading{opacity:.55;transition:opacity .15s;pointer-events:none}
+</style>
+<script>
+// Navegación parcial: los enlaces del menú lateral solo reemplazan el contenido de <main>.
+(function () {
+  var controller = null;
+
+  function highlight() {
+    var path = location.pathname, best = null;
+    document.querySelectorAll("#slide-out a[href]").forEach(function (a) {
+      a.classList.remove("active");
+      a.removeAttribute("aria-current");
+      var h = a.getAttribute("href");
+      if (h === path || (h.length > 1 && path.indexOf(h) === 0)) {
+        if (!best || h.length > best.getAttribute("href").length) best = a;
+      }
+    });
+    if (best) {
+      best.classList.add("active");
+      best.setAttribute("aria-current", "page");
+    }
+  }
+
+  function runScripts(container) {
+    var pending = [];
+    var original = document.addEventListener;
+    document.addEventListener = function (type, fn, opts) {
+      if (type === "DOMContentLoaded") pending.push(fn);
+      else original.call(document, type, fn, opts);
+    };
+    try {
+      container.querySelectorAll("script").forEach(function (old) {
+        var fresh = document.createElement("script");
+        Array.prototype.forEach.call(old.attributes, function (attr) { fresh.setAttribute(attr.name, attr.value); });
+        fresh.text = old.textContent;
+        old.replaceWith(fresh);
+      });
+    } finally {
+      document.addEventListener = original;
+    }
+    pending.forEach(function (fn) { fn.call(document, new Event("DOMContentLoaded")); });
+  }
+
+  function navigate(url, push) {
+    var main = document.querySelector("main");
+    if (controller) controller.abort();
+    controller = new AbortController();
+    main.classList.add("is-loading");
+    fetch(url, {signal: controller.signal, credentials: "same-origin"})
+      .then(function (response) {
+        var type = response.headers.get("content-type") || "";
+        if (type.indexOf("text/html") === -1) throw new Error("not-html");
+        return response.text().then(function (html) { return {html: html, url: response.url}; });
+      })
+      .then(function (result) {
+        var doc = new DOMParser().parseFromString(result.html, "text/html");
+        var fresh = doc.querySelector("main");
+        if (!fresh || !doc.getElementById("slide-out")) throw new Error("no-main");
+        main.innerHTML = fresh.innerHTML;
+        document.title = doc.title;
+        if (push) history.pushState(null, "", result.url);
+        else if (result.url !== location.href) history.replaceState(null, "", result.url);
+        window.scrollTo(0, 0);
+        highlight();
+        runScripts(main);
+        window.edutrackBoot(false);
+        window.edutrackLive();
+        main.classList.remove("is-loading");
+      })
+      .catch(function (error) {
+        if (error.name === "AbortError") return;
+        window.location.href = url;
+      });
+  }
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest("#slide-out a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (link.target || link.origin !== location.origin || link.pathname.indexOf("/admin/") === 0) return;
+    if (!window.edutrackBoot || !window.edutrackLive) return;
+    event.preventDefault();
+    if (link.href === location.href) return;
+    navigate(link.href, true);
+  });
+
+  window.addEventListener("popstate", function () { navigate(location.href, false); });
+  highlight();
+})();
+</script>

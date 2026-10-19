@@ -7,7 +7,8 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Campus, User
+from core.models import Campus
+from core.testing import create_user, revoke
 from payments.forms import PaymentForm, PaymentUpdateForm
 from payments.models import Installment, Payment, PaymentAllocation
 from students.models import Course, Enrollment, Ficha, Student
@@ -16,11 +17,11 @@ from students.models import Course, Enrollment, Ficha, Student
 class PaymentCrudTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede de pagos", active=True)
-        self.user = User.objects.create_user(
+        self.user = create_user(
             username="cashier",
             password="secret123",
-            can_manage_students=True,
-            can_register_payments=True,
+            manage_students=True,
+            register_payments=True,
         )
         self.user.campuses.add(self.campus)
         self.client.force_login(self.user)
@@ -412,8 +413,7 @@ class PaymentCrudTests(TestCase):
         self.assertContains(self.client.get(url, {"q": "zzzz"}), "No se encontraron resultados")
 
     def test_global_search_hides_sections_without_permission(self):
-        self.user.can_register_payments = False
-        self.user.save()
+        revoke(self.user, "register_payments")
         response = self.client.get(reverse("global-search"), {"q": "D1"})
         self.assertEqual(response.context["payments"], [])
 
@@ -449,14 +449,12 @@ class PaymentCrudTests(TestCase):
 class PaymentListExtraFiltersTests(TestCase):
     def test_amount_and_cashier_filters(self):
         from decimal import Decimal
-        from core.models import Campus, User
+        from core.models import Campus
         from payments.models import Payment
         from students.models import Course, Enrollment, Student
 
         campus = Campus.objects.create(name="Sede Filtros", active=True)
-        user = User.objects.create_user(
-            username="caja1", password="pass-12345", can_register_payments=True
-        )
+        user = create_user(username="caja1", password="pass-12345", register_payments=True)
         user.campuses.add(campus)
         student = Student.objects.create(campus=campus, full_name="Ana", phone="987654321")
         course = Course.objects.create(campus=campus, name="Ingles", schedule="L", group="A")

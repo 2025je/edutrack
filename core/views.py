@@ -1,17 +1,55 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.models import Permission
+from django.contrib.auth.views import PasswordChangeView
+from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Sum
 from django.shortcuts import render, redirect
+from django.urls import reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import TemplateView
 from .campus import available_campuses, get_selected_campus
+from .permission_labels import describe
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from students.models import Student, Enrollment, Course, Promoter
 from payments.models import Payment, Installment
 
 User = get_user_model()
+
+
+class ProfileView(LoginRequiredMixin, PasswordChangeView):
+    """Perfil del usuario: datos de la cuenta, grupos, permisos y cambio de contraseña."""
+
+    template_name = "core/profile.html"
+    form_class = PasswordChangeForm
+    success_url = reverse_lazy("profile")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Contraseña actualizada correctamente.")
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        permissions = (
+            Permission.objects.filter(Q(group__user=user) | Q(user=user))
+            .distinct()
+            .select_related("content_type")
+            .order_by("content_type__app_label", "codename")
+        )
+        modules = {}
+        for perm in permissions:
+            module, name, detail = describe(perm)
+            modules.setdefault(module, []).append({"name": name, "detail": detail})
+        context.update(
+            groups=user.groups.order_by("name"),
+            permission_modules=[] if user.is_superuser else sorted(modules.items()),
+            campuses=user.campuses.order_by("name"),
+        )
+        return context
 
 
 @login_required
@@ -54,16 +92,13 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         campus = get_selected_campus(self.request)
         ctx["selected_campus"] = campus
         ctx["campuses"] = available_campuses(self.request.user)
-        can_manage_students = (
-            self.request.user.is_superuser or self.request.user.can_manage_students
-        )
-        can_register_payments = (
-            self.request.user.is_superuser or self.request.user.can_register_payments
-        )
+        can_see_enrollments = self.request.user.has_perm("students.view_enrollment")
+        can_see_financials = self.request.user.has_perm("core.view_financial_reports")
+        can_see_payments = self.request.user.has_perm("payments.view_payment")
         user = self.request.user
         today = timezone.localdate()
         month_start = today.replace(day=1)
-        if can_manage_students:
+        if can_see_enrollments:
             enrollments = Enrollment.objects.filter(campus=campus, active=True)
             ctx["student_count"] = Student.objects.filter(campus=campus).count()
             ctx["enrollment_count"] = enrollments.count()
@@ -73,8 +108,8 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             ctx["recent_enrollments"] = enrollments.select_related("student", "course").order_by(
                 "-created_at"
             )[:5]
-        if can_register_payments:
-            confirmed = Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED)
+        confirmed = Payment.objects.filter(campus=campus, status=Payment.Status.CONFIRMED)
+        if can_see_financials:
             ctx["payments_total"] = confirmed.aggregate(total=Sum("amount"))["total"] or 0
             ctx["payments_today"] = (
                 confirmed.filter(created_at__date=today).aggregate(total=Sum("amount"))["total"]
@@ -97,10 +132,11 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                     overdue_count += 1
             ctx["pending_total"] = pending_total
             ctx["overdue_count"] = overdue_count
+        if can_see_payments:
             ctx["recent_payments"] = confirmed.select_related("enrollment__student").order_by(
                 "-created_at"
             )[:5]
-        if user.is_superuser or user.can_manage_calls:
+        if user.has_perm("calls.view_callnote"):
             from calls.models import CallNote
             from calls.views import can_view_all_calls, visible_enrollments
 
@@ -111,10 +147,11 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             ctx["calls_today"] = notes.filter(created_at__date=today).count()
             ctx["calls_month"] = notes.filter(created_at__date__gte=month_start).count()
             ctx["calls_scope_all"] = can_view_all_calls(user)
-        if user.is_superuser or user.can_manage_promoters:
+        if user.has_perm("students.view_course"):
             ctx["course_count"] = Course.objects.filter(campus=campus, active=True).count()
+        if user.has_perm("students.view_promoter"):
             ctx["promoter_count"] = Promoter.objects.filter(campuses=campus, active=True).count()
-        if user.is_superuser or user.can_manage_users:
+        if user.has_perm("core.view_user"):
             ctx["user_count"] = User.objects.filter(is_active=True).count()
         return ctx
 
@@ -124,7 +161,12 @@ class GlobalSearchView(LoginRequiredMixin, TemplateView):
     limit = 15
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and get_selected_campus(request) is None:
+        user = request.user
+        if user.is_authenticated and not (
+            user.has_perm("students.view_student") or user.has_perm("payments.view_payment")
+        ):
+            raise PermissionDenied("No tienes permiso para usar la búsqueda.")
+        if user.is_authenticated and get_selected_campus(request) is None:
             return redirect("select-campus")
         return super().dispatch(request, *args, **kwargs)
 
@@ -135,8 +177,8 @@ class GlobalSearchView(LoginRequiredMixin, TemplateView):
         user = self.request.user
         campus = get_selected_campus(self.request)
         q = self.request.GET.get("q", "").strip()[:80]
-        can_students = user.is_superuser or user.can_manage_students
-        can_payments = user.is_superuser or user.can_register_payments
+        can_students = user.has_perm("students.view_student")
+        can_payments = user.has_perm("payments.view_payment")
         context.update(q=q, can_students=can_students, can_payments=can_payments)
         students = fichas = payments = []
         if q:
@@ -146,7 +188,7 @@ class GlobalSearchView(LoginRequiredMixin, TemplateView):
                     .filter(Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q))
                     .order_by("full_name")[: self.limit]
                 )
-                if q.isdigit():
+                if q.isdigit() and user.has_perm("students.view_enrollment"):
                     fichas = list(
                         Ficha.objects.filter(campus=campus, code=int(q))
                         .select_related("enrollment__student", "enrollment__course")

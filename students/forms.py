@@ -238,6 +238,9 @@ class EnrollmentForm(forms.ModelForm):
                 )
             ).order_by("is_not_unassigned", "name", "schedule", "group")
             self.fields["course"].queryset = course_queryset
+            if self.instance.pk and user and not user.has_perm("core.change_enrollment_course"):
+                self.fields["course"].queryset = course_queryset.filter(pk=self.instance.course_id)
+                self.fields["course"].disabled = True
             if not self.instance.pk:
                 default_course = course_queryset.filter(is_not_unassigned=0).first()
                 if default_course:

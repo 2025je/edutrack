@@ -7,6 +7,7 @@ from .views import (
     CallNoteDeleteView,
     CallNoteListView,
     CallNoteUpdateView,
+    CallReportView,
     CallStudentListView,
     WhatsAppTemplateView,
 )
@@ -23,5 +24,6 @@ urlpatterns = [
     ),
     path("plantilla/", WhatsAppTemplateView.as_view(), name="calls-template"),
     path("asignaciones/", CallAssignmentView.as_view(), name="calls-assignments"),
+    path("reportes/", CallReportView.as_view(), name="calls-report"),
     path("alumnos/", CallStudentListView.as_view(), name="calls-students"),
 ]

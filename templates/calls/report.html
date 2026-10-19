@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Reporte de llamadas · EduTrack{% endblock %}
+{% block content %}
+<div class="flex wrap between items-center gap mb">
+  <div><h1 class="mb-0">Reporte de llamadas</h1><div class="muted">{% if scope_all %}Llamadas de todo el equipo en la sede seleccionada.{% else %}Tus llamadas registradas en la sede seleccionada.{% endif %}</div></div>
+  <div class="no-print"><button class="btn-flat grey-text text-darken-2" onclick="window.print()">Imprimir</button></div>
+</div>
+<form method="get" class="row no-print">
+  <div class="col s12 m4"><label for="f-desde">Desde</label><input id="f-desde" type="date" name="desde" value="{{ start|date:'Y-m-d' }}"></div>
+  <div class="col s12 m4"><label for="f-hasta">Hasta</label><input id="f-hasta" type="date" name="hasta" value="{{ end|date:'Y-m-d' }}"></div>
+  <div class="col s12 m4"><button class="btn" type="submit">Consultar</button></div>
+</form>
+<div class="row">
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Llamadas</div><div class="stat">{{ totals.total }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Alumnos contactados</div><div class="stat">{{ totals.students }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">Asistirán</div><div class="stat">{{ totals.will }}</div></div></div>
+  <div class="col s12 m6 xl3"><div class="card card-pad"><div class="muted">No asistirán</div><div class="stat">{{ totals.wont }}</div></div></div>
+</div>
+<div class="card table-wrap"><table class="highlight"><thead><tr><th>Usuario</th><th>Llamadas</th><th>Alumnos</th><th>Asistirá</th><th>No asistirá</th><th>Otros</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.author__username }}</td><td>{{ row.total }}</td><td>{{ row.students }}</td><td>{{ row.will }}</td><td>{{ row.wont }}</td><td>{{ row.other }}</td></tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay llamadas en el período seleccionado.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

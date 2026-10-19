@@ -2,7 +2,7 @@
 {% block content %}
 <div class="flex wrap between items-center gap mb">
   <div><h1 class="mb-0">Usuarios</h1><div class="muted">Crea y edita usuarios, sus permisos y las sedes que pueden manejar.</div></div>
-  <div class="no-print"><a class="btn" href="{% url 'user-create' %}">Nuevo usuario</a></div>
+  <div class="no-print">{% if perms.core.manage_user_access %}<a class="btn" href="{% url 'user-create' %}">Nuevo usuario</a>{% endif %}</div>
 </div>
 <form method="get" class="card card-pad no-print mb" data-live-filter>
   <div class="field-row-end"><div style="flex:1;min-width:220px"><label for="q">Buscar usuario</label><input id="q" type="search" name="q" value="{{ q }}"></div><button class="btn" type="submit">Buscar</button></div>
@@ -13,7 +13,7 @@
   <td class="strong">{{ u.username }}</td>
   <td>{% for campus in u.campuses.all %}{{ campus.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">Sin sedes</span>{% endfor %}</td>
   <td>{% if u.is_active %}Activo{% else %}<span class="muted">Inactivo</span>{% endif %}</td>
-  <td class="no-print"><a class="blue-text" href="{% url 'user-update' u.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a></td>
+  <td class="no-print">{% if perms.core.manage_user_access %}<a class="blue-text" href="{% url 'user-update' u.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a>{% endif %}</td>
 </tr>{% empty %}<tr><td colspan="4" class="center-align muted">No hay usuarios con estos criterios.</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="mt">{% include "shared/pagination.html" %}</div>

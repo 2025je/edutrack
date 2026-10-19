@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Campus, User
+from core.testing import create_user, grant, revoke
 from payments.models import Installment, Payment, PaymentAllocation
 from calls.models import CallAssignment, CallNote, WhatsAppTemplate
 from students.models import Course, Enrollment, Student
@@ -13,12 +14,9 @@ from students.models import Course, Enrollment, Student
 class CallStudentListTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede Llamadas", active=True)
-        user = User.objects.create_user(
-            username="caja", password="x", can_manage_calls=True, can_edit_call_notes=True
-        )
+        user = create_user(username="caja", password="x", manage_calls=True, edit_call_notes=True)
         user.campuses.add(self.campus)
-        user.can_assign_calls = True
-        user.save()
+        grant(user, "assign_calls")
         self.client.force_login(user)
         session = self.client.session
         session["selected_campus_id"] = self.campus.pk
@@ -164,8 +162,7 @@ class CallStudentListTests(TestCase):
         note = CallNote.objects.create(
             campus=self.campus, student=student, author=user, note="Original"
         )
-        user.can_edit_call_notes = False
-        user.save()
+        revoke(user, "edit_call_notes")
         for name in ("calls-note-update", "calls-note-delete"):
             self.assertEqual(self.client.get(reverse(name, args=[note.pk])).status_code, 403)
         self.assertEqual(
@@ -192,8 +189,8 @@ class CallStudentListTests(TestCase):
         )
 
     def test_users_without_calls_permission_are_denied(self):
-        other = User.objects.create_user(
-            username="otro", password="x", can_register_payments=True, can_manage_promoters=True
+        other = create_user(
+            username="otro", password="x", register_payments=True, manage_promoters=True
         )
         other.campuses.add(self.campus)
         self.client.force_login(other)
@@ -244,11 +241,11 @@ class CallAssignmentTests(TestCase):
             CallNote.objects.create(
                 campus=self.campus, student=student, author=self._user("autor" + name), note="x"
             )
-        self.caller = self._user("llamador", can_manage_calls=True)
-        self.boss = self._user("jefe", can_manage_calls=True, can_assign_calls=True)
+        self.caller = self._user("llamador", manage_calls=True)
+        self.boss = self._user("jefe", manage_calls=True, assign_calls=True)
 
     def _user(self, username, **flags):
-        user = User.objects.create_user(username=username, password="pass-12345", **flags)
+        user = create_user(username=username, password="pass-12345", **flags)
         user.campuses.add(self.campus)
         return user
 

@@ -50,7 +50,7 @@ def parse_receipt_code(value):
 
 
 class SelectedCampusViewMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
-    permission_field = "can_register_payments"
+    required_permission = "payments.view_payment"
 
 
 class PaymentListView(SelectedCampusViewMixin, ListView):
@@ -166,6 +166,7 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
 
 
 class PaymentSelectView(SelectedCampusViewMixin, TemplateView):
+    required_permission = "payments.add_payment"
     """Paso previo: buscar la matrícula con deuda y elegir cuál pagar."""
 
     template_name = "payments/payment_select.html"
@@ -226,6 +227,7 @@ class PaymentSelectView(SelectedCampusViewMixin, TemplateView):
 
 
 class PaymentCreateView(SelectedCampusViewMixin, FormView):
+    required_permission = "payments.add_payment"
     template_name = "payments/payment_form.html"
     form_class = PaymentForm
     success_url = reverse_lazy("payment-list")
@@ -338,6 +340,7 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
 
 
 class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
+    required_permission = "payments.change_payment"
     model = Payment
     form_class = PaymentUpdateForm
     template_name = "payments/payment_form.html"
@@ -441,6 +444,7 @@ class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
 
 
 class PaymentDeleteView(SelectedCampusViewMixin, DeleteView):
+    required_permission = "core.void_payment"
     model = Payment
     template_name = "payments/payment_confirm_delete.html"
     success_url = reverse_lazy("payment-list")
@@ -473,6 +477,7 @@ class PaymentReceiptView(SelectedCampusViewMixin, DetailView):
 
 
 class InstallmentListView(SelectedCampusViewMixin, ListView):
+    required_permission = "core.view_pending_balances"
     model = Installment
     template_name = "payments/installment_list.html"
     context_object_name = "installments"
@@ -491,6 +496,7 @@ class InstallmentListView(SelectedCampusViewMixin, ListView):
 
 
 class PendingDebtsView(SelectedCampusViewMixin, ListView):
+    required_permission = "core.view_pending_balances"
     """Reporte de cuotas con saldo pendiente, limitado a la sede seleccionada."""
 
     model = Installment

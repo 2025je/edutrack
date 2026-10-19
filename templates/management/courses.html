@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% block title %}Cursos · EduTrack{% endblock %}
 {% block content %}
 <div class="mb"><h1 class="mb-0">Cursos</h1><div class="muted">Los cursos creados se asignan a la sede seleccionada.</div></div>
+{% if perms.students.add_course %}
 <div class="card card-pad">
 	<h2>Nuevo curso</h2>
 	<form method="post" class="row mb-0">
@@ -13,8 +14,9 @@
 		<div class="col s12"><button class="btn" type="submit">Crear curso</button></div>
 	</form>
 </div>
+{% endif %}
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Curso</th><th>Horario</th><th>Grupo</th><th>Inicio</th><th>Capacidad</th><th>Matrícula</th><th>Mensualidad</th><th>Estado</th><th class="right-align">Acciones</th></tr></thead><tbody>
-{% for course in courses %}<tr><td>{{ course.name }}</td><td>{{ course.schedule }}</td><td>{{ course.group }}</td><td>{{ course.start_date_display }}</td><td>{{ course.capacity_display }}</td><td>{{ course.enrollment_fee_display }}</td><td>{{ course.monthly_fee_display }}</td><td>{% if course.active %}Activo{% else %}Inactivo{% endif %}</td><td class="right-align">{% if course.name != "POR ASIGNAR" %}<a class="blue-text" href="{% url 'course-update' course.pk %}">Editar</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="9" class="center-align muted">No hay cursos registrados.</td></tr>{% endfor %}
+{% for course in courses %}<tr><td>{{ course.name }}</td><td>{{ course.schedule }}</td><td>{{ course.group }}</td><td>{{ course.start_date_display }}</td><td>{{ course.capacity_display }}</td><td>{{ course.enrollment_fee_display }}</td><td>{{ course.monthly_fee_display }}</td><td>{% if course.active %}Activo{% else %}Inactivo{% endif %}</td><td class="right-align">{% if course.name != "POR ASIGNAR" and perms.students.change_course %}<a class="blue-text" href="{% url 'course-update' course.pk %}">Editar</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="9" class="center-align muted">No hay cursos registrados.</td></tr>{% endfor %}
 </tbody></table></div>
 {% include "shared/pagination.html" %}
 <script>

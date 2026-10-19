@@ -65,22 +65,33 @@ class CampusFlyer(models.Model):
         return not self.file.name.lower().endswith(".pdf")
 
 
+class FeatureAccess(models.Model):
+    """Sin tabla: solo declara los permisos nativos de Django que se asignan vía grupos."""
+
+    class Meta:
+        managed = False
+        default_permissions = ()
+        permissions = [
+            ("deactivate_student", "Desactivar un estudiante"),
+            ("deactivate_enrollment", "Desactivar una matrícula"),
+            ("change_enrollment_course", "Cambiar el curso asociado a una matrícula"),
+            ("void_payment", "Anular un pago conservando su historial"),
+            ("edit_call_notes", "Modificar notas de llamadas existentes"),
+            ("assign_calls", "Asignar llamadas a gestores"),
+            ("view_all_calls", "Consultar todas las llamadas autorizadas del campus"),
+            ("view_financial_reports", "Consultar reportes financieros"),
+            ("view_pending_balances", "Consultar cuotas y saldos pendientes"),
+            ("view_academic_reports", "Consultar reportes académicos"),
+            ("view_call_reports", "Consultar reportes de llamadas"),
+            ("export_reports", "Exportar reportes autorizados a Excel"),
+            ("manage_user_access", "Administrar usuarios, grupos y permisos"),
+        ]
+
+
 class User(AbstractUser):
     campuses = models.ManyToManyField(
         Campus, blank=True, related_name="users", verbose_name="Sedes asignadas"
     )
-    can_manage_students = models.BooleanField("Puede registrar alumnos y matrículas", default=False)
-    can_register_payments = models.BooleanField("Puede registrar pagos", default=False)
-    can_manage_promoters = models.BooleanField("Puede crear promotores y cursos", default=False)
-    can_manage_calls = models.BooleanField("Puede acceder a llamadas", default=False)
-    can_manage_campuses = models.BooleanField(
-        "Puede crear y editar sedes y asignarlas a usuarios", default=False
-    )
-    can_manage_users = models.BooleanField("Puede crear y editar usuarios", default=False)
-    can_edit_call_notes = models.BooleanField(
-        "Puede editar y eliminar el historial de llamadas", default=False
-    )
-    can_assign_calls = models.BooleanField("Puede asignar llamadas", default=False)
 
     # Los usuarios se identifican solo por su nombre de usuario.
     first_name = None

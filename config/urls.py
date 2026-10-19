@@ -4,7 +4,7 @@ from django.urls import path, include, re_path
 from django.views.defaults import page_not_found
 from django.conf import settings
 from django.conf.urls.static import static
-from core.views import DashboardView, GlobalSearchView, select_campus
+from core.views import DashboardView, GlobalSearchView, ProfileView, select_campus
 from django.contrib.auth import views as auth_views
 
 urlpatterns = [
@@ -15,6 +15,7 @@ urlpatterns = [
         name="login",
     ),
     path("cuentas/salir/", auth_views.LogoutView.as_view(), name="logout"),
+    path("cuentas/perfil/", ProfileView.as_view(), name="profile"),
     path("sedes/seleccionar/", select_campus, name="select-campus"),
     path("", DashboardView.as_view(), name="dashboard"),
     path("buscar/", GlobalSearchView.as_view(), name="global-search"),

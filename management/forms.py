@@ -1,22 +1,12 @@
 import os
 
 from django import forms
+from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 from core.models import Campus, CampusFlyer, User
 from students.models import UNASSIGNED_SCHEDULE_NAME, Course, Promoter, Schedule
-
-PERMISSION_FIELDS = [
-    "can_manage_students",
-    "can_register_payments",
-    "can_manage_promoters",
-    "can_manage_calls",
-    "can_edit_call_notes",
-    "can_assign_calls",
-    "can_manage_campuses",
-    "can_manage_users",
-]
 
 
 class CampusForm(forms.ModelForm):
@@ -79,14 +69,17 @@ class UserCreateForm(forms.ModelForm):
         widget=forms.CheckboxSelectMultiple,
     )
 
+    groups = forms.ModelMultipleChoiceField(
+        label="Grupos (permisos)",
+        queryset=Group.objects.order_by("name"),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
     class Meta:
         model = User
-        fields = ["username", *PERMISSION_FIELDS]
+        fields = ["username"]
         labels = {"username": "Nombre de usuario"}
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.permission_fields = [self[name] for name in PERMISSION_FIELDS]
 
     def clean(self):
         cleaned = super().clean()
@@ -110,12 +103,13 @@ class UserCreateForm(forms.ModelForm):
         if commit:
             user.save()
             user.campuses.set(self.cleaned_data["campuses"])
+            user.groups.set(self.cleaned_data["groups"])
         return user
 
 
 class UserUpdateForm(UserCreateForm):
     class Meta(UserCreateForm.Meta):
-        fields = ["username", "is_active", *PERMISSION_FIELDS]
+        fields = ["username", "is_active"]
         labels = {"username": "Nombre de usuario", "is_active": "Usuario activo"}
 
     def __init__(self, *args, editor=None, **kwargs):
@@ -127,6 +121,7 @@ class UserUpdateForm(UserCreateForm):
         self.fields["password2"].label = "Confirmar nueva contraseña"
         if self.instance.pk:
             self.fields["campuses"].initial = self.instance.campuses.all()
+            self.fields["groups"].initial = self.instance.groups.all()
 
     def clean_is_active(self):
         is_active = self.cleaned_data["is_active"]

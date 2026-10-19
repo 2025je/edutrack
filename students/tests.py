@@ -10,6 +10,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Campus, User
+from core.testing import create_user
 from payments.models import Installment, Payment, PaymentAllocation
 from students.forms import PhoneListWidget
 from students.models import Course, Enrollment, Ficha, Promoter, Schedule, Student
@@ -18,10 +19,10 @@ from students.models import Course, Enrollment, Ficha, Promoter, Schedule, Stude
 class CourseStudentExportTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede Exportación", active=True)
-        self.user = User.objects.create_user(
+        self.user = create_user(
             username="exporter",
             password="secret123",
-            can_manage_students=True,
+            manage_students=True,
         )
         self.user.campuses.add(self.campus)
         self.client.force_login(self.user)
@@ -143,11 +144,11 @@ class CourseStudentExportTests(TestCase):
 class StudentEnrollmentCrudTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede CRUD", active=True)
-        self.user = User.objects.create_user(
+        self.user = create_user(
             username="manager",
             password="secret123",
-            can_manage_students=True,
-            can_register_payments=True,
+            manage_students=True,
+            register_payments=True,
         )
         self.user.campuses.add(self.campus)
         self.client.force_login(self.user)
@@ -1468,7 +1469,7 @@ class UnassignedCourseTests(TestCase):
         campus = Campus.objects.create(name="Sede Admin")
         course = Course.objects.get(campus=campus, name="POR ASIGNAR")
         schedule = Schedule.objects.get(campus=campus, name="PENDIENTE DE ASIGNACION")
-        staff = User.objects.create_user("staff", password="x", is_staff=True)
+        staff = create_user("staff", password="x", is_staff=True)
         staff.user_permissions.set(Permission.objects.filter(content_type__app_label="students"))
         admin_user = User.objects.create_superuser("root", password="x")
         request = RequestFactory().get("/")

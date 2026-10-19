@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Matrículas · EduTrack{% endblock %}
 {% block content %}
-<div class="flex between items-center wrap gap mb"><h1 class="mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1><div class="flex gap wrap"><a class="btn green" data-live-export="{% url 'enrollment-excel' %}"{% if filtered_student %} data-live-extra="student_id={{ filtered_student.pk }}"{% endif %} href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a><a class="btn" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a></div></div>
+<div class="flex between items-center wrap gap mb"><h1 class="mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1><div class="flex gap wrap">{% if perms.core.export_reports %}<a class="btn green" data-live-export="{% url 'enrollment-excel' %}"{% if filtered_student %} data-live-extra="student_id={{ filtered_student.pk }}"{% endif %} href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a>{% endif %}{% if perms.students.add_enrollment %}<a class="btn" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a>{% endif %}</div></div>
 <form method="get" class="row" data-live-filter>
 	{% if request.GET.course_id %}<input type="hidden" name="course_id" value="{{ request.GET.course_id }}">{% endif %}
 	{% if request.GET.promoter_id %}<input type="hidden" name="promoter_id" value="{{ request.GET.promoter_id }}">{% endif %}
@@ -61,8 +61,8 @@
 	<td class="strong debt-cell{% if e.has_outstanding_debt %} debt-owed{% elif e.has_no_debt %} debt-clear{% endif %}">S/ {{ e.total_debt|floatformat:2 }}</td>
 	<td>
 		{% for receipt in e.payments.all %}
-			{% if user.is_superuser or user.can_register_payments %}
-			<a class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}" href="{% url 'payment-receipt' receipt.pk %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</a>
+			{% if perms.payments.add_payment %}
+			{% if perms.payments.view_payment %}<a class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}" href="{% url 'payment-receipt' receipt.pk %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</a>{% else %}<span class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</span>{% endif %}
 			{% else %}
 			<span class="chip {% if receipt.status == 'ANULADO' %}grey{% else %}blue darken-2{% endif %}">{{ receipt.receipt_number }}{% if receipt.status == 'ANULADO' %} · Anulado{% endif %}</span>
 			{% endif %}
@@ -73,13 +73,13 @@
 	<td>{% if e.active %}Activa{% else %}Inactiva{% endif %}</td>
 	<td class="right-align">
 		<div class="flex gap" style="justify-content:flex-end">
-			{% if user.is_superuser or user.can_register_payments %}
+			{% if perms.payments.add_payment %}
 				{% if e.pk in payable_enrollment_ids %}
 				<a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
 				{% endif %}
 			{% endif %}
-			<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula"><i class="material-icons" aria-hidden="true">edit</i>Editar</a>
-			{% if e.active %}<a class="btn-small action-btn red darken-1" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="material-icons" aria-hidden="true">person_remove</i>Dar de baja</a>{% endif %}
+			{% if perms.students.change_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula">			<i class="material-icons" aria-hidden="true">edit</i>Editar</a>{% endif %}
+						{% if e.active and perms.core.deactivate_enrollment %}<a class="btn-small action-btn red darken-1" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="material-icons" aria-hidden="true">person_remove</i>Dar de baja</a>{% endif %}
 		</div>
 	</td>
 </tr>

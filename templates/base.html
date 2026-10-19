@@ -605,7 +605,7 @@
       {% if user.is_authenticated %}<a href="#" data-target="slide-out" class="sidenav-trigger" aria-label="Abrir menú"><i class="material-icons">menu</i></a>{% endif %}
       <a class="brand-logo" style="font-size:1.4rem;font-weight:700" href="{% url 'dashboard' %}"><img src="{% static 'img/logo.svg' %}" alt="" width="36" height="36" style="margin-right:10px">EduTrack</a>
       <ul class="right">
-      {% if user.is_authenticated and selected_campus %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}      {% if user.is_authenticated and selected_campus %}<li class="header-campus hide-on-small-only"><form method="post" action="{% url 'select-campus' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><details class="campus-menu"><summary aria-label="Cambiar de sede">{% if selected_campus.logo %}<img class="campus-logo" src="{{ selected_campus.logo.url }}" alt="Logo de {{ selected_campus.name }}">{% endif %}<span>Sede: {{ selected_campus.name }}</span><i class="material-icons" aria-hidden="true">arrow_drop_down</i></summary><ul class="campus-options">{% for campus in available_campuses %}<li><button type="submit" name="campus" value="{{ campus.pk }}"{% if campus.pk == selected_campus.pk %} class="active" aria-current="true"{% endif %}>{% if campus.logo %}<img class="campus-logo" src="{{ campus.logo.url }}" alt="">{% else %}<span class="campus-logo-empty"></span>{% endif %}{{ campus.name }}</button></li>{% endfor %}</ul></details></form></li>{% endif %}
+      {% if user.is_authenticated and selected_campus and perms.students.view_student or user.is_authenticated and selected_campus and perms.payments.view_payment %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}      
             <li class="header-user hide-on-med-and-down"><span title="Fecha actual"><i class="material-icons" aria-hidden="true">calendar_today</i>{% now "d/m/Y" %}</span></li>
             {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
             <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
@@ -614,62 +614,7 @@
     </div>
   </nav>
   {% if user.is_authenticated %}
-  <ul id="slide-out" class="sidenav sidenav-fixed">
-    <li class="sidenav-spacer" aria-hidden="true"></li>
-    <li><a href="{% url 'dashboard' %}"><i class="material-icons">dashboard</i>Inicio</a></li>
-    <li class="hide-on-med-and-up"><a href="{% url 'global-search' %}"><i class="material-icons">search</i>Buscar</a></li>
-    <li><div class="divider"></div></li>
-    {% if user.is_superuser or user.can_manage_students %}
-    <li><div class="subheader">Académico</div></li>
-    <li><a href="{% url 'student-list' %}"><i class="material-icons">school</i>Estudiantes</a></li>
-    <li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>
-    <li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_register_payments %}
-    <li><div class="subheader">Pagos</div></li>
-    <li><a href="{% url 'payment-list' %}"><i class="material-icons">receipt_long</i>Pagos</a></li>
-    <li><a href="{% url 'installment-list' %}"><i class="material-icons">event_note</i>Cuotas</a></li>
-    <li><a href="{% url 'pending-debts' %}"><i class="material-icons">money_off</i>Deudas pendientes</a></li>
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_calls %}
-    <li><div class="subheader">Llamadas</div></li>
-    <li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Alumnos y deudas</a></li>
-    <li><a href="{% url 'calls-notes-all' %}"><i class="material-icons">forum</i>Historial de llamadas</a></li>
-     <li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_students or user.can_register_payments %}
-    <li><div class="subheader">Herramientas</div></li>
-    <li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_campuses or user.can_manage_promoters %}
-    <li><div class="subheader">Gestión</div></li>
-    {% if user.is_superuser or user.can_manage_campuses %}
-    <li><a href="{% url 'campus-list' %}"><i class="material-icons">apartment</i>Sedes</a></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_promoters %}
-    <li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>
-    <li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>
-    {% endif %}
-    <li><div class="divider"></div></li>
-    {% endif %}
-    {% if user.is_superuser or user.can_manage_users or user.is_staff %}
-    <li><div class="subheader">Sistema</div></li>
-    {% if user.is_superuser or user.can_manage_users %}
-    <li><a href="{% url 'user-list' %}"><i class="material-icons">group</i>Usuarios</a></li>
-    {% endif %}
-    {% if user.is_superuser %}
-    <li><a href="{% url 'activity-log' %}"><i class="material-icons">history</i>Actividad</a></li>
-    {% endif %}
-    {% if user.is_staff %}
-    <li><a href="/admin/"><i class="material-icons">admin_panel_settings</i>Administración</a></li>
-    {% endif %}
-    <li><div class="divider"></div></li>
-    {% endif %}
-      </ul>
+  {% include "shared/sidebar.html" %}
   {% endif %}
 </header>
 <main>
@@ -680,7 +625,8 @@
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+// Inicialización de la página; `first` es true solo en la carga completa (no al cambiar el contenido).
+window.edutrackBoot = function (first) {
   (function(){
     function setup(){
       document.querySelectorAll("main table").forEach(function(t){
@@ -700,10 +646,11 @@ document.addEventListener("DOMContentLoaded", function () {
         if(has)hint.classList.toggle("show",over);
       });
     }
-    setup();window.addEventListener("resize",setup);
-    document.addEventListener("live-filter:updated",setup);
+    setup();
+    if(first){window.addEventListener("resize",setup);document.addEventListener("live-filter:updated",setup);}
   })();
   (function(){
+    if(!first)return;
     var lb=document.createElement("div");lb.id="lightbox";lb.setAttribute("role","dialog");lb.setAttribute("aria-label","Vista ampliada");
     lb.innerHTML='<div class="lb-bar"><button type="button" data-a="out" aria-label="Alejar"><i class="material-icons">zoom_out</i></button><button type="button" data-a="in" aria-label="Acercar"><i class="material-icons">zoom_in</i></button><button type="button" data-a="reset" aria-label="Restablecer"><i class="material-icons">fit_screen</i></button><a data-a="open" target="_blank" rel="noopener" aria-label="Abrir en otra pesta\u00f1a"><i class="material-icons">open_in_new</i></a><button type="button" data-a="close" aria-label="Cerrar"><i class="material-icons">close</i></button></div><div class="lb-stage"><img alt="Imagen ampliada"></div>';
     document.body.appendChild(lb);
@@ -767,7 +714,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
       });
     }
-    init();document.addEventListener("live-filter:updated",init);
+    init();if(first)document.addEventListener("live-filter:updated",init);
   })();
   (function(){
     var form=document.querySelector("form[data-live-filter]");
@@ -818,6 +765,7 @@ document.addEventListener("DOMContentLoaded", function () {
       h.insertBefore(s,h.firstChild);h.classList.add("has-title-icon");
     });
   })();
+  if (first) {
   M.Sidenav.init(document.querySelectorAll(".sidenav"));
   var toggle = document.getElementById("theme-toggle");
   function syncThemeIcon() {
@@ -833,14 +781,16 @@ document.addEventListener("DOMContentLoaded", function () {
     try { localStorage.setItem("theme", dark ? "light" : "dark"); } catch (e) {}
     syncThemeIcon();
   });
+  }
   document.querySelectorAll("select").forEach(function (el) { el.classList.add("browser-default"); });
   document.querySelectorAll("input[type=checkbox],input[type=radio]").forEach(function (el) {
     var next = el.nextElementSibling;
     if (!next || next.tagName !== "SPAN") el.classList.add("browser-default");
   });
   document.querySelectorAll("textarea").forEach(function (el) { el.classList.add("materialize-textarea"); });
-});
-</script>
+  };
+  document.addEventListener("DOMContentLoaded", function () { window.edutrackBoot(true); });
+  </script>
 <script>
 // Convierte a mayúsculas lo que se escribe en campos de texto (excepto usuario, correo, contraseña y URLs).
 (function () {
@@ -866,8 +816,9 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 <script>
 // Filtrado en vivo: el formulario con data-live-filter actualiza las zonas data-live-region sin recargar.
-document.addEventListener("DOMContentLoaded", function () {
+window.edutrackLive = function () {
   var form = document.querySelector("form[data-live-filter]");
+  window.__liveLoad = null;
   if (!form) return;
   var controller = null;
   var timer = null;
@@ -942,14 +893,17 @@ document.addEventListener("DOMContentLoaded", function () {
     event.preventDefault();
     run();
   });
-  document.addEventListener("click", function (event) {
-    var link = event.target.closest("a");
-    if (!link || !link.closest("[data-live-region]")) return;
-    if (!link.closest(".pager, thead")) return;
-    event.preventDefault();
-    load(link.href);
-  });
+  window.__liveLoad = load;
+};
+document.addEventListener("click", function (event) {
+  if (!window.__liveLoad) return;
+  var link = event.target.closest("a");
+  if (!link || !link.closest("[data-live-region]")) return;
+  if (!link.closest(".pager, thead")) return;
+  event.preventDefault();
+  window.__liveLoad(link.href);
 });
+document.addEventListener("DOMContentLoaded", window.edutrackLive);
 </script>
 <script>
 document.addEventListener("input", function (e) {

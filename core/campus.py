@@ -37,19 +37,46 @@ class SelectedCampusRequiredMixin:
 
 
 class FeaturePermissionMixin:
-    """Bloquea vistas según permisos operativos del usuario."""
+    """Exige permisos nativos de Django (`app.codename`) para acceder a la vista.
 
-    permission_field = None
+    `required_permission` puede ser un texto o una tupla (se exigen todos).
+    `method_permissions` permite exigir otro permiso según el método HTTP.
+    """
+
+    required_permission = None
+    method_permissions = {}
+
+    def get_required_permissions(self, request):
+        required = self.method_permissions.get(request.method, self.required_permission)
+        if not required:
+            return ()
+        return (required,) if isinstance(required, str) else tuple(required)
 
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect("login")
-        if (
-            not request.user.is_superuser
-            and self.permission_field
-            and not getattr(request.user, self.permission_field, False)
-        ):
+        if not all(request.user.has_perm(p) for p in self.get_required_permissions(request)):
             from django.core.exceptions import PermissionDenied
 
             raise PermissionDenied("No tienes permiso para acceder a esta sección.")
         return super().dispatch(request, *args, **kwargs)
+
+
+def users_with_perm(perm):
+    """Usuarios activos con el permiso `app.codename`, directo o por grupo."""
+    from django.db.models import Q
+
+    from .models import User
+
+    app_label, codename = perm.split(".")
+    return User.objects.filter(
+        Q(
+            user_permissions__codename=codename,
+            user_permissions__content_type__app_label=app_label,
+        )
+        | Q(
+            groups__permissions__codename=codename,
+            groups__permissions__content_type__app_label=app_label,
+        ),
+        is_active=True,
+    ).distinct()

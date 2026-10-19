@@ -13,7 +13,7 @@
 <div class="card card-pad">
 	<div class="tool-head"><span class="tool-icon"><i class="material-icons">school</i></span><h2>Estudiantes ({{ students|length }})</h2></div>
 	<div class="table-wrap"><table class="highlight"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfonos</th><th>Estado</th><th></th></tr></thead><tbody>
-	{% for s in students %}<tr><td>{{ s.full_name }}</td><td>{{ s.document_number|default:"—" }}</td><td>{{ s.phone|default:"—" }}</td><td>{% if s.active %}<span class="chip green darken-1">Activo</span>{% else %}<span class="chip grey">Inactivo</span>{% endif %}</td><td class="right-align"><a class="btn-small action-btn blue darken-2" href="{% url 'student-enrollment-list' s.pk %}">Matrículas</a> <a class="btn-small action-btn blue darken-2" href="{% url 'student-update' s.pk %}">Editar</a></td></tr>{% endfor %}
+	{% for s in students %}<tr><td>{{ s.full_name }}</td><td>{{ s.document_number|default:"—" }}</td><td>{{ s.phone|default:"—" }}</td><td>{% if s.active %}<span class="chip green darken-1">Activo</span>{% else %}<span class="chip grey">Inactivo</span>{% endif %}</td><td class="right-align">{% if perms.students.view_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'student-enrollment-list' s.pk %}">Matrículas</a>{% endif %} {% if perms.students.change_student %}<a class="btn-small action-btn blue darken-2" href="{% url 'student-update' s.pk %}">Editar</a>{% endif %}</td></tr>{% endfor %}
 	</tbody></table></div>
 </div>
 {% endif %}
@@ -21,7 +21,7 @@
 <div class="card card-pad">
 	<div class="tool-head"><span class="tool-icon"><i class="material-icons">description</i></span><h2>Fichas ({{ fichas|length }})</h2></div>
 	<div class="table-wrap"><table class="highlight"><thead><tr><th>Código</th><th>Fecha</th><th>Estudiante</th><th>Curso</th><th></th></tr></thead><tbody>
-	{% for f in fichas %}<tr><td>{{ f.code }}{% if f.image %} <a href="{{ f.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td><td>{{ f.date|date:"d/m/Y" }}</td><td>{{ f.enrollment.student.full_name }}</td><td>{{ f.enrollment.course.name }}</td><td class="right-align"><a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' f.enrollment_id %}">Ver matrícula</a></td></tr>{% endfor %}
+	{% for f in fichas %}<tr><td>{{ f.code }}{% if f.image %} <a href="{{ f.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td><td>{{ f.date|date:"d/m/Y" }}</td><td>{{ f.enrollment.student.full_name }}</td><td>{{ f.enrollment.course.name }}</td><td class="right-align">{% if perms.students.change_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' f.enrollment_id %}">Ver matrícula</a>{% endif %}</td></tr>{% endfor %}
 	</tbody></table></div>
 </div>
 {% endif %}

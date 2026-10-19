@@ -4,7 +4,7 @@
 <div class="flex wrap between items-center gap mb">
   <div><h1 class="mb-0">Historial de llamadas</h1><div class="muted">{{ student.full_name }} · {{ student.phone }}</div></div>
   <div class="no-print">
-    <a class="btn" href="{% url 'calls-note-create' student.pk %}">Registrar llamada</a>
+    {% if perms.calls.add_callnote %}<a class="btn" href="{% url 'calls-note-create' student.pk %}">Registrar llamada</a>{% endif %}
     <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver a llamadas</a>
   </div>
 </div>
@@ -14,7 +14,7 @@
 </tbody>{% if courses %}<tfoot><tr><th colspan="5" class="right-align">Deuda total</th><th class="right-align{% if total_debt > 0 %} danger{% endif %}">S/ {{ total_debt|floatformat:2 }}</th></tr></tfoot>{% endif %}</table></div></details>
 <h2 class="mb" style="font-size:1.3rem">Llamadas registradas</h2>
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Fecha y hora</th><th>Registrado por</th><th>Respuesta</th><th>Detalle</th><th class="no-print">Acciones</th></tr></thead><tbody>
-{% for note in notes %}<tr><td style="white-space:nowrap">{{ note.created_at|date:"d/m/Y H:i" }}</td><td>{{ note.author.get_full_name|default:note.author.username }}</td><td><span class="strong{% if note.response == 'ASISTIRA' %} green-text text-darken-2{% elif note.response == 'NO_ASISTIRA' %} red-text text-darken-2{% endif %}">{{ note.get_response_display }}</span></td><td style="white-space:pre-wrap">{{ note.note }}</td><td class="no-print" style="white-space:nowrap">{% if user.is_superuser or user.can_edit_call_notes %}<a class="blue-text" href="{% url 'calls-note-update' note.pk %}?next={{ request.get_full_path|urlencode }}" title="Editar"><i class="material-icons tiny">edit</i></a> <a class="red-text" href="{% url 'calls-note-delete' note.pk %}?next={{ request.get_full_path|urlencode }}" title="Eliminar"><i class="material-icons tiny">delete</i></a>{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="center-align muted">Aún no hay llamadas registradas para este alumno.</td></tr>{% endfor %}
+{% for note in notes %}<tr><td style="white-space:nowrap">{{ note.created_at|date:"d/m/Y H:i" }}</td><td>{{ note.author.get_full_name|default:note.author.username }}</td><td><span class="strong{% if note.response == 'ASISTIRA' %} green-text text-darken-2{% elif note.response == 'NO_ASISTIRA' %} red-text text-darken-2{% endif %}">{{ note.get_response_display }}</span></td><td style="white-space:pre-wrap">{{ note.note }}</td><td class="no-print" style="white-space:nowrap">{% if perms.core.edit_call_notes %}<a class="blue-text" href="{% url 'calls-note-update' note.pk %}?next={{ request.get_full_path|urlencode }}" title="Editar"><i class="material-icons tiny">edit</i></a> <a class="red-text" href="{% url 'calls-note-delete' note.pk %}?next={{ request.get_full_path|urlencode }}" title="Eliminar"><i class="material-icons tiny">delete</i></a>{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="center-align muted">Aún no hay llamadas registradas para este alumno.</td></tr>{% endfor %}
 </tbody></table></div>
 {% include "shared/pagination.html" %}
 {% endblock %}
