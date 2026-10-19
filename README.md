@@ -1,35 +1,111 @@
 # EduTrack
 
-Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuotas y pagos. Está construido con Django y PostgreSQL, con interfaz en español y permisos separados por función y sede.
+Sistema web en español para administrar estudiantes, matrículas, cursos, promotores, cuotas, pagos y seguimiento de llamadas. Usa Django y PostgreSQL, con permisos nativos de Django (grupos y permisos) y acceso limitado por sede.
+
+## Contenido
+
+- [Funcionalidades](#funcionalidades)
+- [Roles y permisos](#roles-y-permisos)
+- [Requisitos](#requisitos)
+- [Inicio con Docker](#inicio-con-docker)
+- [Configuración inicial](#configuración-inicial)
+- [Desarrollo local sin Docker](#desarrollo-local-sin-docker)
+- [Pruebas y calidad](#pruebas-y-calidad)
+- [Respaldos y producción](#respaldos-y-producción)
 
 ## Funcionalidades
 
-- Gestión de estudiantes, cursos y matrículas, con edición y bajas lógicas.
-- Un estudiante puede registrar varios teléfonos peruanos separados por comas; el documento se identifica como DNI.
-- Cada matrícula puede tener fecha propia, costos editables y varios promotores.
-- Los costos de inscripción y mensualidad se copian inicialmente del curso, pero quedan guardados en la matrícula.
-- Las matrículas muestran pago total, pagos confirmados, deuda, recibos y su estado; permiten filtrar y ordenar.
-- Los nombres de estudiantes llevan a una lista de sus matrículas. Desde esta también se puede iniciar un pago.
-- Los recibos se conservan: al anular un pago, el recibo queda registrado como anulado.
-- Reportes por curso exportables a Excel, con una hoja por nombre de curso y una tabla por grupo/horario.
-- La tabla de matrículas se puede exportar a Excel respetando filtros y orden.
-- Administración de sedes, usuarios, cursos y promotores desde Django Admin.
-- Logo opcional por sede, administrable desde Django Admin y visible según la sede seleccionada.
+**Académico**
+
+- Estudiantes, cursos y matrículas, con edición y bajas lógicas.
+- Un estudiante puede tener varios teléfonos peruanos separados por comas; el documento es el DNI.
+- Cada matrícula tiene fecha propia, costos editables y varios promotores. Los costos de inscripción y mensualidad se copian del curso, pero quedan guardados en la matrícula.
+- La lista de matrículas muestra pago total, pagos confirmados, deuda, recibos y estado, con filtros y orden. Los nombres de estudiantes llevan a sus matrículas, desde donde también se puede iniciar un pago.
+
+**Caja**
+
+- Cuotas, saldos pendientes y pagos. Los recibos se conservan: al anular un pago, el recibo queda registrado como anulado.
+- Los recibos son comprobantes internos; no son comprobantes electrónicos autorizados por SUNAT.
+
+**Llamadas**
+
+- Asignación de llamadas a gestores, registro de resultados y notas.
+- Reporte de llamadas por usuario, con desglose por respuesta y filtro de fechas. Con `view_all_calls` se ve todo el campus; sin él, solo las propias.
+
+**Reportes**
+
+- Reportes por curso exportables a Excel (una hoja por curso y una tabla por grupo/horario).
+- La tabla de matrículas se exporta a Excel respetando filtros y orden.
+
+**Sistema**
+
+- Administración de sedes, usuarios, cursos y promotores desde la aplicación y desde Django Admin.
+- Logo opcional por sede, visible según la sede seleccionada.
+- Búsqueda global por nombre, DNI, código de ficha o recibo.
+
+**Interfaz**
+
+- Menú lateral único y plano: selector de sede arriba y usuario conectado al pie. Al navegar por el menú solo se recarga el contenido de la derecha.
+- Perfil de usuario (`/cuentas/perfil/`) con grupos, sedes, permisos descritos en español y cambio de contraseña.
+
+## Roles y permisos
+
+Los permisos son los nativos de Django; no hay casillas de permiso en el modelo `User`. Un usuario puede pertenecer a varios grupos y acumula sus permisos.
+
+Las migraciones crean seis grupos con los permisos básicos de la matriz de acceso:
+
+| Grupo | Función principal |
+|---|---|
+| Matrículas | Registrar y consultar estudiantes y matrículas |
+| Caja | Registrar y consultar pagos y saldos pendientes |
+| Gestor de llamadas | Consultar sus llamadas y registrar resultados y notas |
+| Asignador de llamadas | Asignar llamadas a gestores |
+| Supervisor de campus | Consulta amplia del campus |
+| Administrador general | Consulta y administración completas |
+
+Los permisos que requieren autorización adicional no se conceden por pertenecer al grupo: asígnalos en `/admin/`, a un usuario o a un grupo.
+
+Permisos especiales (aplicación `core`):
+
+| Código | Acción |
+|---|---|
+| `deactivate_student` | Desactivar estudiantes |
+| `deactivate_enrollment` | Desactivar matrículas |
+| `change_enrollment_course` | Cambiar el curso de una matrícula |
+| `void_payment` | Anular pagos conservando el recibo |
+| `view_pending_balances` | Consultar cuotas y saldos pendientes (distinto de ver pagos) |
+| `view_financial_reports` | Consultar reportes financieros |
+| `view_academic_reports` | Consultar reportes académicos |
+| `view_call_reports` | Consultar el reporte de llamadas |
+| `edit_call_notes` | Modificar notas de llamadas existentes |
+| `assign_calls` | Asignar llamadas a gestores |
+| `view_all_calls` | Ver todas las llamadas del campus |
+| `export_reports` | Exportar reportes a Excel |
+| `manage_user_access` | Administrar usuarios, grupos y permisos |
+
+Los permisos estándar (`view_`, `add_`, `change_`, `delete_`) cubren las operaciones básicas.
+
+Reglas de seguridad:
+
+- Los menús, botones y vistas se muestran solo a quien tiene el permiso correspondiente, y cada vista lo exige también en el servidor.
+- Las plantillas comprueban permisos concretos, nunca nombres de grupo.
+- Cada usuario solo accede a las sedes que tiene asignadas y a la sede seleccionada.
+- Desactivar un estudiante o una matrícula no elimina pagos ni recibos.
 
 ## Requisitos
 
-- Docker Desktop con Docker Compose (recomendado), o Python 3.12 o 3.13, uv, PostgreSQL 15 o posterior y Redis para caché en producción.
+- Docker Desktop con Docker Compose (recomendado), o Python 3.12 o 3.13, uv, PostgreSQL 15 o posterior y Redis para la caché en producción.
 - Navegador moderno.
 
 ## Inicio con Docker
 
-1. En PowerShell, crea tu archivo local de configuración:
+1. Crea tu archivo local de configuración:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-2. Edita `.env`. Para Docker Compose, el host de la base debe ser `db` (no `127.0.0.1`). Configura también una clave secreta propia y una contraseña de base de datos:
+2. Edita `.env`. Para Docker Compose, el host de la base debe ser `db` (no `127.0.0.1`). Configura una clave secreta propia y contraseñas seguras:
 
    ```dotenv
    DJANGO_SECRET_KEY=una-clave-larga-aleatoria
@@ -44,13 +120,13 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    DB_PORT=5432
    ```
 
-3. Construye e inicia los servicios:
+   Si ya tienes un `.env`, agrega `DJANGO_CSRF_TRUSTED_ORIGINS` y `GRAFANA_ADMIN_PASSWORD`.
+
+3. Construye e inicia los servicios (la compilación usa BuildKit y guarda en caché los paquetes de uv):
 
    ```powershell
    docker compose up --build -d
    ```
-
-   La compilación usa BuildKit y conserva en caché los paquetes de uv para acelerar compilaciones posteriores.
 
 4. Aplica las migraciones y crea el usuario administrador:
 
@@ -59,42 +135,51 @@ Sistema web para administrar estudiantes, matrículas, cursos, promotores, cuota
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Para acceder desde otros equipos de la red local, agrega la IP LAN de este equipo a `DJANGO_ALLOWED_HOSTS` y su origen a `DJANGO_CSRF_TRUSTED_ORIGINS` en `.env`. Por ejemplo, para `192.168.0.107`:
+5. Abre <http://localhost:8080/>.
 
-   ```dotenv
-   DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,192.168.0.107
-   DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://192.168.0.107:8080
-   ```
+### Acceso desde otros equipos de la red
 
-   Recrea los servicios para aplicar la configuración: `docker compose up -d --build`. Luego, desde los otros equipos, abre <http://192.168.0.107:8080/>. Si no conecta, permite el tráfico TCP entrante por el puerto 8080 en el Firewall de Windows para redes privadas y confirma que todos los equipos estén en la misma red. La dirección debe ser la IP actual del equipo que ejecuta Docker.
+Agrega la IP LAN del servidor a `DJANGO_ALLOWED_HOSTS` y su origen a `DJANGO_CSRF_TRUSTED_ORIGINS`. Por ejemplo, para `192.168.0.107`:
 
-   También puedes abrir <http://localhost:8080/> en el equipo servidor. Grafana está disponible solo localmente en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`) con Loki ya configurado como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`. Alloy recoge los logs de los contenedores de este proyecto y Loki los conserva durante 30 días. Nginx sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia; Redis proporciona la caché compartida de Django y solo es accesible dentro de Compose. Para consultar logs de arranque usa `docker compose logs -f web nginx redis grafana loki alloy`; para detener los servicios sin borrar los datos, `docker compose down`.
+```dotenv
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,192.168.0.107
+DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://192.168.0.107:8080
+```
 
-Si ya tienes un `.env`, agrega `DJANGO_CSRF_TRUSTED_ORIGINS` y `GRAFANA_ADMIN_PASSWORD` como arriba, y recrea los servicios: `docker compose up -d --build`.
+Recrea los servicios con `docker compose up -d --build` y abre <http://192.168.0.107:8080/>. Si no conecta, permite el tráfico TCP entrante por el puerto 8080 en el Firewall de Windows para redes privadas y confirma que todos los equipos estén en la misma red. La IP debe ser la actual del equipo que ejecuta Docker.
 
-> `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo únicamente cuando quieras borrar la base por completo.
+### Servicios incluidos
 
-> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es exclusivamente para desarrollo y no debe exponerse a una LAN, Internet ni usarse en producción. En despliegues públicos, configura HTTPS (directamente en Nginx o mediante un proxy TLS de confianza) y ajusta `DJANGO_ALLOWED_HOSTS` al dominio utilizado.
+- **Nginx** sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia.
+- **Gunicorn** ejecuta Django; **Redis** proporciona la caché compartida y solo es accesible dentro de Compose.
+- **Grafana** está disponible solo localmente en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`), con Loki como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`.
+- **Alloy** recoge los logs de los contenedores del proyecto y **Loki** los conserva 30 días.
+
+Para ver logs de arranque: `docker compose logs -f web nginx redis grafana loki alloy`. Para detener los servicios sin borrar datos: `docker compose down`.
+
+> `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo solo cuando quieras borrar la base por completo.
+
+> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es solo para desarrollo: no lo expongas a una LAN ni a Internet, ni lo uses en producción.
 
 ## Configuración inicial
 
 1. En `/admin/`, crea las sedes y los cursos.
 2. Crea promotores y asigna las sedes donde pueden trabajar; una matrícula admite varios promotores.
-3. Crea usuarios y asigna sedes y permisos: **Puede registrar alumnos y matrículas** y/o **Puede registrar pagos**.
-4. Inicia sesión con cada usuario y selecciona la sede activa correspondiente.
+3. Crea usuarios, asigna sus sedes y añádelos a uno o varios grupos. Asigna los permisos especiales que correspondan.
+4. Inicia sesión con cada usuario y selecciona la sede activa.
 
-La sede de la matrícula se determina en el servidor a partir de la sede seleccionada por el usuario. Al crear una matrícula, se generan las cuotas iniciales de inscripción y mensualidad si sus importes son mayores que cero. El primer pago debe cubrir como mínimo la inscripción y no puede exceder la deuda pendiente.
+La sede de la matrícula se determina en el servidor a partir de la sede seleccionada por el usuario. Al crear una matrícula se generan las cuotas iniciales de inscripción y mensualidad si sus importes son mayores que cero. El primer pago debe cubrir como mínimo la inscripción y no puede exceder la deuda pendiente.
 
 ## Desarrollo local sin Docker
 
-Con PostgreSQL instalado y ejecutándose, instala uv si aún no lo tienes y prepara las dependencias:
+Con PostgreSQL en ejecución, instala las dependencias:
 
 ```powershell
 uv sync
 uv run pre-commit install
 ```
 
-Configura las variables de `.env.example` en el entorno de PowerShell: Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker. Usa `DB_HOST=127.0.0.1` para PostgreSQL local. Después ejecuta:
+Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker: configura en PowerShell las variables de `.env.example`, con `DB_HOST=127.0.0.1`. Después ejecuta:
 
 ```powershell
 uv run python manage.py migrate
@@ -102,10 +187,9 @@ uv run python manage.py createsuperuser
 uv run python manage.py runserver_plus 127.0.0.1:8000
 ```
 
-El depurador de `runserver_plus` permite inspeccionar errores durante el desarrollo. No lo uses con datos reales ni en producción.
-Con `DEBUG=True`, Django Debug Toolbar aparece automáticamente en el entorno local en las páginas HTML. Solo está instalado en el grupo de desarrollo y no se habilita cuando `DEBUG=False`.
+Con `DEBUG=True`, Django Debug Toolbar aparece en las páginas HTML. Solo está instalado en el grupo de desarrollo y no se habilita con `DEBUG=False`. Sin `REDIS_URL`, Django usa una caché local en memoria, apropiada para un solo proceso.
 
-## Pruebas y migraciones
+## Pruebas y calidad
 
 Con Docker y el servicio PostgreSQL activo:
 
@@ -115,16 +199,23 @@ docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
 ```
 
-Los hooks de pre-commit ejecutan Ruff para revisar y corregir el lint y formatear los archivos Python preparados para el commit. Para ejecutar las comprobaciones localmente, usa `uv run ruff check .` y `uv run pyright`. Las dependencias están declaradas en `pyproject.toml` y bloqueadas en `uv.lock`. Al cambiar dependencias, usa `uv add paquete` o `uv remove paquete` para actualizar ambos archivos. Para dependencias de desarrollo, usa `uv add --dev paquete`. Django usa Redis cuando `REDIS_URL` está configurado; sin esa variable utiliza caché local en memoria, apropiada para desarrollo de un solo proceso. GitHub Actions instala con uv, ejecuta Ruff y verifica la aplicación y sus pruebas en PostgreSQL 15 y Redis con Python 3.12 y 3.13 en cada push y pull request.
+Revisiones locales: `uv run ruff check .` y `uv run pyright`. Los hooks de pre-commit ejecutan Ruff (lint y formato) sobre los archivos preparados para el commit.
+
+Las dependencias están en `pyproject.toml` y bloqueadas en `uv.lock`; usa `uv add paquete`, `uv remove paquete` o `uv add --dev paquete` para actualizarlas. GitHub Actions instala con uv y ejecuta Ruff, las comprobaciones y las pruebas en cada push y pull request, con PostgreSQL 15, Redis y Python 3.12 y 3.13.
 
 ## Respaldos y producción
 
-Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Ejemplo con los valores de base incluidos en `.env.example`:
+Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Con los valores de `.env.example`:
 
 ```powershell
 docker compose exec -T db pg_dump -U edutrack_user -d edutrack_pagos > backup_edutrack.sql
 ```
 
-En Docker, Gunicorn sirve Django, Redis proporciona la caché, Alloy envía los logs de Docker a Loki y Grafana permite explorarlos. Grafana y Nginx solo publican puertos en loopback; Loki, Alloy, Django y Redis no publican puertos al host. Alloy necesita acceso al socket de Docker para descubrir contenedores y leer sus logs: protege el host y no expongas el daemon de Docker. Antes de exponer el servicio a Internet, cambia `GRAFANA_ADMIN_PASSWORD`, usa un `DJANGO_SECRET_KEY` privado, restringe `DJANGO_ALLOWED_HOSTS` al dominio, configura HTTPS (Nginx no termina TLS con la configuración incluida), aplica reglas de firewall y prueba el procedimiento de restauración.
+Grafana y Nginx solo publican puertos en loopback; Loki, Alloy, Django y Redis no publican puertos al host. Alloy necesita acceso al socket de Docker para leer los logs: protege el host y no expongas el daemon de Docker.
 
-Los recibos emitidos por la aplicación son comprobantes internos; no son comprobantes electrónicos tributarios autorizados por SUNAT.
+Antes de exponer el servicio a Internet:
+
+- Cambia `GRAFANA_ADMIN_PASSWORD` y usa un `DJANGO_SECRET_KEY` privado.
+- Restringe `DJANGO_ALLOWED_HOSTS` al dominio.
+- Configura HTTPS (el Nginx incluido no termina TLS), directamente o con un proxy TLS de confianza.
+- Aplica reglas de firewall y prueba el procedimiento de restauración.
