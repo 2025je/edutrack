@@ -1,21 +1,21 @@
 {% extends "base.html" %}{% block title %}Pagos · EduTrack{% endblock %}
 {% block content %}
 <div class="flex between items-center wrap gap mb"><h1 class="mb-0">Pagos y recibos</h1>{% if perms.payments.add_payment %}<a class="btn" href="{% url 'payment-create' %}">+ Registrar pago</a>{% endif %}</div>
-<form method="get" class="row" data-live-filter>
+<form method="get" class="row" data-live-filter data-filter-collapse>
 	<h6 class="col s12 strong">Recibo</h6>
-	<div class="col s12 m6 l3"><label for="payment-receipt">Número de recibo</label><input id="payment-receipt" name="receipt" value="{{ request.GET.receipt }}" placeholder="Filtrar por recibo"></div>
+	<div class="col s12 m6 l3" data-primary><label for="payment-receipt">Número de recibo</label><input id="payment-receipt" name="receipt" value="{{ request.GET.receipt }}" placeholder="Filtrar por recibo"></div>
 	<div class="col s12 m6 l3"><label for="payment-reference">Referencia</label><input id="payment-reference" name="reference" value="{{ request.GET.reference }}" placeholder="Filtrar por referencia"></div>
 	<div class="col s12 m6 l3"><label for="payment-cashier">Cajero</label><input id="payment-cashier" name="cashier" value="{{ request.GET.cashier }}" placeholder="Filtrar por cajero"></div>
-	<div class="col s12 m6 l3"><label for="payment-status">Estado</label><select id="payment-status" name="status" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option value="CONFIRMADO" {% if request.GET.status == "CONFIRMADO" %}selected{% endif %}>Confirmado</option><option value="ANULADO" {% if request.GET.status == "ANULADO" %}selected{% endif %}>Anulado</option></select></div>
+	<div class="col s12 m6 l3" data-primary><label for="payment-status">Estado</label><select id="payment-status" name="status" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option value="CONFIRMADO" {% if request.GET.status == "CONFIRMADO" %}selected{% endif %}>Confirmado</option><option value="ANULADO" {% if request.GET.status == "ANULADO" %}selected{% endif %}>Anulado</option></select></div>
 	<h6 class="col s12 strong">Alumno y curso</h6>
-	<div class="col s12 m6 l3"><label for="payment-student">Estudiante</label><input id="payment-student" name="student" value="{{ request.GET.student }}" placeholder="Filtrar por estudiante"></div>
-	<div class="col s12 m6 l3"><label for="payment-course">Curso</label><input id="payment-course" name="course" value="{{ request.GET.course }}" placeholder="Filtrar por curso"></div>
+	<div class="col s12 m6 l3" data-primary><label for="payment-student">Estudiante</label><input id="payment-student" name="student" value="{{ request.GET.student }}" placeholder="Filtrar por estudiante"></div>
+	<div class="col s12 m6 l3" data-primary><label for="payment-course">Curso</label><input id="payment-course" name="course" value="{{ request.GET.course }}" placeholder="Filtrar por curso"></div>
 	<h6 class="col s12 strong">Fecha de pago</h6>
 	<div class="col s12 m6 l3"><label for="payment-date-from">Desde</label><input id="payment-date-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
 	<div class="col s12 m6 l3"><label for="payment-date-to">Hasta</label><input id="payment-date-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
 	<h6 class="col s12 strong">Importe</h6>	<div class="col s12 m6 l3"><label for="payment-amount-min">Importe mínimo (S/)</label><input id="payment-amount-min" type="number" step="0.01" min="0" name="amount_min" value="{{ request.GET.amount_min }}"></div>
 	<div class="col s12 m6 l3"><label for="payment-amount-max">Importe máximo (S/)</label><input id="payment-amount-max" type="number" step="0.01" min="0" name="amount_max" value="{{ request.GET.amount_max }}"></div>
-	<div class="col s12"><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Limpiar</a></div>
+	<div class="col s12" data-actions><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Limpiar</a></div>
 </form>
 <div data-live-region="results">
 <div class="card table-wrap"><table class="highlight"><thead><tr>

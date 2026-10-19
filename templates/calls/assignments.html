@@ -3,9 +3,9 @@
 {% block content %}
 <div class="mb"><h1 class="mb-0">Asignar llamadas</h1><div class="muted">Elige qué matrículas verá cada usuario en «Alumnos y deudas». Quienes asignan llamadas ven todas.</div></div>
 <div class="card card-pad">
-  <form method="get" class="row mb-0" data-live-filter>
+  <form method="get" class="row mb-0" data-live-filter data-filter-collapse>
     <h6 class="col s12 strong">Usuario</h6>
-    <div class="col s12 m6"><label for="usuario">Usuario</label>
+    <div class="col s12 m6" data-primary data-nochip><label for="usuario">Usuario</label>
       <select id="usuario" name="usuario" class="browser-default">
         <option value="">Selecciona un usuario</option>
         {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
@@ -13,15 +13,15 @@
       {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
     </div>
     <h6 class="col s12 strong">Alumno y curso</h6>
-    <div class="col s12 m6 l3"><label for="q">Alumno o curso</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
-    <div class="col s12 m6 l3"><label for="curso">Curso</label>
+    <div class="col s12 m6 l3" data-primary><label for="q">Alumno o curso</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
+    <div class="col s12 m6 l3" data-primary><label for="curso">Curso</label>
       <select id="curso" name="curso" class="browser-default"><option value="">Todos</option>{% for c in courses %}<option value="{{ c }}" {% if filters.curso == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
     <div class="col s12 m6 l3"><label for="horario">Horario</label>
       <select id="horario" name="horario" class="browser-default"><option value="">Todos</option>{% for s in schedules %}<option value="{{ s }}" {% if filters.horario == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
     <div class="col s12 m6 l3"><label for="grupo">Grupo</label>
       <select id="grupo" name="grupo" class="browser-default"><option value="">Todos</option>{% for g in groups %}<option value="{{ g }}" {% if filters.grupo == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
     <h6 class="col s12 strong">Asignación y deuda</h6>
-    <div class="col s12 m6 l3"><label for="estado">Estado de asignación</label>
+    <div class="col s12 m6 l3" data-primary><label for="estado">Estado de asignación</label>
       <select id="estado" name="estado" class="browser-default">
         <option value="">Todas</option>
         <option value="sin_asignar" {% if filters.estado == "sin_asignar" %}selected{% endif %}>Sin asignar a nadie</option>
@@ -29,7 +29,7 @@
         <option value="no_asignadas" {% if filters.estado == "no_asignadas" %}selected{% endif %}>No asignadas al usuario</option>
         <option value="otros" {% if filters.estado == "otros" %}selected{% endif %}>Asignadas a otros usuarios</option>
       </select></div>
-    <div class="col s12">
+    <div class="col s12" data-actions>
       <label><input type="checkbox" name="deuda" value="1" {% if filters.deuda %}checked{% endif %}><span>Solo con deuda pendiente</span></label>
       <button class="btn" type="submit">Filtrar</button>
       <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-assignments' %}{% if target %}?usuario={{ target.pk }}{% endif %}">Limpiar</a>

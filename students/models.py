@@ -244,6 +244,9 @@ class Enrollment(models.Model):
         validators=[positive_amount_validator],
     )
     active = models.BooleanField("Activa", default=True)
+    deactivated_with_student = models.BooleanField(
+        "Dada de baja junto con el estudiante", default=False, editable=False
+    )
     created_at = models.DateTimeField("Creada el", auto_now_add=True)
 
     class Meta:

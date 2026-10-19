@@ -39,6 +39,7 @@ from .models import (
     Ficha,
 )
 from .forms import StudentForm, EnrollmentForm
+from .installments import fee_conflicts, sync_initial_installments
 
 
 MAX_RECORD_CODE_CHECK_RANGE = 10_000
@@ -193,12 +194,14 @@ class StudentDeleteView(CampusScopedMixin, DeleteView):
         with transaction.atomic():
             student.active = False
             student.save(update_fields=["active"])
-            Enrollment.objects.filter(student=student).update(active=False)
+            Enrollment.objects.filter(student=student, active=True).update(
+                active=False, deactivated_with_student=True
+            )
             Installment.objects.filter(enrollment__student=student).update(active=False)
             Payment.objects.filter(
                 enrollment__student=student,
                 status=Payment.Status.CONFIRMED,
-            ).update(status=Payment.Status.VOID)
+            ).update(status=Payment.Status.VOID, voided_on_deactivation=True)
         messages.success(
             self.request,
             "Estudiante dado de baja; se conservaron sus matrículas y recibos, y los recibos confirmados se anularon.",
@@ -877,65 +880,11 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
             messages.info(self.request, message)
         return response
 
-    @staticmethod
-    def installment_kind(installment):
-        if installment.concept == "Matrícula":
-            return "enrollment_fee"
-        if installment.concept.startswith("Mensualidad inicial"):
-            return "monthly_fee"
-        return None
-
     def fee_conflicts(self, form, installments):
-        """Impide bajar un costo por debajo de lo ya cobrado en su cuota."""
-        errors = []
-        labels = {"enrollment_fee": "matrícula", "monthly_fee": "mensualidad"}
-        for installment in installments:
-            kind = self.installment_kind(installment)
-            if kind is None or not installment.active:
-                continue
-            new_amount = form.cleaned_data[kind]
-            paid = installment.paid_amount
-            if new_amount < paid:
-                errors.append(
-                    (
-                        kind,
-                        f"Ya se cobró S/ {paid:.2f} de la {labels[kind]}; "
-                        "el nuevo costo no puede ser menor.",
-                    )
-                )
-        return errors
+        return fee_conflicts(installments, form.cleaned_data)
 
     def sync_installments(self, installments):
-        """Ajusta las cuotas iniciales a los costos actuales de la matrícula."""
-        from payments.models import Installment
-
-        enrollment = self.object
-        by_kind = {}
-        for installment in installments:
-            kind = self.installment_kind(installment)
-            if kind and kind not in by_kind:
-                by_kind[kind] = installment
-        due_date = enrollment.course_start_date or enrollment.enrollment_date
-        concepts = {
-            "enrollment_fee": "Matrícula",
-            "monthly_fee": f"Mensualidad inicial ({due_date:%Y-%m})",
-        }
-        for kind, concept in concepts.items():
-            amount = getattr(enrollment, kind)
-            installment = by_kind.get(kind)
-            if installment is None:
-                if amount > 0:
-                    Installment.objects.create(
-                        enrollment=enrollment, concept=concept, amount=amount, due_date=due_date
-                    )
-            elif amount > 0:
-                if installment.amount != amount or not installment.active:
-                    installment.amount = amount
-                    installment.active = enrollment.active
-                    installment.save(update_fields=["amount", "active"])
-            elif installment.active:
-                installment.active = False
-                installment.save(update_fields=["active"])
+        sync_initial_installments(self.object, installments)
 
 
 class EnrollmentDeleteView(CampusScopedMixin, DeleteView):
@@ -961,7 +910,7 @@ class EnrollmentDeleteView(CampusScopedMixin, DeleteView):
             Payment.objects.filter(
                 enrollment=enrollment,
                 status=Payment.Status.CONFIRMED,
-            ).update(status=Payment.Status.VOID)
+            ).update(status=Payment.Status.VOID, voided_on_deactivation=True)
         messages.success(
             self.request,
             "Matrícula dada de baja; se conservaron las cuotas y recibos, y los recibos confirmados se anularon.",

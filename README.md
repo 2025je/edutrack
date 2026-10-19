@@ -205,11 +205,21 @@ Las dependencias están en `pyproject.toml` y bloqueadas en `uv.lock`; usa `uv a
 
 ## Respaldos y producción
 
-Haz respaldos regulares de PostgreSQL y guarda una copia fuera del servidor. Con los valores de `.env.example`:
+El servicio `backup` respalda cada día la base de datos (`pg_dump`) y los archivos subidos en `./backups/`. Tras cada respaldo restaura el volcado en una base temporal y compara tablas y filas; el resultado queda en `backups/STATUS`. Se conservan los últimos `BACKUP_KEEP` respaldos. Guarda además una copia de `backups/` fuera del servidor.
+
+Variables opcionales: `BACKUP_KEEP` (14), `BACKUP_HOUR_UTC` (7 = 02:00 en Perú), `BACKUP_ON_START` (1).
+
+Respaldo manual inmediato: `docker compose restart backup`.
+
+Restauración (reemplaza los datos actuales):
 
 ```powershell
-docker compose exec -T db pg_dump -U edutrack_user -d edutrack_pagos > backup_edutrack.sql
+docker compose stop web
+docker compose run --rm -e CONFIRM=yes --entrypoint sh backup /scripts/restore.sh /backups/db/ARCHIVO.dump /backups/media/ARCHIVO.tar.gz
+docker compose start web
 ```
+
+El segundo archivo (media) es opcional.
 
 Grafana y Nginx solo publican puertos en loopback; Loki, Alloy, Django y Redis no publican puertos al host. Alloy necesita acceso al socket de Docker para leer los logs: protege el host y no expongas el daemon de Docker.
 

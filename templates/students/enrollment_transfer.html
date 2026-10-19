@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Trasladar matrícula · EduTrack{% endblock %}
+{% block content %}
+<div class="row"><div class="col s12 l8 offset-l2"><div class="card card-pad">
+	<h1>Trasladar matrícula</h1>
+	<p>Estudiante: <strong>{{ enrollment.student_label }}</strong><br>Curso actual: <strong>{{ enrollment.course_label }}</strong></p>
+	<p class="muted">Los pagos ya registrados se conservan (S/ {{ paid_total|floatformat:2 }} cobrados en cuotas activas). Las cuotas iniciales se ajustan al nuevo curso y su vencimiento pasa a la fecha de inicio del nuevo curso.</p>
+	<form method="post">{% csrf_token %}
+		{% if form.non_field_errors %}<div class="note note-error">{% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}</div>{% endif %}
+		<div class="field"><label for="{{ form.course.id_for_label }}">{{ form.course.label }}</label>{{ form.course }}{% for error in form.course.errors %}<div class="danger small">{{ error }}</div>{% endfor %}</div>
+		<p><label>{{ form.use_course_fees }}<span>{{ form.use_course_fees.label }}</span></label><br><span class="small muted">{{ form.use_course_fees.help_text }}</span></p>
+		<div class="flex gap"><button class="btn" type="submit">Trasladar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Cancelar</a></div>
+	</form>
+</div></div></div>
+{% endblock %}

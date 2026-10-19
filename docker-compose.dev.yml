@@ -1,0 +1,10 @@
+# Modo desarrollo: el código ya está montado en /app; aquí se sustituye Gunicorn por
+# runserver, que recarga Python y plantillas al guardar sin reconstruir la imagen.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web
+#
+# Para volver al modo normal:
+#   docker compose up -d web
+services:
+  web:
+    command: sh -c "python manage.py collectstatic --noinput && python manage.py runserver 0.0.0.0:8000"

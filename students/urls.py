@@ -1,4 +1,10 @@
 from django.urls import path
+from .lifecycle import (
+    EnrollmentTransferView,
+    RestoreEnrollmentView,
+    RestoreStudentView,
+    TrashView,
+)
 from .reports import (
     CourseOccupancyReportView,
     DebtByCourseReportView,
@@ -38,6 +44,16 @@ urlpatterns = [
     path(
         "matriculas/exportar-excel/", EnrollmentExcelExportView.as_view(), name="enrollment-excel"
     ),
+    path(
+        "matriculas/<int:pk>/trasladar/",
+        EnrollmentTransferView.as_view(),
+        name="enrollment-transfer",
+    ),
+    path(
+        "matriculas/<int:pk>/restaurar/", RestoreEnrollmentView.as_view(), name="enrollment-restore"
+    ),
+    path("<int:pk>/restaurar/", RestoreStudentView.as_view(), name="student-restore"),
+    path("papelera/", TrashView.as_view(), name="trash"),
     path("matriculas/nueva/", EnrollmentCreateView.as_view(), name="enrollment-create"),
     path("matriculas/<int:pk>/editar/", EnrollmentUpdateView.as_view(), name="enrollment-update"),
     path("matriculas/<int:pk>/eliminar/", EnrollmentDeleteView.as_view(), name="enrollment-delete"),

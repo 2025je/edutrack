@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
@@ -5,7 +6,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import Permission
 from django.contrib.auth.views import PasswordChangeView
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q, Sum
+from django.db.models import F, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import render, redirect
 from django.urls import reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -15,7 +17,7 @@ from .permission_labels import describe
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from students.models import Student, Enrollment, Course, Promoter
-from payments.models import Payment, Installment
+from payments.models import Payment, PaymentAllocation, Installment
 
 User = get_user_model()
 
@@ -121,17 +123,26 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                 ]
                 or 0
             )
-            pending_total = 0
-            overdue_count = 0
-            for i in Installment.objects.filter(
+            installments = Installment.objects.filter(
                 enrollment__campus=campus, active=True, enrollment__active=True
-            ):
-                balance = i.balance
-                pending_total += balance
-                if balance > 0 and i.due_date < today:
-                    overdue_count += 1
-            ctx["pending_total"] = pending_total
-            ctx["overdue_count"] = overdue_count
+            ).annotate(
+                paid_total=Coalesce(
+                    Subquery(
+                        PaymentAllocation.objects.filter(
+                            installment=OuterRef("pk"), payment__status=Payment.Status.CONFIRMED
+                        )
+                        .values("installment")
+                        .annotate(t=Sum("amount"))
+                        .values("t")[:1]
+                    ),
+                    Value(Decimal("0.00")),
+                )
+            )
+            totals = installments.aggregate(total=Sum("amount"), paid=Sum("paid_total"))
+            ctx["pending_total"] = (totals["total"] or 0) - (totals["paid"] or 0)
+            ctx["overdue_count"] = installments.filter(
+                due_date__lt=today, paid_total__lt=F("amount")
+            ).count()
         if can_see_payments:
             ctx["recent_payments"] = confirmed.select_related("enrollment__student").order_by(
                 "-created_at"

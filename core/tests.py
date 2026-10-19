@@ -299,7 +299,11 @@ class RoleGroupMatrixTests(TestCase):
         self.user_in("Caja")
         page = self.client.get(reverse("dashboard"))
         self.assertContains(page, 'id="sidebar-toggle"')
-        self.assertContains(page, "Navegación parcial")
+        self.assertContains(page, "js/sidebar.js")
+        from django.contrib.staticfiles import finders
+
+        with open(finders.find("js/sidebar.js"), encoding="utf-8") as script:
+            self.assertIn("Navegación parcial", script.read())
 
     def test_search_requires_permission_and_hides_unusable_actions(self):
         self.user_in("Gestor de llamadas")

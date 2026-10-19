@@ -1,14 +1,14 @@
 {% extends "base.html" %}{% block title %}Matrículas · EduTrack{% endblock %}
 {% block content %}
 <div class="flex between items-center wrap gap mb"><h1 class="mb-0">{% if filtered_student %}Matrículas de {{ filtered_student.full_name }}{% else %}Matrículas{% endif %}</h1><div class="flex gap wrap">{% if perms.core.export_reports %}<a class="btn green" data-live-export="{% url 'enrollment-excel' %}"{% if filtered_student %} data-live-extra="student_id={{ filtered_student.pk }}"{% endif %} href="{% url 'enrollment-excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}{% if filtered_student %}{% if request.GET.urlencode %}&amp;{% else %}?{% endif %}student_id={{ filtered_student.pk }}{% endif %}"><i class="material-icons" aria-hidden="true">file_download</i>Exportar Excel</a>{% endif %}{% if perms.students.add_enrollment %}<a class="btn" href="{% url 'enrollment-create' %}">+ Nueva matrícula</a>{% endif %}</div></div>
-<form method="get" class="row" data-live-filter>
+<form method="get" class="row" data-live-filter data-filter-collapse>
 	{% if request.GET.course_id %}<input type="hidden" name="course_id" value="{{ request.GET.course_id }}">{% endif %}
 	{% if request.GET.promoter_id %}<input type="hidden" name="promoter_id" value="{{ request.GET.promoter_id }}">{% endif %}
 	<h6 class="col s12 strong">Estudiante</h6>
-	<div class="col s12 m6 l3"><label for="f-student">Nombre</label><input id="f-student" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
-	<div class="col s12 m6 l3"><label for="f-document">DNI</label><input id="f-document" name="document" value="{{ request.GET.document }}" placeholder="Filtrar por DNI" inputmode="numeric"></div>
+	<div class="col s12 m6 l3" data-primary><label for="f-student">Nombre</label><input id="f-student" name="student" value="{% if filtered_student %}{{ filtered_student.full_name }}{% else %}{{ request.GET.student }}{% endif %}" placeholder="Filtrar por estudiante"></div>
+	<div class="col s12 m6 l3" data-primary><label for="f-document">DNI</label><input id="f-document" name="document" value="{{ request.GET.document }}" placeholder="Filtrar por DNI" inputmode="numeric"></div>
 	<h6 class="col s12 strong">Curso</h6>
-	<div class="col s12 m6 l3"><label for="f-course">Curso</label><input id="f-course" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
+	<div class="col s12 m6 l3" data-primary><label for="f-course">Curso</label><input id="f-course" name="course" value="{{ course_filter_value }}" placeholder="Filtrar por curso"></div>
 	<div class="col s12 m6 l3"><label for="f-schedule">Horario</label><input id="f-schedule" name="schedule" value="{{ request.GET.schedule }}" placeholder="Filtrar por horario"></div>
 	<div class="col s12 m6 l3"><label for="f-group">Grupo</label><input id="f-group" name="group" value="{{ request.GET.group }}" placeholder="Filtrar por grupo"></div>
 	<h6 class="col s12 strong">Ficha y promotor</h6>
@@ -19,9 +19,9 @@
 	<div class="col s12 m6 l3"><label for="enrollment-date-from">Desde</label><input id="enrollment-date-from" type="date" name="enrollment_date_from" value="{{ enrollment_date_from }}"></div>
 	<div class="col s12 m6 l3"><label for="enrollment-date-to">Hasta</label><input id="enrollment-date-to" type="date" name="enrollment_date_to" value="{{ enrollment_date_to }}"></div>
 	<h6 class="col s12 strong">Estado y deuda</h6>
-	<div class="col s12 m6 l3"><label for="f-debt">Deuda</label><select id="f-debt" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
+	<div class="col s12 m6 l3" data-primary><label for="f-debt">Deuda</label><select id="f-debt" name="debt_status" aria-label="Filtrar por deuda"><option value="" {% if not debt_filter_value %}selected{% endif %}>Todas las matrículas</option><option value="with_debt" {% if debt_filter_value == "with_debt" %}selected{% endif %}>Con deuda</option><option value="without_debt" {% if debt_filter_value == "without_debt" %}selected{% endif %}>Sin deuda</option></select></div>
 	<div class="col s12 m6 l3"><label for="f-active">Estado</label><select id="f-active" name="active_status" aria-label="Filtrar por estado"><option value="">Todos</option><option value="active" {% if request.GET.active_status == "active" %}selected{% endif %}>Activas</option><option value="inactive" {% if request.GET.active_status == "inactive" %}selected{% endif %}>Inactivas</option></select></div>
-	<div class="col s12"><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Limpiar</a></div>
+	<div class="col s12" data-actions><button class="btn" type="submit">Filtrar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Limpiar</a></div>
 </form>
 <p class="table-scroll-hint muted">Desliza la tabla horizontalmente para ver todas las columnas.</p>
 <div data-live-region="results">
@@ -79,6 +79,7 @@
 				{% endif %}
 			{% endif %}
 			{% if perms.students.change_enrollment or perms.students.add_enrollment and e.is_pending %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula">			<i class="material-icons" aria-hidden="true">edit</i>{% if not e.student_id %}Asignar Estudiante{% elif not e.course_id %}Asignar curso{% else %}Editar{% endif %}</a>{% endif %}
+						{% if e.active and e.course_id and perms.core.change_enrollment_course %}<a class="btn-small action-btn orange darken-2" href="{% url 'enrollment-transfer' e.pk %}" aria-label="Trasladar matrícula" title="Trasladar a otro curso"><i class="material-icons" aria-hidden="true">swap_horiz</i>Trasladar</a>{% endif %}
 						{% if e.active and perms.core.deactivate_enrollment %}<a class="btn-small action-btn red darken-1" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="material-icons" aria-hidden="true">person_remove</i>Dar de baja</a>{% endif %}
 		</div>
 	</td>

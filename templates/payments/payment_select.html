@@ -3,19 +3,19 @@
 <h1>Registrar pago</h1>
 <p class="muted">Paso 1 de 2: busca la matrícula con deuda pendiente y pulsa «Pagar» para registrar el recibo.</p>
 <style>.section-title{font-size:1.2rem;font-weight:600;margin:1.75rem 0 1rem;padding-bottom:.4rem;border-bottom:1px solid rgba(128,138,155,.35)}.sub-title{font-size:.95rem;font-weight:600;margin:1rem 0 .25rem;opacity:.85}</style>
-<form method="get" class="mb" data-live-filter>
+<form method="get" class="mb" data-live-filter data-filter-collapse>
   {% with g=request.GET %}
   <h2 class="section-title" style="margin-top:1rem">Alumno y curso</h2>
   <div class="row" style="margin-bottom:0">
-    <div class="col s12 m6 field"><label for="payment-search">Alumno o curso</label><input id="payment-search" type="search" name="q" value="{{ g.q|default:'' }}" placeholder="Nombre del alumno o curso" autocomplete="off"></div>
-    <div class="col s12 m6 field"><label for="f-dni">DNI del alumno</label><input id="f-dni" type="text" name="dni" value="{{ g.dni|default:'' }}" inputmode="numeric" autocomplete="off"></div>
-    <div class="col s12 m6 field"><label for="f-course">Curso</label><select id="f-course" name="course" class="browser-default"><option value="">Todos</option>{% for c in filter_courses %}<option value="{{ c.pk }}" {% if g.course == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}{% if c.schedule %} · {{ c.schedule }}{% endif %}</option>{% endfor %}</select></div>
+    <div class="col s12 m6 field" data-primary><label for="payment-search">Alumno o curso</label><input id="payment-search" type="search" name="q" value="{{ g.q|default:'' }}" placeholder="Nombre del alumno o curso" autocomplete="off"></div>
+    <div class="col s12 m6 field" data-primary><label for="f-dni">DNI del alumno</label><input id="f-dni" type="text" name="dni" value="{{ g.dni|default:'' }}" inputmode="numeric" autocomplete="off"></div>
+    <div class="col s12 m6 field" data-primary><label for="f-course">Curso</label><select id="f-course" name="course" class="browser-default"><option value="">Todos</option>{% for c in filter_courses %}<option value="{{ c.pk }}" {% if g.course == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}{% if c.schedule %} · {{ c.schedule }}{% endif %}</option>{% endfor %}</select></div>
     <div class="col s6 m3 field"><label for="f-schedule">Horario</label><input id="f-schedule" type="text" name="schedule" value="{{ g.schedule|default:'' }}" autocomplete="off"></div>
     <div class="col s6 m3 field"><label for="f-group">Grupo / aula</label><input id="f-group" type="text" name="group" value="{{ g.group|default:'' }}" autocomplete="off"></div>
   </div>
   <h2 class="section-title">Matrícula</h2>
   <div class="row" style="margin-bottom:0">
-    <div class="col s12 m4 field"><label for="f-promoter">Promotor</label><select id="f-promoter" name="promoter" class="browser-default"><option value="">Todos</option>{% for p in filter_promoters %}<option value="{{ p.pk }}" {% if g.promoter == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+    <div class="col s12 m4 field" data-primary><label for="f-promoter">Promotor</label><select id="f-promoter" name="promoter" class="browser-default"><option value="">Todos</option>{% for p in filter_promoters %}<option value="{{ p.pk }}" {% if g.promoter == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
     <div class="col s12 m4 field"><label for="f-ficha">Código de ficha</label><input id="f-ficha" type="number" min="1" name="ficha" value="{{ g.ficha|default:'' }}"></div>
     <div class="col s6 m2 field"><label for="f-date-from">Matrícula desde</label><input id="f-date-from" type="date" name="date_from" value="{{ g.date_from|default:'' }}"></div>
     <div class="col s6 m2 field"><label for="f-date-to">Matrícula hasta</label><input id="f-date-to" type="date" name="date_to" value="{{ g.date_to|default:'' }}"></div>
@@ -26,7 +26,7 @@
     <div class="col s6 m3 field"><label for="f-debt-max">Deuda máxima (S/)</label><input id="f-debt-max" type="number" min="0" step="0.01" name="debt_max" value="{{ g.debt_max|default:'' }}"></div>
   </div>
   {% if g.student %}<input type="hidden" name="student" value="{{ g.student }}">{% endif %}
-  <div class="flex gap items-center">
+  <div class="flex gap items-center" data-actions>
     <button class="btn" type="submit">Buscar</button>
     {% if has_filters %}<a class="btn-flat grey-text text-darken-2" href="{% url 'payment-create' %}">Limpiar</a>{% endif %}
     <a class="btn-flat grey-text text-darken-2" href="{% url 'payment-list' %}">Cancelar</a>

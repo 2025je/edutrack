@@ -62,6 +62,26 @@ class PaymentCrudTests(TestCase):
             amount=40,
         )
 
+    def test_dashboard_totals_match_installment_balances(self):
+        Installment.objects.create(
+            enrollment=self.enrollment, concept="Vencida", amount=50, due_date=date(2020, 1, 1)
+        )
+        Installment.objects.create(
+            enrollment=self.enrollment, concept="Futura", amount=30, due_date=date(2999, 1, 1)
+        )
+        self.user.is_superuser = True
+        self.user.save()
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        today = timezone.localdate()
+        installments = list(Installment.objects.filter(enrollment=self.enrollment))
+        self.assertEqual(response.context["pending_total"], sum(i.balance for i in installments))
+        self.assertEqual(
+            response.context["overdue_count"],
+            sum(1 for i in installments if i.balance > 0 and i.due_date < today),
+        )
+        self.assertEqual(response.context["overdue_count"], 2)
+
     def test_payment_can_be_updated_and_reallocated(self):
         response = self.client.get(reverse("payment-update", args=[self.payment.pk]))
         self.assertEqual(response.status_code, 200)

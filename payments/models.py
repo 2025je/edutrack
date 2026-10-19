@@ -76,6 +76,9 @@ class Payment(models.Model):
     status = models.CharField(
         "Estado", max_length=15, choices=Status.choices, default=Status.CONFIRMED
     )
+    voided_on_deactivation = models.BooleanField(
+        "Anulado al dar de baja", default=False, editable=False
+    )
     created_at = models.DateTimeField("Fecha y hora", auto_now_add=True)
 
     class Meta:

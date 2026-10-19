@@ -271,6 +271,158 @@ class ExtraReportsTests(TestCase):
         self.assertEqual(self.client.get(reverse("report-pending-course")).status_code, 200)
 
 
+class LifecycleTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Ciclo", active=True)
+        self.user = create_user(
+            username="lifecycle",
+            password="x-Test-pass-123",
+            manage_students=True,
+            register_payments=True,
+        )
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.course_a = Course.objects.create(
+            campus=self.campus,
+            name="Curso A",
+            schedule="Lunes",
+            start_date=date(2026, 10, 1),
+            enrollment_fee=40,
+            monthly_fee=60,
+        )
+        self.course_b = Course.objects.create(
+            campus=self.campus,
+            name="Curso B",
+            schedule="Martes",
+            start_date=date(2026, 11, 2),
+            enrollment_fee=30,
+            monthly_fee=70,
+        )
+        self.student = Student.objects.create(
+            campus=self.campus, full_name="Ana Pérez", document_number="1", phone="987654321"
+        )
+        self.enrollment = Enrollment.objects.create(
+            campus=self.campus,
+            student=self.student,
+            course=self.course_a,
+            enrollment_fee=40,
+            monthly_fee=60,
+        )
+        self.fee = Installment.objects.create(
+            enrollment=self.enrollment, concept="Matrícula", amount=40, due_date=date(2026, 10, 1)
+        )
+        self.monthly = Installment.objects.create(
+            enrollment=self.enrollment,
+            concept="Mensualidad inicial (2026-10)",
+            amount=60,
+            due_date=date(2026, 10, 1),
+        )
+        self.payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="R-1",
+            amount=40,
+        )
+        PaymentAllocation.objects.create(payment=self.payment, installment=self.fee, amount=40)
+
+    def transfer(self, course, use_fees):
+        data = {"course": course.pk}
+        if use_fees:
+            data["use_course_fees"] = "on"
+        return self.client.post(reverse("enrollment-transfer", args=[self.enrollment.pk]), data)
+
+    def test_transfer_is_blocked_when_new_fee_is_below_paid_amount(self):
+        response = self.transfer(self.course_b, use_fees=True)
+        self.assertEqual(response.status_code, 200)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.course, self.course_a)
+
+    def test_transfer_keeps_payments_and_recalculates_installments(self):
+        self.course_b.enrollment_fee = 50
+        self.course_b.save()
+        self.assertEqual(self.transfer(self.course_b, use_fees=True).status_code, 302)
+        self.enrollment.refresh_from_db()
+        self.fee.refresh_from_db()
+        self.monthly.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.enrollment.course, self.course_b)
+        self.assertEqual((self.enrollment.enrollment_fee, self.enrollment.monthly_fee), (50, 70))
+        self.assertEqual((self.fee.amount, self.monthly.amount), (50, 70))
+        self.assertEqual(self.fee.due_date, date(2026, 11, 2))
+        self.assertEqual(self.monthly.concept, "Mensualidad inicial (2026-11)")
+        self.assertEqual(self.payment.status, Payment.Status.CONFIRMED)
+        self.assertEqual(self.fee.balance, 10)
+
+    def test_transfer_can_keep_current_fees(self):
+        self.assertEqual(self.transfer(self.course_b, use_fees=False).status_code, 302)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.course, self.course_b)
+        self.assertEqual((self.enrollment.enrollment_fee, self.enrollment.monthly_fee), (40, 60))
+
+    def test_transfer_requires_permission_and_hides_taken_courses(self):
+        Enrollment.objects.create(campus=self.campus, student=self.student, course=self.course_b)
+        form = self.client.get(reverse("enrollment-transfer", args=[self.enrollment.pk])).context[
+            "form"
+        ]
+        self.assertNotIn(self.course_b, form.fields["course"].queryset)
+        self.assertNotIn(self.course_a, form.fields["course"].queryset)
+
+        clerk = create_user(username="clerk", password="x-Test-pass-123")
+        clerk.campuses.add(self.campus)
+        self.client.force_login(clerk)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        response = self.client.get(reverse("enrollment-transfer", args=[self.enrollment.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_student_trash_restore_brings_back_enrollments_installments_and_receipts(self):
+        self.client.post(reverse("student-delete", args=[self.student.pk]))
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.VOID)
+        self.assertContains(self.client.get(reverse("trash")), "ANA PÉREZ")
+
+        self.client.post(reverse("student-restore", args=[self.student.pk]))
+        self.student.refresh_from_db()
+        self.enrollment.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.assertTrue(self.student.active)
+        self.assertTrue(self.enrollment.active)
+        self.assertEqual(self.payment.status, Payment.Status.CONFIRMED)
+        self.assertEqual(
+            Installment.objects.filter(enrollment=self.enrollment, active=True).count(), 2
+        )
+        self.assertEqual(list(self.client.get(reverse("trash")).context["students"]), [])
+
+    def test_enrollment_restore_keeps_manually_voided_receipts_void(self):
+        manual = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="R-2",
+            amount=10,
+            status=Payment.Status.VOID,
+        )
+        self.client.post(reverse("enrollment-delete", args=[self.enrollment.pk]))
+        self.client.post(reverse("enrollment-restore", args=[self.enrollment.pk]))
+        self.enrollment.refresh_from_db()
+        self.payment.refresh_from_db()
+        manual.refresh_from_db()
+        self.assertTrue(self.enrollment.active)
+        self.assertEqual(self.payment.status, Payment.Status.CONFIRMED)
+        self.assertEqual(manual.status, Payment.Status.VOID)
+
+    def test_enrollment_restore_requires_active_student(self):
+        self.client.post(reverse("student-delete", args=[self.student.pk]))
+        self.client.post(reverse("enrollment-restore", args=[self.enrollment.pk]))
+        self.enrollment.refresh_from_db()
+        self.assertFalse(self.enrollment.active)
+
+
 class StudentEnrollmentCrudTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede CRUD", active=True)
