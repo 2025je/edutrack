@@ -4,7 +4,7 @@ from django.dispatch import receiver
 from .models import ActivityLog
 
 SKIPPED_PREFIXES = ("/admin/jsi18n", "/__debug__/", "/static/", "/media/")
-SKIPPED_URL_NAMES = {"login", "logout"}
+SKIPPED_URL_NAMES = {"login", "logout", "student-duplicates"}  # esta última se registra a mano
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 # (nombre de la ruta) -> (acción, descripción)
@@ -45,15 +45,42 @@ URL_ACTIONS["pending-debts-excel"] = (
     ActivityLog.Action.EXPORT,
     "Exportó deudas pendientes a Excel",
 )
-GET_ACTIONS["enrollment-statement"] = (ActivityLog.Action.OTHER, "Consult? un estado de cuenta")
+GET_ACTIONS["enrollment-statement"] = (ActivityLog.Action.OTHER, "Consultó un estado de cuenta")
 LOGGED_GET_URL_NAMES |= {"payment-excel", "pending-debts-excel", "enrollment-statement"}
+URL_ACTIONS["cash-closing-excel"] = (ActivityLog.Action.EXPORT, "Exportó un cierre de caja")
+GET_ACTIONS["cash-closing"] = (ActivityLog.Action.OTHER, "Consultó un cierre de caja")
+LOGGED_GET_URL_NAMES |= {"cash-closing", "cash-closing-excel"}
 
 
 def client_ip(request):
     return request.META.get("REMOTE_ADDR") or None
 
 
-def record(request, action, description, user=None, username=""):
+def target_object(url_name, kwargs):
+    """Registro (estudiante o matrícula) al que se refiere la acción, para su historial."""
+    if kwargs.get("student_id"):
+        return "student", kwargs["student_id"]
+    if kwargs.get("enrollment_id"):
+        return "enrollment", kwargs["enrollment_id"]
+    pk = kwargs.get("pk")
+    if not pk:
+        return "", None
+    if url_name.startswith("student-"):
+        return "student", pk
+    if url_name.startswith("enrollment-"):
+        return "enrollment", pk
+    if url_name.startswith("payment-"):
+        from payments.models import Payment
+
+        enrollment_id = (
+            Payment.objects.filter(pk=pk).values_list("enrollment_id", flat=True).first()
+        )
+        if enrollment_id:
+            return "enrollment", enrollment_id
+    return "", None
+
+
+def record(request, action, description, user=None, username="", object_type="", object_id=None):
     if not request.method:  # login programático (p. ej. force_login) sin petición real
         return
     user = user or getattr(request, "user", None)
@@ -74,6 +101,8 @@ def record(request, action, description, user=None, username=""):
         method=request.method[:10],
         path=request.get_full_path()[:500],
         ip_address=client_ip(request),
+        object_type=object_type,
+        object_id=object_id,
     )
 
 
@@ -127,7 +156,8 @@ class ActivityLogMiddleware:
         )
         if pk:
             label = f"{label} (ID {pk})"
-        record(request, action, label)
+        object_type, object_id = target_object(url_name, match.kwargs)
+        record(request, action, label, object_type=object_type, object_id=object_id)
 
 
 @receiver(user_logged_in)

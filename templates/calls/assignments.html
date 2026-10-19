@@ -3,7 +3,7 @@
 {% block content %}
 <div class="mb"><h1 class="mb-0">Asignar llamadas</h1><div class="muted">Elige qué matrículas verá cada usuario en «Alumnos y deudas». Quienes asignan llamadas ven todas.</div></div>
 <div class="card card-pad">
-  <div class="row mb-0"><div class="col s12 m6"><label for="usuario">Usuario que realizar? las llamadas</label>
+  <div class="row mb-0"><div class="col s12 m6"><label for="usuario">Usuario que realizará las llamadas</label>
     <select id="usuario" name="usuario" form="assign-filters" class="browser-default">
       <option value="">Selecciona un usuario</option>
       {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
@@ -11,6 +11,23 @@
     {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
   </div></div>
 </div>
+<details class="card card-pad mt no-print"><summary class="strong">Acciones masivas</summary>
+  <div class="row mb-0 mt">
+    <form method="post" class="col s12 m6">
+      {% csrf_token %}<input type="hidden" name="accion" value="reasignar"><input type="hidden" name="usuario" value="{{ target.pk|default:'' }}">
+      <h6 class="strong">Pasar todas las asignaciones de un usuario al seleccionado</h6>
+      <label for="origen">Usuario de origen</label>
+      <select id="origen" name="origen" class="browser-default"><option value="">Elige el usuario de origen</option>{% for u, load in source_users %}<option value="{{ u.pk }}">{{ u.username }} ({{ load }})</option>{% endfor %}</select>
+      <button class="btn mt" type="submit" {% if not target %}disabled title="Selecciona primero el usuario de destino"{% endif %}>Pasar al usuario seleccionado</button>
+    </form>
+    <form method="post" class="col s12 m6">
+      {% csrf_token %}<input type="hidden" name="accion" value="repartir"><input type="hidden" name="usuario" value="{{ target.pk|default:'' }}">
+      <h6 class="strong">Repartir las {{ unassigned_count }} matrículas sin asignar en partes iguales</h6>
+      {% for u in users %}<div><label><input type="checkbox" name="reparto" value="{{ u.pk }}"><span>{{ u.username }}</span></label></div>{% endfor %}
+      <button class="btn mt" type="submit" {% if not unassigned_count %}disabled{% endif %}>Repartir</button>
+    </form>
+  </div>
+</details>
 <div data-live-region="assigned">
 {% if target %}
 <details class="card card-pad mt"><summary class="strong">Llamadas ya asignadas a {{ target.username }} ({{ assigned_list|length }})</summary>
@@ -18,7 +35,7 @@
   <div class="table-wrap mt" style="max-height:320px;overflow:auto"><table class="highlight"><thead><tr><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th></tr></thead><tbody>
   {% for a in assigned_list %}<tr><td>{{ a.enrollment.student_label }}</td><td>{{ a.enrollment.course_label }}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.schedule }}{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.group }}{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>
-  {% else %}<p class="muted mt mb-0">Este usuario a?n no tiene llamadas asignadas.</p>{% endif %}
+  {% else %}<p class="muted mt mb-0">Este usuario aún no tiene llamadas asignadas.</p>{% endif %}
 </details>
 {% endif %}
 </div>

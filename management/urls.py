@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     ActivityLogView,
+    RecordHistoryView,
     CampusCreateView,
     CampusFlyerCreateView,
     CampusFlyerDeleteView,
@@ -27,6 +28,7 @@ urlpatterns = [
         name="campus-flyer-delete",
     ),
     path("actividad/", ActivityLogView.as_view(), name="activity-log"),
+    path("historial/<str:kind>/<int:pk>/", RecordHistoryView.as_view(), name="record-history"),
     path("usuarios/", UserListView.as_view(), name="user-list"),
     path("usuarios/nuevo/", UserCreateView.as_view(), name="user-create"),
     path("usuarios/<int:pk>/editar/", UserUpdateView.as_view(), name="user-update"),

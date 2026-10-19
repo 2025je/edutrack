@@ -1968,3 +1968,55 @@ class CourseUniquenessTests(TestCase):
             set(Schedule.objects.filter(campus=self.campus).values_list("name", flat=True)),
             {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM"},
         )
+
+
+class StudentMergeTests(TestCase):
+    def setUp(self):
+        from calls.models import CallNote
+
+        self.CallNote = CallNote
+        self.campus = Campus.objects.create(name="Sede Fusión", active=True)
+        self.user = create_user(username="merger", password="x" * 12, manage_students=True)
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.keep = Student.objects.create(campus=self.campus, full_name="Juan Pérez", phone="999")
+        self.dup = Student.objects.create(campus=self.campus, full_name="Perez Juan", phone="111")
+        Student.objects.create(campus=self.campus, full_name="Otra Persona", phone="222")
+        self.course = Course.objects.create(campus=self.campus, name="Curso M")
+        self.enrollment = Enrollment.objects.create(
+            campus=self.campus, student=self.dup, course=self.course
+        )
+        self.note = CallNote.objects.create(
+            campus=self.campus, student=self.dup, author=self.user, note="hola"
+        )
+
+    def merge(self, keep, duplicate):
+        return self.client.post(
+            reverse("student-duplicates"), {"keep": keep.pk, "duplicate": duplicate.pk}
+        )
+
+    def test_duplicates_are_grouped_ignoring_accents_and_word_order(self):
+        groups = self.client.get(reverse("student-duplicates")).context["groups"]
+        self.assertEqual([{s.pk for s in g} for g in groups], [{self.keep.pk, self.dup.pk}])
+
+    def test_merge_moves_enrollments_and_calls_and_deactivates_duplicate(self):
+        self.merge(self.keep, self.dup)
+        self.enrollment.refresh_from_db()
+        self.note.refresh_from_db()
+        self.dup.refresh_from_db()
+        self.assertEqual(self.enrollment.student, self.keep)
+        self.assertEqual(self.note.student, self.keep)
+        self.assertFalse(self.dup.active)
+        self.assertEqual(self.client.get(reverse("student-duplicates")).context["groups"], [])
+
+    def test_merge_rejects_different_people_and_requires_permission(self):
+        other = Student.objects.get(full_name="OTRA PERSONA")
+        self.merge(self.keep, other)
+        other.refresh_from_db()
+        self.assertTrue(other.active)
+        self.user.groups.clear()
+        self.user._perm_cache = None
+        self.assertEqual(self.client.get(reverse("student-duplicates")).status_code, 403)

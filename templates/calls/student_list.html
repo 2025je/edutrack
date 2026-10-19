@@ -9,13 +9,22 @@
   {% if perms.calls.add_callnote %}<a class="btn-flat blue-text no-print" href="{% url 'calls-template' %}">Plantilla de WhatsApp</a>{% endif %}
 </div>
 <form method="get" class="card card-pad no-print call-filters" data-live-filter>
-  <input type="search" name="q" value="{{ search_query }}" placeholder="Buscar alumno o tel?fono" autocomplete="off">
+  <input type="search" name="q" value="{{ search_query }}" placeholder="Buscar alumno o teléfono" autocomplete="off">
+  <select name="orden" class="browser-default" aria-label="Ordenar por">{% for key, label in orders %}<option value="{{ key }}" {% if order == key %}selected{% endif %}>Orden: {{ label }}</option>{% endfor %}</select>
+  <select name="contacto" class="browser-default" aria-label="Contacto">{% for key, label in contacts %}<option value="{{ key }}" {% if contact == key %}selected{% endif %}>{% if key %}{{ label }}{% else %}Contacto: todos{% endif %}</option>{% endfor %}</select>
+  <label class="call-filters-debt"><input type="checkbox" name="promesa" value="vencida" {% if promise_filter %}checked{% endif %}><span>Promesas incumplidas</span></label>
   <label class="call-filters-debt"><input type="checkbox" name="deuda" value="1" {% if only_debt %}checked{% endif %}><span>Solo con deuda</span></label>
   <button class="btn">Buscar</button>
   <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Limpiar</a>
 </form>
 <style>
 .call-filters{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.call-filters select{width:auto;min-width:190px;margin:0}
+.quick-call{margin-top:6px}
+.quick-call summary{cursor:pointer;color:#42a5f5;font-size:12px}
+.quick-call form{display:flex;flex-direction:column;gap:6px;margin-top:6px;min-width:200px}
+.quick-call form>*{margin:0!important}
+.call-meta{font-size:12px;margin-top:4px}
 .call-filters input[type=search]{flex:1 1 280px;margin:0!important}
 .call-filters .btn,.call-filters .btn-flat{margin:0;height:36px;line-height:36px}
 .call-filters-debt{display:inline-flex;align-items:center;white-space:nowrap}
@@ -36,8 +45,8 @@
     <td class="course-cell">{{ item.course_label }}{% if item.course and item.course.start_date %}<div class="small muted">Inicio: {{ item.course.start_date|date:"d/m/Y" }}</div>{% endif %}{% if forloop.first and row.courses|length > 1 %} <button type="button" class="course-toggle no-print" data-toggle-courses="{{ row.student.pk }}" aria-expanded="false"><span data-more>+{{ row.courses|length|add:"-1" }} más</span><span data-less style="display:none">Ocultar</span></button>{% endif %}</td>
     <td class="right-align">S/ {{ item.enrollment_fee|default:0|floatformat:2 }}</td><td class="right-align">S/ {{ item.monthly_fee|default:0|floatformat:2 }}</td><td class="right-align strong">S/ {{ item.total|floatformat:2 }}</td>
     <td>{% for p in item.receipts %}<div style="display:flex;align-items:center;gap:8px;margin:3px 0;white-space:nowrap">{% if perms.payments.view_payment %}<a class="btn-small" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;line-height:1;padding:0" href="{% url 'payment-receipt' p.pk %}" title="Recibo {{ p.receipt_number }}">{{ forloop.counter }}</a>{% else %}<span class="chip" title="Recibo {{ p.receipt_number }}">{{ forloop.counter }}</span>{% endif %}<span class="small">S/ {{ p.amount|floatformat:2 }}</span></div>{% empty %}<span class="muted">—</span>{% endfor %}</td>
-    <td class="right-align{% if item.debt > 0 %} danger strong{% endif %}">S/ {{ item.debt|floatformat:2 }}</td>
-    {% if forloop.first %}<td class="right-align{% if row.total_debt > 0 %} danger strong{% endif %}" rowspan="1" data-span="{{ row.courses|length }}">S/ {{ row.total_debt|floatformat:2 }}</td><td class="no-print" rowspan="1" data-span="{{ row.courses|length }}" style="white-space:nowrap"><a class="btn-small btn-flat blue-text" href="{% url 'calls-notes' row.student.pk %}" title="Ver historial"><i class="material-icons left" style="margin-right:4px">visibility</i>Ver{% if row.notes_count %} ({{ row.notes_count }}){% endif %}</a>{% if perms.calls.add_callnote %}<br><a class="btn-small btn-flat blue-text" href="{% url 'calls-note-create' row.student.pk %}" title="Registrar llamada"><i class="material-icons left" style="margin-right:4px">add_comment</i>Añadir</a>{% endif %}</td>{% endif %}
+    <td class="right-align{% if item.debt > 0 %} danger strong{% endif %}">S/ {{ item.debt|floatformat:2 }}{% if item.debt > 0 and perms.payments.add_payment %}<div class="no-print"><a class="btn-small" href="{% url 'payment-create-for' item.enrollment_id %}" title="Registrar un pago de este curso">Cobrar</a></div>{% endif %}</td>
+    {% if forloop.first %}<td class="right-align{% if row.total_debt > 0 %} danger strong{% endif %}" rowspan="1" data-span="{{ row.courses|length }}">S/ {{ row.total_debt|floatformat:2 }}{% if row.overdue_days %}<div class="small muted">{{ row.overdue_days }} d vencida</div>{% endif %}</td><td class="no-print" rowspan="1" data-span="{{ row.courses|length }}" style="white-space:nowrap"><a class="btn-small btn-flat blue-text" href="{% url 'calls-notes' row.student.pk %}" title="Ver historial"><i class="material-icons left" style="margin-right:4px">visibility</i>Ver{% if row.notes_count %} ({{ row.notes_count }}){% endif %}</a>{% if perms.calls.add_callnote %}<br><a class="btn-small btn-flat blue-text" href="{% url 'calls-note-create' row.student.pk %}" title="Registrar llamada"><i class="material-icons left" style="margin-right:4px">add_comment</i>Añadir</a>{% endif %}<div class="call-meta">{% if row.last_call %}Última: {{ row.last_call|date:"d/m/Y" }} (hace {{ row.days_since_call }} d){% else %}Sin llamadas{% endif %}</div>{% if row.promise %}<div class="call-meta{% if row.promise_broken %} danger strong{% endif %}">Promesa: {{ row.promise.promise_date|date:"d/m/Y" }}{% if row.promise_broken %} · incumplida{% endif %}</div>{% endif %}{% if perms.calls.add_callnote %}<details class="quick-call no-print"><summary>Registro rápido</summary><form method="post" action="{% url 'calls-quick-note' row.student.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><select name="response" class="browser-default" aria-label="Resultado" onchange="this.form.promise_date.style.display=this.value==='PROMETIO_PAGO'?'':'none'">{% for key, label in response_choices %}<option value="{{ key }}" {% if key == 'NO_CONTESTO' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><input type="date" name="promise_date" style="display:none" aria-label="Fecha prometida"><input type="text" name="note" maxlength="1000" placeholder="Detalle (opcional)"><button class="btn-small" type="submit">Guardar</button></form></details>{% endif %}</td>{% endif %}
   </tr>
   {% endfor %}
 {% empty %}<tr><td colspan="10" class="center-align muted">No hay alumnos con estos criterios.</td></tr>{% endfor %}

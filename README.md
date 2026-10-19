@@ -26,11 +26,14 @@ Sistema web en español para administrar estudiantes, matrículas, cursos, promo
 
 - Cuotas, saldos pendientes y pagos. Los recibos se conservan: al anular un pago, el recibo queda registrado como anulado.
 - Los recibos son comprobantes internos; no son comprobantes electrónicos autorizados por SUNAT.
+- Cierre de caja diario (`/pagos/cierre-de-caja/`) por cajero, imprimible y exportable a Excel.
 
 **Llamadas**
 
-- Asignación de llamadas a gestores, registro de resultados y notas.
-- Reporte de llamadas por usuario, con desglose por respuesta y filtro de fechas. Con `view_all_calls` se ve todo el campus; sin él, solo las propias.
+- Asignación de llamadas a gestores, registro de resultados y notas, con registro rápido desde la lista y botón «Cobrar» por curso con deuda.
+- Promesas de pago con fecha («Prometió pago»), con filtro de promesas incumplidas; orden por deuda, días vencidos o último contacto, y filtro de «sin contacto en N días».
+- Acciones masivas: reasignar todas las llamadas de un usuario a otro y repartir las matrículas sin asignar en partes iguales.
+- Reporte de llamadas por usuario, con avance de asignadas, desglose por respuesta y filtro de fechas. Con `view_all_calls` se ve todo el campus; sin él, solo las propias.
 
 **Reportes**
 
@@ -41,7 +44,8 @@ Sistema web en español para administrar estudiantes, matrículas, cursos, promo
 
 - Administración de sedes, usuarios, cursos y promotores desde la aplicación y desde Django Admin.
 - Logo opcional por sede, visible según la sede seleccionada.
-- Búsqueda global por nombre, DNI, código de ficha o recibo.
+- Búsqueda global por nombre, DNI, código de ficha o recibo (atajo `/` o `Ctrl+K`).
+- Historial de acciones por estudiante y por matrícula (botón «Historial») y fusión de estudiantes duplicados (`/estudiantes/duplicados/`).
 
 **Interfaz**
 
@@ -201,18 +205,22 @@ docker compose run --rm web python manage.py makemigrations --check --dry-run
 
 Revisiones locales: `uv run ruff check .` y `uv run pyright`. Los hooks de pre-commit ejecutan Ruff (lint y formato) sobre los archivos preparados para el commit.
 
+Para ejecutar toda la suite en el contenedor en marcha (PostgreSQL, con `UNACCENT`): `.\scripts\test-postgres.ps1` (acepta etiquetas, p. ej. `calls`). Con SQLite fallan algunas pruebas de búsqueda por esa función.
+
+**Pruebas E2E (Playwright)**: con el sistema levantado, `pip install -r requirements-e2e.txt`, `playwright install chromium` y luego `E2E_USER=... E2E_PASSWORD=... pytest e2e` (opcional `E2E_URL`, por defecto `http://localhost:8080`). Usa un usuario de prueba con acceso a llamadas; sin credenciales solo se ejecuta la comprobación de `/salud/`.
+
 Las dependencias están en `pyproject.toml` y bloqueadas en `uv.lock`; usa `uv add paquete`, `uv remove paquete` o `uv add --dev paquete` para actualizarlas. GitHub Actions instala con uv y ejecuta Ruff, las comprobaciones y las pruebas en cada push y pull request, con PostgreSQL 15, Redis y Python 3.12 y 3.13.
 
-### Seguridad y operaci?n
+### Seguridad y operación
 
-- `DJANGO_SECRET_KEY` es obligatoria cuando `DJANGO_DEBUG=False`; con la clave de ejemplo la app no arranca. Gen?rala con `python -c "import secrets;print(secrets.token_urlsafe(50))"`.
-- Los archivos de `/media/` (comprobantes y fichas) requieren sesi?n y pertenecer a la sede; nginx los entrega tras la autorizaci?n de Django.
+- `DJANGO_SECRET_KEY` es obligatoria cuando `DJANGO_DEBUG=False`; con la clave de ejemplo la app no arranca. Genérala con `python -c "import secrets;print(secrets.token_urlsafe(50))"`.
+- Los archivos de `/media/` (comprobantes y fichas) requieren sesión y pertenecer a la sede; nginx los entrega tras la autorización de Django.
 - Tras `LOGIN_MAX_ATTEMPTS` intentos fallidos, el par IP + usuario se bloquea `LOGIN_LOCKOUT_SECONDS` segundos.
 - Con HTTPS delante de nginx, define `DJANGO_HTTPS=True` (y opcionalmente `DJANGO_HSTS_SECONDS`).
 - `/salud/` devuelve el estado de la app y la base de datos; `web` y `nginx` tienen healthcheck y `web` ejecuta `migrate` al iniciar.
 - Respaldos externos: define `BACKUP_OFFSITE_PATH` (carpeta del host) o `BACKUP_RCLONE_REMOTE` con las variables `RCLONE_CONFIG_*`.
-- Las alertas de Grafana (errores 5xx, fallos de respaldo, restauraci?n sin verificar) se cargan solas; falta configurar un *contact point* en Grafana > Alerting.
-- El CI ya prueba contra PostgreSQL 15. En local con SQLite fallan algunas pruebas por la funci?n `UNACCENT`; no son regresiones.
+- Las alertas de Grafana (errores 5xx, fallos de respaldo, restauración sin verificar) se cargan solas; falta configurar un *contact point* en Grafana > Alerting.
+- El CI ya prueba contra PostgreSQL 15. En local con SQLite fallan algunas pruebas por la función `UNACCENT`; no son regresiones.
 - En desarrollo sin Docker usa `DJANGO_DEBUG=True` o define `DJANGO_SECRET_KEY`.
 
 ## Respaldos y producción

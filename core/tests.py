@@ -418,3 +418,58 @@ class DashboardCacheTests(TestCase):
         before = current_version()
         Student.objects.create(campus=campus, full_name="Alumno cache")
         self.assertGreater(current_version(), before)
+
+
+class RecordHistoryTests(TestCase):
+    def setUp(self):
+        from payments.models import Payment
+        from students.models import Course, Enrollment, Student
+
+        self.campus = Campus.objects.create(name="Sede Historial", active=True)
+        self.user = create_user(
+            username="hist", password="x" * 12, manage_students=True, register_payments=True
+        )
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.student = Student.objects.create(campus=self.campus, full_name="Ana Historia")
+        course = Course.objects.create(campus=self.campus, name="Curso H")
+        self.enrollment = Enrollment.objects.create(
+            campus=self.campus, student=self.student, course=course
+        )
+        self.payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=self.user,
+            receipt_number="H1",
+            amount=10,
+        )
+
+    def test_actions_are_linked_to_their_student_and_enrollment(self):
+        self.client.get(reverse("payment-receipt", args=[self.payment.pk]))
+        log = ActivityLog.objects.filter(description__startswith="Consultó un recibo").first()
+        self.assertEqual((log.object_type, log.object_id), ("enrollment", self.enrollment.pk))
+        page = self.client.get(reverse("record-history", args=["matricula", self.enrollment.pk]))
+        self.assertContains(page, "Consultó un recibo")
+
+    def test_history_is_scoped_to_the_selected_campus_and_permissions(self):
+        ActivityLog.objects.create(
+            username="x",
+            action="update",
+            description="Cambio visible",
+            object_type="student",
+            object_id=self.student.pk,
+        )
+        url = reverse("record-history", args=["estudiante", self.student.pk])
+        self.assertContains(self.client.get(url), "Cambio visible")
+        other = Campus.objects.create(name="Otra sede", active=True)
+        self.user.campuses.add(other)
+        session = self.client.session
+        session["selected_campus_id"] = other.pk
+        session.save()
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(
+            self.client.get(reverse("record-history", args=["otro", 1])).status_code, 404
+        )

@@ -583,3 +583,6 @@
       .has-side main,main{padding-left:0!important}
     }
 .saved-filters .btn-small,.saved-filters .btn-flat{margin:0;height:36px;line-height:36px;padding:0 14px}
+
+/* Cabeceras fijas con scroll interno en tablas largas */
+@media screen{main .table-wrap{max-height:calc(100vh - 170px);overflow:auto}main .table-wrap table thead th{position:sticky;top:0;z-index:2;box-shadow:0 1px 0 var(--md-border,#dde1e7)}}

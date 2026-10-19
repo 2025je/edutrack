@@ -142,9 +142,12 @@ class ActivityLog(models.Model):
     method = models.CharField("Método", max_length=10, blank=True)
     path = models.CharField("Ruta", max_length=500, blank=True)
     ip_address = models.GenericIPAddressField("IP", null=True, blank=True)
+    object_type = models.CharField("Tipo de objeto", max_length=20, blank=True)
+    object_id = models.PositiveIntegerField("ID del objeto", null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["object_type", "object_id"])]
         verbose_name = "registro de actividad"
         verbose_name_plural = "registro de actividades"
 

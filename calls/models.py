@@ -177,6 +177,8 @@ class CallNote(models.Model):
     class Response(models.TextChoices):
         WILL_ATTEND = "ASISTIRA", "Asistirá"
         WONT_ATTEND = "NO_ASISTIRA", "No asistirá"
+        NO_ANSWER = "NO_CONTESTO", "No contestó"
+        PROMISED_PAYMENT = "PROMETIO_PAGO", "Prometió pago"
         OTHER = "OTROS", "Otros"
 
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
@@ -193,6 +195,7 @@ class CallNote(models.Model):
         "Tipo de respuesta", max_length=15, choices=Response.choices, default=Response.OTHER
     )
     note = models.TextField("Detalle", max_length=1000)
+    promise_date = models.DateField("Fecha prometida de pago", null=True, blank=True)
     created_at = models.DateTimeField("Fecha y hora", auto_now_add=True)
 
     class Meta:

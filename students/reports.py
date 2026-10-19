@@ -22,7 +22,7 @@ def money(value):
 
 
 def as_number(value):
-    """Convierte textos num?ricos de un informe en n?meros para que Excel los sume."""
+    """Convierte textos numéricos de un informe en números para que Excel los sume."""
     if isinstance(value, str):
         try:
             return int(value) if value.isdigit() else Decimal(value)

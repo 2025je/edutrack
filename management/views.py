@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
 from django.db.models import Count, Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.dateparse import parse_date
 from django.urls import reverse, reverse_lazy
@@ -11,7 +12,7 @@ from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
 from core.models import ActivityLog, Campus, CampusFlyer, User
 from core.pagination import paginate_context
-from students.models import Course, Promoter, Schedule
+from students.models import Course, Enrollment, Promoter, Schedule, Student
 
 from .forms import (
     CampusFlyerForm,
@@ -334,4 +335,39 @@ class ActivityLogView(LoginRequiredMixin, UserPassesTestMixin, ListView):
         params = get.copy()
         params.pop("page", None)
         context["pagination_query"] = params.urlencode()
+        return context
+
+
+class RecordHistoryView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
+    """Historial de acciones sobre un estudiante o una matrícula de la sede seleccionada."""
+
+    template_name = "management/record_history.html"
+    kinds = {"estudiante": "student", "matricula": "enrollment"}
+
+    def get_required_permissions(self, request):
+        kind = self.kinds.get(self.kwargs["kind"])
+        return (f"students.view_{kind}",) if kind else ()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        kind = self.kinds.get(self.kwargs["kind"])
+        if kind is None:
+            raise Http404
+        campus = get_selected_campus(self.request)
+        if kind == "student":
+            record = get_object_or_404(Student, pk=self.kwargs["pk"], campus=campus)
+            title = record.full_name
+            back = reverse("student-list")
+        else:
+            record = get_object_or_404(
+                Enrollment.objects.select_related("student", "course"),
+                pk=self.kwargs["pk"],
+                campus=campus,
+            )
+            title = f"{record.student_label} · {record.course_label}"
+            back = reverse("enrollment-list")
+        logs = ActivityLog.objects.filter(object_type=kind, object_id=record.pk).select_related(
+            "user"
+        )
+        context.update(title=title, kind=kind, logs=logs[:200], back_url=back)
         return context

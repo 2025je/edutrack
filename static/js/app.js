@@ -439,3 +439,15 @@ document.addEventListener("click", function (event) {
 window.addEventListener("beforeprint", function () {
   document.querySelectorAll("[data-toggle-courses]").forEach(function (b) { setCourseRows(b, true); });
 });
+
+document.addEventListener("keydown", function (e) {
+  var isShortcut = e.key === "/" || (e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey));
+  if (!isShortcut || e.altKey) return;
+  var t = e.target, tag = t && t.tagName;
+  if (e.key === "/" && (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable))) return;
+  var box = document.querySelector(".header-search input[name=q]");
+  if (!box || box.offsetParent === null) return;
+  e.preventDefault();
+  box.focus();
+  box.select();
+});

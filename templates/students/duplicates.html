@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Estudiantes duplicados · EduTrack{% endblock %}
+{% block content %}
+<div class="card-head"><h5 style="margin:0">Estudiantes duplicados</h5></div>
+<p class="muted">Se agrupan los estudiantes activos con el mismo nombre (sin tildes y sin importar el orden de las palabras). Al fusionar, las matrículas y llamadas del duplicado pasan al estudiante principal y el duplicado se da de baja.</p>
+{% for group in groups %}
+<div class="card table-wrap" style="margin-bottom:16px">
+  <table>
+    <thead><tr><th>Nombre</th><th>Teléfonos</th><th>DNI</th><th>Matrículas</th><th>Registrado</th><th></th></tr></thead>
+    <tbody>
+    {% for s in group %}<tr>
+      <td>{{ s.full_name }}</td><td>{{ s.phone|default:"—" }}</td><td>{{ s.document_number|default:"—" }}</td><td>{{ s.enrollment_set.count }}</td><td>{{ s.created_at|date:"d/m/Y" }}</td>
+      <td class="right-align">{% if not forloop.first %}
+        <form method="post" onsubmit="return confirm('¿Fusionar este estudiante en {{ group.0.full_name|escapejs }}?')">{% csrf_token %}
+          <input type="hidden" name="keep" value="{{ group.0.pk }}"><input type="hidden" name="duplicate" value="{{ s.pk }}">
+          <button class="btn-small" type="submit"><i class="material-icons left">merge_type</i>Fusionar con el primero</button>
+        </form>{% else %}<span class="chip green darken-1">Principal</span>{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% empty %}
+<p class="grey-text">No se encontraron estudiantes duplicados.</p>
+{% endfor %}
+{% endblock %}

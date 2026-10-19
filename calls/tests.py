@@ -329,3 +329,124 @@ class CallAssignmentTests(TestCase):
         self.assertEqual(ids(estado="asignadas"), {self.enrollments[0].pk})
         self.assertNotIn(self.enrollments[0].pk, ids(estado="sin_asignar"))
         self.assertEqual(ids(estado="otros"), set())
+
+
+class CallWorkflowTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Flujo", active=True)
+        self.course = Course.objects.create(
+            campus=self.campus, name="Ingles", schedule="L", group="A"
+        )
+        self.boss = self._user("jefe", manage_calls=True, assign_calls=True, register_payments=True)
+        grant(self.boss, "core.view_call_reports")
+        self.ana = self._enroll("Ana", due=date(2000, 1, 1))
+        self.beto = self._enroll("Beto", due=date(2999, 1, 1))
+        self.caller = self._user("llamador", manage_calls=True)
+        self.client.force_login(self.boss)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def _user(self, username, **flags):
+        user = create_user(username=username, password="x" * 12, **flags)
+        user.campuses.add(self.campus)
+        return user
+
+    def _enroll(self, name, due):
+        student = Student.objects.create(campus=self.campus, full_name=name, phone="987654321")
+        enrollment = Enrollment.objects.create(
+            campus=self.campus, student=student, course=self.course
+        )
+        Installment.objects.create(
+            enrollment=enrollment, concept="Cuota", amount=Decimal("50"), due_date=due
+        )
+        return enrollment
+
+    def rows(self, **params):
+        response = self.client.get(reverse("calls-students"), params)
+        return [r["student"].full_name for r in response.context["rows"]]
+
+    def quick(self, student, **data):
+        return self.client.post(
+            reverse("calls-quick-note", args=[student.pk]),
+            {"next": reverse("calls-students"), **data},
+        )
+
+    def test_quick_note_defaults_detail_to_the_result(self):
+        self.quick(self.ana.student, response="NO_CONTESTO", note="")
+        note = CallNote.objects.get()
+        self.assertEqual(
+            (note.note, note.author, note.campus), ("No contestó", self.boss, self.campus)
+        )
+
+    def test_promise_requires_a_date(self):
+        self.quick(self.ana.student, response="PROMETIO_PAGO")
+        self.assertEqual(CallNote.objects.count(), 0)
+        self.quick(self.ana.student, response="PROMETIO_PAGO", promise_date="2000-02-01")
+        self.assertEqual(CallNote.objects.get().promise_date, date(2000, 2, 1))
+
+    def test_broken_promises_are_flagged_and_filterable(self):
+        self.quick(self.ana.student, response="PROMETIO_PAGO", promise_date="2000-02-01")
+        self.quick(self.beto.student, response="PROMETIO_PAGO", promise_date="2999-02-01")
+        self.assertEqual(self.rows(promesa="vencida"), ["ANA"])
+        row = self.client.get(reverse("calls-students")).context["rows"][0]
+        self.assertTrue(row["promise_broken"])
+
+    def test_filter_by_last_contact_and_priority_order(self):
+        self.quick(self.ana.student, response="NO_CONTESTO")
+        self.assertEqual(self.rows(contacto="nunca"), ["BETO"])
+        self.assertEqual(self.rows(contacto="7"), ["BETO"])
+        self.assertEqual(self.rows(orden="sin_contacto"), ["BETO", "ANA"])
+        self.assertEqual(self.rows(orden="vencida"), ["ANA", "BETO"])
+        self.assertEqual(self.rows(orden="deuda")[0], "ANA")
+
+    def test_quick_note_requires_permission_to_add_calls(self):
+        viewer = self._user("lector")
+        grant(viewer, "calls.view_callnote")
+        self.client.force_login(viewer)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.assertEqual(self.quick(self.ana.student, response="OTROS").status_code, 403)
+
+    def test_pay_button_links_to_the_course_with_debt(self):
+        page = self.client.get(reverse("calls-students"))
+        self.assertContains(page, reverse("payment-create-for", args=[self.ana.pk]))
+
+    def test_bulk_move_passes_every_assignment_to_another_user(self):
+        other = self._user("otro", manage_calls=True)
+        CallAssignment.objects.create(user=self.caller, enrollment=self.ana)
+        CallAssignment.objects.create(user=self.caller, enrollment=self.beto)
+        CallAssignment.objects.create(user=other, enrollment=self.beto)
+        self.client.post(
+            reverse("calls-assignments"),
+            {"accion": "reasignar", "origen": self.caller.pk, "usuario": other.pk},
+        )
+        self.assertFalse(CallAssignment.objects.filter(user=self.caller).exists())
+        self.assertEqual(CallAssignment.objects.filter(user=other).count(), 2)
+
+    def test_bulk_split_shares_unassigned_enrollments_evenly(self):
+        other = self._user("otro", manage_calls=True)
+        extra = self._enroll("Carla", due=date(2999, 1, 1))
+        CallAssignment.objects.create(user=self.caller, enrollment=extra)
+        self.client.post(
+            reverse("calls-assignments"),
+            {"accion": "repartir", "reparto": [self.caller.pk, other.pk]},
+        )
+        self.assertEqual(CallAssignment.objects.filter(user=self.caller).count(), 2)
+        self.assertEqual(CallAssignment.objects.filter(user=other).count(), 1)
+
+    def test_report_shows_assignment_progress_per_user(self):
+        CallAssignment.objects.create(user=self.caller, enrollment=self.ana)
+        CallAssignment.objects.create(user=self.caller, enrollment=self.beto)
+        CallNote.objects.create(
+            campus=self.campus, student=self.ana.student, author=self.caller, note="x"
+        )
+        rows = {
+            r["author__username"]: r
+            for r in self.client.get(reverse("calls-report")).context["rows"]
+        }
+        row = rows["llamador"]
+        self.assertEqual(
+            (row["assigned"], row["called"], row["pending"], row["progress"]), (2, 1, 1, 50)
+        )

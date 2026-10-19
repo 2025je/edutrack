@@ -1,4 +1,5 @@
 from django.urls import path
+from .duplicates import StudentDuplicatesView
 from .lifecycle import (
     EnrollmentTransferView,
     RestoreEnrollmentView,
@@ -32,6 +33,7 @@ from .views import (
 
 urlpatterns = [
     path("", StudentListView.as_view(), name="student-list"),
+    path("duplicados/", StudentDuplicatesView.as_view(), name="student-duplicates"),
     path("nuevo/", StudentCreateView.as_view(), name="student-create"),
     path("<int:pk>/editar/", StudentUpdateView.as_view(), name="student-update"),
     path("<int:pk>/eliminar/", StudentDeleteView.as_view(), name="student-delete"),

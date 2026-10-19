@@ -32,6 +32,7 @@
   {% if perms.students.view_course %}<li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>{% endif %}
   {% if perms.students.view_enrollment %}<li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>{% endif %}
   {% if perms.students.view_promoter %}<li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>{% endif %}
+  {% if perms.core.deactivate_student and perms.students.change_student %}<li><a href="{% url 'student-duplicates' %}"><i class="material-icons">merge_type</i>Duplicados</a></li>{% endif %}
   {% if perms.core.deactivate_student or perms.core.deactivate_enrollment %}<li><a href="{% url 'trash' %}"><i class="material-icons">delete_sweep</i>Papelera</a></li>{% endif %}
   {% endif %}
 
@@ -65,7 +66,8 @@
   <li><a href="{% url 'report-enrollments-by-promoter' %}"><i class="material-icons">badge</i>Matrículas por promotor</a></li>
   <li><a href="{% url 'report-course-occupancy' %}"><i class="material-icons">event_seat</i>Ocupación por curso</a></li>{% endif %}
   {% if perms.core.view_pending_balances %}<li><a href="{% url 'report-debt-by-course' %}"><i class="material-icons">trending_down</i>Morosidad por curso</a></li>{% endif %}
-  {% if perms.core.view_financial_reports %}<li><a href="{% url 'report-income-by-month' %}"><i class="material-icons">savings</i>Ingresos por mes</a></li>{% endif %}
+  {% if perms.core.view_financial_reports %}<li><a href="{% url 'report-income-by-month' %}"><i class="material-icons">savings</i>Ingresos por mes</a></li>
+  {% if perms.payments.view_payment %}<li><a href="{% url 'cash-closing' %}"><i class="material-icons">point_of_sale</i>Cierre de caja</a></li>{% endif %}{% endif %}
   {% if perms.students.add_enrollment or perms.payments.add_payment %}<li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>{% endif %}
   {% endif %}
 

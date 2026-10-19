@@ -1,0 +1,32 @@
+{% extends "base.html" %}{% block title %}Cierre de caja · EduTrack{% endblock %}
+{% block content %}
+<div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <h5 style="margin:0">Cierre de caja · {{ day|date:"d/m/Y" }}</h5>
+  <div class="no-print">
+    {% if perms.core.export_reports %}<a class="btn-flat" href="{% url 'cash-closing-excel' %}?fecha={{ day|date:'Y-m-d' }}&cajero={{ cashier }}"><i class="material-icons left">download</i>Excel</a>{% endif %}
+    <button type="button" class="btn-flat" onclick="window.print()"><i class="material-icons left">print</i>Imprimir</button>
+  </div>
+</div>
+<form method="get" class="no-print" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:12px 0">
+  <label>Fecha<input type="date" name="fecha" value="{{ day|date:'Y-m-d' }}"></label>
+  <label>Cajero<select name="cajero" class="browser-default"><option value="">Todos</option>{% for id, name in cashiers %}<option value="{{ id }}"{% if cashier == id|stringformat:"s" %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+  <button class="btn" type="submit">Ver</button>
+</form>
+<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px">
+  <div><strong>Total confirmado:</strong> S/ {{ total_confirmed }}</div>
+  <div><strong>Anulado:</strong> S/ {{ total_voided }}</div>
+</div>
+{% for g in groups %}
+<div class="card table-wrap" style="margin-bottom:16px">
+  <table class="striped">
+    <caption style="text-align:left;padding:8px 12px"><strong>{{ g.cashier }}</strong> · confirmado S/ {{ g.confirmed }}{% if g.voided %} · anulado S/ {{ g.voided }}{% endif %}</caption>
+    <thead><tr><th>Recibo</th><th>Hora</th><th>Estudiante</th><th>Curso</th><th>Estado</th><th style="text-align:right">Importe</th></tr></thead>
+    <tbody>
+    {% for p in g.payments %}<tr><td>{{ p.receipt_number }}</td><td>{{ p.created_at|time:"H:i" }}</td><td>{{ p.enrollment.student_label }}</td><td>{{ p.enrollment.course_label }}</td><td>{{ p.get_status_display }}</td><td style="text-align:right">{{ p.amount }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% empty %}
+<p class="grey-text">No hay pagos registrados en esta fecha.</p>
+{% endfor %}
+{% endblock %}

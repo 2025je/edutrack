@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Historial · EduTrack{% endblock %}
+{% block content %}
+<div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <h5 style="margin:0">Historial: {{ title }}</h5>
+  <a class="btn-flat" href="{{ back_url }}"><i class="material-icons left">arrow_back</i>Volver</a>
+</div>
+<div class="card table-wrap">
+  <table class="highlight">
+    <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Descripción</th></tr></thead>
+    <tbody>
+    {% for log in logs %}<tr><td style="white-space:nowrap">{{ log.created_at|date:"d/m/Y H:i" }}</td><td>{{ log.username|default:"—" }}</td><td>{{ log.get_action_display }}</td><td>{{ log.description }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="center-align muted">Aún no hay acciones registradas para este registro.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">Se muestran las últimas 200 acciones registradas desde que se activó el historial.</p>
+{% endblock %}

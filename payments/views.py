@@ -602,7 +602,7 @@ class PaymentExcelExportView(PaymentListView):
             "Pagos",
             f"Sede: {get_selected_campus(request).name}",
             [
-                "N.? de recibo",
+                "N.º de recibo",
                 "Fecha y hora",
                 "Estudiante",
                 "Curso",
@@ -618,8 +618,99 @@ class PaymentExcelExportView(PaymentListView):
         )
 
 
+class CashClosingView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
+    """Cierre de caja: pagos de un día agrupados por cajero (solo los confirmados suman)."""
+
+    required_permission = ("payments.view_payment", "core.view_financial_reports")
+    template_name = "payments/cash_closing.html"
+
+    def get_day(self):
+        return parse_date(self.request.GET.get("fecha", "")) or timezone.localdate()
+
+    def get_payments(self):
+        qs = Payment.objects.filter(
+            campus=get_selected_campus(self.request), created_at__date=self.get_day()
+        ).select_related("enrollment__student", "enrollment__course", "cashier")
+        cashier = self.request.GET.get("cajero", "")
+        if cashier.isdigit():
+            qs = qs.filter(cashier_id=int(cashier))
+        return qs.order_by("cashier__username", "created_at")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        payments = list(self.get_payments())
+        groups = {}
+        for payment in payments:
+            group = groups.setdefault(
+                payment.cashier_id,
+                {
+                    "cashier": payment.cashier.get_full_name() or payment.cashier.username,
+                    "payments": [],
+                    "confirmed": Decimal("0.00"),
+                    "voided": Decimal("0.00"),
+                },
+            )
+            group["payments"].append(payment)
+            if payment.status == Payment.Status.CONFIRMED:
+                group["confirmed"] += payment.amount
+            else:
+                group["voided"] += payment.amount
+        cashiers = (
+            Payment.objects.filter(campus=get_selected_campus(self.request))
+            .values_list("cashier_id", "cashier__username")
+            .distinct()
+            .order_by("cashier__username")
+        )
+        context.update(
+            day=self.get_day(),
+            groups=list(groups.values()),
+            total_confirmed=sum((g["confirmed"] for g in groups.values()), Decimal("0.00")),
+            total_voided=sum((g["voided"] for g in groups.values()), Decimal("0.00")),
+            cashiers=cashiers,
+            cashier=self.request.GET.get("cajero", ""),
+        )
+        return context
+
+
+class CashClosingExcelView(CashClosingView):
+    required_permission = (
+        "payments.view_payment",
+        "core.view_financial_reports",
+        "core.export_reports",
+    )
+
+    def get(self, request, *args, **kwargs):
+        self.request = request
+        payments = list(self.get_payments())
+        rows = [
+            [
+                p.cashier.get_full_name() or p.cashier.username,
+                p.receipt_number,
+                timezone.localtime(p.created_at).replace(tzinfo=None),
+                p.enrollment.student_label,
+                p.enrollment.course_label,
+                p.get_status_display(),
+                p.amount,
+            ]
+            for p in payments
+        ]
+        confirmed = sum(
+            (p.amount for p in payments if p.status == Payment.Status.CONFIRMED), Decimal("0.00")
+        )
+        return xlsx_response(
+            f"cierre-caja-{self.get_day():%Y-%m-%d}",
+            "Cierre de caja",
+            f"Sede: {get_selected_campus(request).name} · {self.get_day():%d/%m/%Y}",
+            ["Cajero", "N.º de recibo", "Fecha y hora", "Estudiante", "Curso", "Estado", "Importe"],
+            rows,
+            money=(6,),
+            dates=(2,),
+            totals=["Total confirmado", "", "", "", "", "", confirmed],
+        )
+
+
 class PendingDebtsExcelView(PendingDebtsView):
-    """Exporta a Excel las cuotas con saldo pendiente (seg?n la b?squeda actual)."""
+    """Exporta a Excel las cuotas con saldo pendiente (según la búsqueda actual)."""
 
     required_permission = ("core.view_pending_balances", "core.export_reports")
 
@@ -662,7 +753,7 @@ class PendingDebtsExcelView(PendingDebtsView):
 
 
 class EnrollmentStatementView(SelectedCampusViewMixin, DetailView):
-    """Estado de cuenta imprimible de una matr?cula: cuotas, pagos y saldo."""
+    """Estado de cuenta imprimible de una matrícula: cuotas, pagos y saldo."""
 
     model = Enrollment
     template_name = "payments/statement.html"

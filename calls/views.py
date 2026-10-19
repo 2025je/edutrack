@@ -1,11 +1,12 @@
-from django.http import QueryDict
 from collections import defaultdict
 from decimal import Decimal
 from urllib.parse import quote, urlencode
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
+from django.http import QueryDict
+from django.db.models import Count, F, Max, Q, Sum
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -24,7 +25,7 @@ from payments.forms import pending_enrollments_for_campus
 from payments.models import Installment, Payment, PaymentAllocation
 from students.models import Enrollment, Student
 
-from .forms import CallNoteForm, WhatsAppTemplateForm
+from .forms import CallNoteForm, QuickCallNoteForm, WhatsAppTemplateForm
 from .models import EMOJIS, PLACEHOLDERS, CallAssignment, CallNote, WhatsAppTemplate
 
 ZERO = Decimal("0.00")
@@ -298,9 +299,37 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
     context_object_name = "rows"
     paginate_by = 50
 
+    ORDERS = {
+        "": "Nombre",
+        "deuda": "Mayor deuda",
+        "vencida": "Más días vencida",
+        "sin_contacto": "Más tiempo sin llamar",
+    }
+    CONTACTS = {
+        "": "Todos",
+        "nunca": "Sin llamadas",
+        "7": "Sin llamar hace 7+ días",
+        "15": "Sin llamar hace 15+ días",
+        "30": "Sin llamar hace 30+ días",
+    }
+
     @property
     def only_debt(self):
         return self.request.GET.get("deuda") == "1"
+
+    @property
+    def order(self):
+        value = self.request.GET.get("orden", "")
+        return value if value in self.ORDERS else ""
+
+    @property
+    def contact(self):
+        value = self.request.GET.get("contacto", "")
+        return value if value in self.CONTACTS else ""
+
+    @property
+    def promise_filter(self):
+        return "vencida" if self.request.GET.get("promesa") == "vencida" else ""
 
     def get_queryset(self):
         campus = get_selected_campus(self.request)
@@ -341,6 +370,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             debt = billed.get(enrollment.pk, ZERO) - paid.get(enrollment.pk, ZERO)
             by_student[enrollment.student_id].append(
                 {
+                    "enrollment_id": enrollment.pk,
                     "course": enrollment.course,
                     "course_label": enrollment.course_label,
                     "enrollment_fee": enrollment.enrollment_fee,
@@ -356,12 +386,56 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             .values_list("student")
             .annotate(n=Count("id"))
         )
+        last_call = dict(
+            CallNote.objects.filter(campus=campus, student__in=students)
+            .values_list("student")
+            .annotate(last=Max("created_at"))
+        )
+        promises = {}
+        for note in CallNote.objects.filter(
+            campus=campus,
+            student__in=students,
+            response=CallNote.Response.PROMISED_PAYMENT,
+            promise_date__isnull=False,
+        ).order_by("created_at", "id"):
+            promises[note.student_id] = note
+        today = timezone.localdate()
+        oldest_due = {}
+        unpaid = (
+            Installment.objects.filter(enrollment__in=ids, active=True, due_date__lt=today)
+            .annotate(
+                paid=Coalesce(
+                    Sum(
+                        "allocations__amount",
+                        filter=Q(allocations__payment__status=Payment.Status.CONFIRMED),
+                    ),
+                    ZERO,
+                )
+            )
+            .filter(amount__gt=F("paid"))
+            .values_list("enrollment__student_id", "due_date")
+        )
+        for student_id, due in unpaid:
+            if student_id not in oldest_due or due < oldest_due[student_id]:
+                oldest_due[student_id] = due
+        contact = self.contact
         rows = []
         for student in students:
             courses = by_student[student.pk]
             total = sum((c["debt"] for c in courses), ZERO)
             if self.only_debt and total <= 0:
                 continue
+            last = last_call.get(student.pk)
+            days_since_call = (today - timezone.localtime(last).date()).days if last else None
+            promise = promises.get(student.pk)
+            promise_broken = bool(promise and promise.promise_date < today and total > 0)
+            if self.promise_filter == "vencida" and not promise_broken:
+                continue
+            if contact == "nunca" and last:
+                continue
+            if contact.isdigit() and last and days_since_call < int(contact):
+                continue
+            due = oldest_due.get(student.pk)
             rows.append(
                 {
                     "student": student,
@@ -369,7 +443,27 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
                     "total_debt": total,
                     "notes_count": notes_count.get(student.pk, 0),
                     "phones": build_phone_links(template, campus, student, courses, total),
+                    "last_call": last,
+                    "days_since_call": days_since_call,
+                    "promise": promise,
+                    "promise_broken": promise_broken,
+                    "overdue_days": (today - due).days if due and total > 0 else 0,
+                    "pay_enrollment_id": max(courses, key=lambda c: c["debt"])["enrollment_id"]
+                    if total > 0
+                    else None,
                 }
+            )
+        order = self.order
+        if order == "deuda":
+            rows.sort(key=lambda r: -r["total_debt"])
+        elif order == "vencida":
+            rows.sort(key=lambda r: -r["overdue_days"])
+        elif order == "sin_contacto":
+            rows.sort(
+                key=lambda r: (
+                    r["days_since_call"] is not None,
+                    -(r["days_since_call"] or 0),
+                )
             )
         return rows
 
@@ -381,10 +475,51 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             params["q"] = q
         if self.only_debt:
             params["deuda"] = "1"
+        for key, value in (
+            ("orden", self.order),
+            ("contacto", self.contact),
+            ("promesa", self.promise_filter),
+        ):
+            if value:
+                params[key] = value
         context["search_query"] = q
         context["only_debt"] = self.only_debt
+        context["order"] = self.order
+        context["contact"] = self.contact
+        context["promise_filter"] = self.promise_filter
+        context["orders"] = self.ORDERS.items()
+        context["contacts"] = self.CONTACTS.items()
+        context["response_choices"] = CallNote.Response.choices
         context["pagination_query"] = urlencode(params)
         return context
+
+
+class CallQuickNoteView(StudentNotesMixin, TemplateView):
+    """Registro rápido de una llamada desde la lista de alumnos."""
+
+    required_permission = "calls.add_callnote"
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        student = self.get_student()
+        form = QuickCallNoteForm(request.POST)
+        if form.is_valid():
+            note = form.save(commit=False)
+            note.note = note.note or note.get_response_display()
+            note.campus = get_selected_campus(request)
+            note.student = student
+            note.author = request.user
+            note.save()
+            messages.success(request, f"Llamada a {student.full_name} registrada.")
+        else:
+            errors = "; ".join(e for errs in form.errors.values() for e in errs)
+            messages.error(request, f"No se registró la llamada: {errors}")
+        target = request.POST.get("next") or ""
+        if not url_has_allowed_host_and_scheme(
+            target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+        ):
+            target = reverse("calls-students")
+        return redirect(target)
 
 
 class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
@@ -409,29 +544,54 @@ class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Templa
         )
         if not can_view_all_calls(self.request.user):
             notes = notes.filter(author=self.request.user)
+        campus = get_selected_campus(self.request)
         by_response = {key: Count("pk", filter=Q(response=key)) for key in CallNote.Response.values}
-        rows = list(
-            notes.values("author__username")
-            .annotate(
-                total=Count("pk"),
-                students=Count("student", distinct=True),
-                will=by_response[CallNote.Response.WILL_ATTEND],
-                wont=by_response[CallNote.Response.WONT_ATTEND],
-                other=by_response[CallNote.Response.OTHER],
-            )
-            .order_by("-total", "author__username")
+        columns = {
+            "total": Count("pk"),
+            "students": Count("student", distinct=True),
+            "will": by_response[CallNote.Response.WILL_ATTEND],
+            "wont": by_response[CallNote.Response.WONT_ATTEND],
+            "no_answer": by_response[CallNote.Response.NO_ANSWER],
+            "promised": by_response[CallNote.Response.PROMISED_PAYMENT],
+            "other": by_response[CallNote.Response.OTHER],
+        }
+        rows = {
+            row["author__username"]: row
+            for row in notes.values("author__username").annotate(**columns)
+        }
+        in_range = Q(
+            enrollment__student__call_notes__campus=campus,
+            enrollment__student__call_notes__author=F("user"),
+            enrollment__student__call_notes__created_at__date__gte=start,
+            enrollment__student__call_notes__created_at__date__lte=end,
         )
+        progress = CallAssignment.objects.filter(
+            enrollment__campus=campus,
+            enrollment__active=True,
+            enrollment__student__active=True,
+        )
+        if not can_view_all_calls(self.request.user):
+            progress = progress.filter(user=self.request.user)
+        for item in progress.values("user__username").annotate(
+            assigned=Count("enrollment", distinct=True),
+            called=Count("enrollment", distinct=True, filter=in_range),
+        ):
+            row = rows.setdefault(
+                item["user__username"],
+                {"author__username": item["user__username"], **dict.fromkeys(columns, 0)},
+            )
+            row["assigned"] = item["assigned"]
+            row["called"] = item["called"]
+            row["pending"] = item["assigned"] - item["called"]
+            row["progress"] = (
+                round(100 * item["called"] / item["assigned"]) if item["assigned"] else 0
+            )
+        ordered = sorted(rows.values(), key=lambda r: (-r["total"], r["author__username"]))
         context.update(
             start=start,
             end=end,
-            rows=rows,
-            totals=notes.aggregate(
-                total=Count("pk"),
-                students=Count("student", distinct=True),
-                will=by_response[CallNote.Response.WILL_ATTEND],
-                wont=by_response[CallNote.Response.WONT_ATTEND],
-                other=by_response[CallNote.Response.OTHER],
-            ),
+            rows=ordered,
+            totals=notes.aggregate(**columns),
             scope_all=can_view_all_calls(self.request.user),
         )
         return context
@@ -538,6 +698,13 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             if target
             else []
         )
+        loads = dict(
+            CallAssignment.objects.filter(
+                enrollment__campus=get_selected_campus(self.request), enrollment__active=True
+            )
+            .values_list("user_id")
+            .annotate(n=Count("enrollment", distinct=True))
+        )
         context.update(
             users=self.get_users(),
             target=target,
@@ -559,10 +726,70 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             total_results=page.paginator.count,
             search_query=filters["q"],
             pagination_query=urlencode(params),
+            unassigned_count=self.get_base_enrollments()
+            .filter(call_assignments__isnull=True)
+            .count(),
+            source_users=[
+                (u, loads.get(u.pk, 0)) for u in self.get_users() if not target or u.pk != target.pk
+            ],
         )
         return context
 
+    def bulk_move(self, request):
+        campus = get_selected_campus(request)
+        users = self.get_users()
+        source = (
+            users.filter(pk=int(request.POST["origen"])).first()
+            if request.POST.get("origen", "").isdigit()
+            else None
+        )
+        target = self.get_target()
+        if not source or not target or source.pk == target.pk:
+            messages.error(request, "Elige un usuario de origen y otro de destino distintos.")
+            return
+        moving = CallAssignment.objects.filter(user=source, enrollment__campus=campus)
+        already = CallAssignment.objects.filter(user=target).values("enrollment_id")
+        moved = moving.exclude(enrollment_id__in=already).update(
+            user=target, assigned_by=request.user
+        )
+        moving.delete()
+        messages.success(
+            request, f"{moved} asignaciones pasaron de {source.username} a {target.username}."
+        )
+
+    def bulk_split(self, request):
+        picked = {int(i) for i in request.POST.getlist("reparto") if i.isdigit()}
+        users = list(self.get_users().filter(pk__in=picked).order_by("username"))
+        if not users:
+            messages.error(request, "Selecciona al menos un usuario para repartir.")
+            return
+        enrollments = list(
+            self.get_base_enrollments()
+            .filter(call_assignments__isnull=True)
+            .order_by("student__full_name", "pk")
+            .values_list("pk", flat=True)
+        )
+        CallAssignment.objects.bulk_create(
+            CallAssignment(user=users[i % len(users)], enrollment_id=pk, assigned_by=request.user)
+            for i, pk in enumerate(enrollments)
+        )
+        messages.success(
+            request,
+            f"{len(enrollments)} matrículas sin asignar repartidas entre {len(users)} usuarios.",
+        )
+
     def post(self, request, *args, **kwargs):
+        action = request.POST.get("accion", "")
+        if action in {"reasignar", "repartir"}:
+            (self.bulk_move if action == "reasignar" else self.bulk_split)(request)
+            return redirect(
+                request.path
+                + (
+                    f"?usuario={request.POST['usuario']}"
+                    if request.POST.get("usuario", "").isdigit()
+                    else ""
+                )
+            )
         target = self.get_target()
         if not target:
             messages.error(request, "Selecciona un usuario válido.")

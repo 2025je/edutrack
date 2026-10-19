@@ -114,6 +114,34 @@ class PaymentCrudTests(TestCase):
         revoke(self.user, "manage_students")
         self.assertEqual(self.client.get(reverse("payment-excel")).status_code, 403)
 
+    def test_cash_closing_groups_by_cashier_and_ignores_voided_in_total(self):
+        other = create_user(username="cajera2", password="x" * 12, register_payments=True)
+        other.campuses.add(self.campus)
+        Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollment,
+            cashier=other,
+            receipt_number="D2",
+            amount=15,
+            status=Payment.Status.VOID,
+        )
+        response = self.client.get(reverse("cash-closing"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_confirmed"], Decimal("40"))
+        self.assertEqual(response.context["total_voided"], Decimal("15"))
+        self.assertEqual(len(response.context["groups"]), 2)
+        only = self.client.get(reverse("cash-closing"), {"cajero": other.pk})
+        self.assertEqual(only.context["total_confirmed"], Decimal("0"))
+        past = self.client.get(reverse("cash-closing"), {"fecha": "2000-01-01"})
+        self.assertEqual(past.context["groups"], [])
+
+    def test_cash_closing_excel_and_permissions(self):
+        response = self.client.get(reverse("cash-closing-excel"))
+        sheet = load_workbook(BytesIO(response.content)).active
+        self.assertIn("D1", [c.value for row in sheet.iter_rows(min_row=4) for c in row])
+        revoke(self.user, "register_payments")
+        self.assertEqual(self.client.get(reverse("cash-closing")).status_code, 403)
+
     def test_pending_debts_export_and_overdue_filter(self):
         Installment.objects.create(
             enrollment=self.enrollment, concept="Futura", amount=30, due_date=date(2999, 1, 1)

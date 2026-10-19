@@ -9,6 +9,11 @@
     <label for="{{ form.response.id_for_label }}">Tipo de respuesta</label>
     {{ form.response }}
     {% for error in form.response.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    <div id="promise-box" {% if form.response.value != 'PROMETIO_PAGO' %}style="display:none"{% endif %}>
+      <label for="{{ form.promise_date.id_for_label }}">Fecha prometida de pago</label>
+      {{ form.promise_date }}
+      {% for error in form.promise_date.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
     <label for="{{ form.note.id_for_label }}">Detalle de la llamada</label>
     {{ form.note }}
     {% for error in form.note.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
