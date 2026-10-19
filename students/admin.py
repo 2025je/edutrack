@@ -2,8 +2,6 @@ from django.contrib import admin
 from django import forms
 
 from .models import (
-    UNASSIGNED_COURSE_NAME,
-    UNASSIGNED_SCHEDULE_NAME,
     Course,
     Enrollment,
     Ficha,
@@ -112,39 +110,12 @@ class CourseAdmin(admin.ModelAdmin):
     list_filter = ("campus", "active")
     search_fields = ("name", "schedule", "group")
 
-    def _is_locked(self, request, obj):
-        return (
-            obj is not None
-            and not request.user.is_superuser
-            and obj.name == UNASSIGNED_COURSE_NAME
-            and obj.schedule == UNASSIGNED_SCHEDULE_NAME
-        )
-
-    def has_change_permission(self, request, obj=None):
-        return super().has_change_permission(request, obj) and not self._is_locked(request, obj)
-
-    def has_delete_permission(self, request, obj=None):
-        return super().has_delete_permission(request, obj) and not self._is_locked(request, obj)
-
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
     list_display = ("name", "campus")
     list_filter = ("campus",)
     search_fields = ("name",)
-
-    def _is_locked(self, request, obj):
-        return (
-            obj is not None
-            and not request.user.is_superuser
-            and obj.name == UNASSIGNED_SCHEDULE_NAME
-        )
-
-    def has_change_permission(self, request, obj=None):
-        return super().has_change_permission(request, obj) and not self._is_locked(request, obj)
-
-    def has_delete_permission(self, request, obj=None):
-        return super().has_delete_permission(request, obj) and not self._is_locked(request, obj)
 
 
 @admin.register(Enrollment)

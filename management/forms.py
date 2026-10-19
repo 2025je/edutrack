@@ -6,7 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 from core.models import Campus, CampusFlyer, User
-from students.models import UNASSIGNED_SCHEDULE_NAME, Course, Promoter, Schedule
+from students.models import Course, Promoter, Schedule
 
 
 class CampusForm(forms.ModelForm):
@@ -133,7 +133,7 @@ class UserUpdateForm(UserCreateForm):
 class CourseForm(forms.ModelForm):
     schedule = forms.ModelChoiceField(
         label="Horario",
-        queryset=Schedule.objects.exclude(name=UNASSIGNED_SCHEDULE_NAME).order_by("name"),
+        queryset=Schedule.objects.order_by("name"),
         empty_label=None,
     )
 
@@ -160,9 +160,7 @@ class CourseForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.campus = campus
         self.fields["schedule"].queryset = (
-            Schedule.objects.filter(campus=campus)
-            .exclude(name=UNASSIGNED_SCHEDULE_NAME)
-            .order_by("name")
+            Schedule.objects.filter(campus=campus).order_by("name")
             if campus
             else Schedule.objects.none()
         )

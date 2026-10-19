@@ -254,13 +254,13 @@ class CourseCreationTests(TestCase):
         self.assertEqual(course.campus, self.campus)
         self.assertEqual(course.schedule, "LUNES 8:00")
 
-    def test_course_form_hides_unassigned_schedule(self):
+    def test_course_form_hides_placeholder_schedule(self):
         self.login(manage_promoters=True)
 
         response = self.client.get(reverse("course-list"))
 
         self.assertNotIn(
-            "PENDIENTE DE ASIGNACION",
+            "-",
             [str(choice[1]) for choice in response.context["form"].fields["schedule"].choices],
         )
 
@@ -382,28 +382,9 @@ class CourseCreationTests(TestCase):
         self.assertEqual(invalid.status_code, 200)
         self.assertTrue(invalid.context["form"].errors.get("enrollment_fee"))
 
-    def test_unassigned_course_cannot_be_edited_even_by_superuser(self):
+    def test_new_campus_does_not_create_a_placeholder_course(self):
         self.login(manage_promoters=True)
-        course = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
-        url = reverse("course-update", args=[course.pk])
-
-        self.assertEqual(self.client.get(url).status_code, 404)
-        self.assertEqual(self.client.post(url, {"start_date": "2030-01-01"}).status_code, 404)
-        self.client.logout()
-        root = User.objects.create_superuser("root", password="x")
-        self.client.force_login(root)
-        session = self.client.session
-        session["selected_campus_id"] = self.campus.pk
-        session.save()
-        self.assertEqual(self.client.get(url).status_code, 404)
-
-    def test_unassigned_course_start_date_is_locked_for_non_superusers(self):
-        self.login(manage_promoters=True)
-        course = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
-
-        response = self.client.get(reverse("course-update", args=[course.pk]))
-
-        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Course.objects.filter(campus=self.campus, name="SIN CURSO").exists())
 
     def test_duplicate_course_is_rejected(self):
         self.login(manage_promoters=True)
@@ -412,14 +393,14 @@ class CourseCreationTests(TestCase):
         response = self.client.post(reverse("course-list"), self.data(name="inglés"))
 
         self.assertContains(response, "Ya existe un curso")
-        self.assertEqual(Course.objects.exclude(name="POR ASIGNAR").count(), 1)
+        self.assertEqual(Course.objects.count(), 1)
 
     def test_user_without_permission_cannot_create_courses(self):
         self.login(manage_students=True, register_payments=True)
 
         self.assertEqual(self.client.get(reverse("course-list")).status_code, 403)
         self.assertEqual(self.client.post(reverse("course-list"), self.data()).status_code, 403)
-        self.assertFalse(Course.objects.exclude(name="POR ASIGNAR").exists())
+        self.assertFalse(Course.objects.exists())
 
 
 class UserCreateTests(TestCase):

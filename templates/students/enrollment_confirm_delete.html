@@ -3,7 +3,7 @@
 {% block content %}
 <div class="row"><div class="col s12 l8 offset-l2"><div class="card card-pad">
 	<h1>Dar de baja matrícula</h1>
-	<p>¿Deseas dar de baja la matrícula de <strong>{{ object.student.full_name }}</strong> en <strong>{{ object.course.name }}</strong>?</p>
+	<p>¿Deseas dar de baja la matrícula de <strong>{{ object.student_label }}</strong> en <strong>{{ object.course_label }}</strong>?</p>
 	<p class="muted">Las cuotas quedarán inactivas; los recibos confirmados se anularán y el historial se conservará.</p>
 	<form method="post" class="flex gap">{% csrf_token %}<button class="btn red" type="submit">Confirmar baja</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Cancelar</a></form>
 </div></div></div>

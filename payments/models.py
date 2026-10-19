@@ -39,7 +39,7 @@ class Installment(models.Model):
         return self.amount - self.paid_amount
 
     def __str__(self):
-        return f"{self.enrollment.student} — {self.concept}"
+        return f"{self.enrollment.student_label} — {self.concept}"
 
 
 class Payment(models.Model):

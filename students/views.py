@@ -7,7 +7,6 @@ from django.db.models import (
     Count,
     DecimalField,
     F,
-    IntegerField,
     OuterRef,
     Prefetch,
     Q,
@@ -33,8 +32,7 @@ from openpyxl.utils import get_column_letter
 from io import BytesIO
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
 from .models import (
-    UNASSIGNED_COURSE_NAME,
-    UNASSIGNED_SCHEDULE_NAME,
+    EMPTY_VALUE,
     Student,
     Enrollment,
     Course,
@@ -66,21 +64,17 @@ class StudentListView(CampusScopedMixin, ListView):
     }
 
     def get_queryset(self):
-        unassigned_course = Q(
-            enrollments__course__name=UNASSIGNED_COURSE_NAME,
-            enrollments__course__schedule=UNASSIGNED_SCHEDULE_NAME,
-        )
         qs = self.campus_queryset(
             Student.objects.select_related("campus")
             .annotate(
                 enrollment_count=Count(
                     "enrollments",
-                    filter=Q(enrollments__active=True) & ~unassigned_course,
+                    filter=Q(enrollments__active=True, enrollments__course__isnull=False),
                     distinct=True,
                 ),
                 unassigned_count=Count(
                     "enrollments",
-                    filter=Q(enrollments__active=True) & unassigned_course,
+                    filter=Q(enrollments__active=True, enrollments__course__isnull=True),
                     distinct=True,
                 ),
             )
@@ -626,12 +620,12 @@ class EnrollmentExcelExportView(EnrollmentListView):
             worksheet.append(
                 [
                     row_numbers[enrollment.pk],
-                    enrollment.student.full_name,
-                    str(enrollment.course),
+                    enrollment.student_label,
+                    enrollment.course_label,
                     enrollment.record_code or "—",
                     promoters,
                     enrollment.enrollment_date,
-                    enrollment.course.start_date or UNASSIGNED_SCHEDULE_NAME,
+                    enrollment.course_start_date or EMPTY_VALUE,
                     enrollment.enrollment_fee,
                     enrollment.monthly_fee,
                     enrollment.total_enrollment_cost,
@@ -706,13 +700,31 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
             self._locked_student = student
         return self._locked_student
 
+    def is_without_student(self):
+        return (
+            self.request.POST.get("sin_estudiante") or self.request.GET.get("sin_estudiante")
+        ) == "1"
+
     def get(self, request, *args, **kwargs):
-        if self.get_locked_student() is None:
+        if self.get_locked_student() is None and not self.is_without_student():
             return self.render_student_selection()
         return super().get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        if self.get_locked_student() is None:
+        if request.POST.get("pending_course") == "1" and self.get_locked_student():
+            # Matrícula rápida pendiente de asignación de curso.
+            data = request.POST.copy()
+            data.update(
+                {
+                    "course": "",
+                    "enrollment_date": timezone.localdate().isoformat(),
+                    "enrollment_fee": "0",
+                    "monthly_fee": "0",
+                    "active": "on",
+                }
+            )
+            request.POST = data
+        if self.get_locked_student() is None and not self.is_without_student():
             messages.error(request, "Primero selecciona un estudiante válido de la tabla.")
             return redirect("enrollment-create")
         return super().post(request, *args, **kwargs)
@@ -750,6 +762,7 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["locked_student"] = self.get_locked_student()
+        context["without_student"] = self.is_without_student() and context["locked_student"] is None
         if context["locked_student"]:
             context["current_enrollments"] = (
                 Enrollment.objects.filter(
@@ -765,6 +778,7 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
         kwargs["user"] = self.request.user
         kwargs["request"] = self.request
         kwargs["locked_student"] = self.get_locked_student()
+        kwargs["without_student"] = self.is_without_student() and kwargs["locked_student"] is None
         return kwargs
 
     def form_valid(self, form):
@@ -777,7 +791,7 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
                 self.object = form.save()
                 from payments.models import Installment
 
-                due_date = self.object.course.start_date or self.object.enrollment_date
+                due_date = self.object.course_start_date or self.object.enrollment_date
                 if self.object.enrollment_fee > 0:
                     Installment.objects.create(
                         enrollment=self.object,
@@ -805,6 +819,18 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
     form_class = EnrollmentForm
     template_name = "students/form.html"
     success_url = reverse_lazy("enrollment-list")
+
+    def get_required_permissions(self, request):
+        # Quien puede matricular también completa las matrículas pendientes.
+        user = request.user
+        if user.is_authenticated and user.has_perm("students.add_enrollment"):
+            pk = self.kwargs.get("pk")
+            enrollment = (
+                Enrollment.objects.select_related("course").filter(pk=pk).first() if pk else None
+            )
+            if enrollment and enrollment.is_pending:
+                return ("students.add_enrollment",)
+        return super().get_required_permissions(request)
 
     def get_queryset(self):
         return self.campus_queryset(
@@ -883,7 +909,7 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
             kind = self.installment_kind(installment)
             if kind and kind not in by_kind:
                 by_kind[kind] = installment
-        due_date = enrollment.course.start_date or enrollment.enrollment_date
+        due_date = enrollment.course_start_date or enrollment.enrollment_date
         concepts = {
             "enrollment_fee": "Matrícula",
             "monthly_fee": f"Mensualidad inicial ({due_date:%Y-%m})",
@@ -952,15 +978,8 @@ def course_students_queryset(request):
                 filter=Q(enrollments__active=True, enrollments__student__active=True),
             )
         )
-        .annotate(
-            unassigned_first=Case(
-                When(name=UNASSIGNED_COURSE_NAME, schedule=UNASSIGNED_SCHEDULE_NAME, then=0),
-                default=1,
-                output_field=IntegerField(),
-            )
-        )
         .prefetch_related(Prefetch("enrollments", queryset=enrollments))
-        .order_by("unassigned_first", "name", "schedule", "group")
+        .order_by("name", "schedule", "group")
     )
     query = request.GET.get("q", "").strip()
     if query:
@@ -1128,15 +1147,15 @@ class AvailableStudentsForCourseView(CampusScopedMixin, ListView):
         if course is None:
             return JsonResponse({"students": []}, status=400)
         enrollments = Enrollment.objects.filter(course=course)
-        if course.is_unassigned():
-            enrollments = enrollments.none()
         current_enrollment = None
         enrollment_id = request.GET.get("enrollment_id")
         if enrollment_id:
             current_enrollment = enrollments.filter(pk=enrollment_id, campus=campus).first()
         if current_enrollment:
             enrollments = enrollments.exclude(pk=current_enrollment.pk)
-        enrolled_ids = enrollments.values_list("student_id", flat=True)
+        enrolled_ids = enrollments.filter(student__isnull=False).values_list(
+            "student_id", flat=True
+        )
         students = Student.objects.filter(campus=campus, active=True)
         if current_enrollment:
             students = Student.objects.filter(campus=campus).filter(

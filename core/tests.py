@@ -295,6 +295,12 @@ class RoleGroupMatrixTests(TestCase):
         ):
             self.assertNotContains(page, f'href="{hidden}"')
 
+    def test_sidebar_can_collapse_and_navigates_partially(self):
+        self.user_in("Caja")
+        page = self.client.get(reverse("dashboard"))
+        self.assertContains(page, 'id="sidebar-toggle"')
+        self.assertContains(page, "Navegación parcial")
+
     def test_search_requires_permission_and_hides_unusable_actions(self):
         self.user_in("Gestor de llamadas")
         self.assertEqual(self.client.get(reverse("global-search")).status_code, 403)

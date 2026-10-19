@@ -31,7 +31,7 @@ ZERO = Decimal("0.00")
 
 def whatsapp_message(template, campus, student, courses, total):
     detail = "\n".join(
-        f"- {c['course'].name}: S/ {c['debt']:.2f}" for c in courses if c["debt"] > 0
+        f"- {c['course_label']}: S/ {c['debt']:.2f}" for c in courses if c["debt"] > 0
     )
     return template.render(
         alumno=student.full_name,
@@ -75,7 +75,7 @@ def visible_students(request):
 
 def visible_enrollments(request):
     campus = get_selected_campus(request)
-    enrollments = Enrollment.objects.filter(active=True, campus=campus)
+    enrollments = Enrollment.objects.filter(active=True, campus=campus, student__isnull=False)
     if can_view_all_calls(request.user):
         return enrollments
     return enrollments.filter(call_assignments__user=request.user)
@@ -154,6 +154,7 @@ class CallNoteListView(StudentNotesMixin, TemplateView):
         context["courses"] = [
             {
                 "course": e.course,
+                "course_label": e.course_label,
                 "enrollment_fee": e.enrollment_fee,
                 "monthly_fee": e.monthly_fee,
                 "total": billed.get(e.pk, ZERO),
@@ -340,6 +341,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             by_student[enrollment.student_id].append(
                 {
                     "course": enrollment.course,
+                    "course_label": enrollment.course_label,
                     "enrollment_fee": enrollment.enrollment_fee,
                     "monthly_fee": enrollment.monthly_fee,
                     "total": billed.get(enrollment.pk, ZERO),

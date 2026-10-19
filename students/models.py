@@ -21,15 +21,15 @@ record_code_validator = RegexValidator(
 MAX_FICHA_IMAGE_SIZE = 10 * 1024 * 1024
 DUPLICATE_FICHA_MESSAGE = "Este código de ficha ya está registrado en la misma fecha de matrícula."
 
-UNASSIGNED_COURSE_NAME = "POR ASIGNAR"
-UNASSIGNED_SCHEDULE_NAME = "PENDIENTE DE ASIGNACION"
+EMPTY_VALUE = "-"
+PENDING_COURSE_LABEL = "PENDIENTE DE ASIGNACIÓN"
+NO_STUDENT_LABEL = "SIN ESTUDIANTE"
 
 
 DEFAULT_PROMOTER_NAMES = ("PARTICULAR", "NN")
 DEFAULT_SCHEDULE_NAMES = (
     "SÁBADOS DE 8AM A 11AM",
     "SÁBADOS DE 11AM A 2PM",
-    UNASSIGNED_SCHEDULE_NAME,
 )
 
 
@@ -42,23 +42,6 @@ def ensure_default_promoters(campus):
 def ensure_default_schedules(campus):
     for name in DEFAULT_SCHEDULE_NAMES:
         Schedule.objects.get_or_create(campus=campus, name=name)
-
-
-def ensure_unassigned_course(campus):
-    schedule, _ = Schedule.objects.get_or_create(campus=campus, name=UNASSIGNED_SCHEDULE_NAME)
-    course, _ = Course.objects.get_or_create(
-        campus=campus,
-        name=UNASSIGNED_COURSE_NAME,
-        schedule=UNASSIGNED_SCHEDULE_NAME,
-        group=UNASSIGNED_SCHEDULE_NAME,
-        defaults={
-            "start_date": None,
-            "capacity": None,
-            "enrollment_fee": None,
-            "monthly_fee": None,
-        },
-    )
-    return course, schedule
 
 
 class Student(models.Model):
@@ -133,12 +116,12 @@ class Course(models.Model):
         ]
 
     def start_date_display(self):
-        return self.start_date.strftime("%d/%m/%Y") if self.start_date else UNASSIGNED_SCHEDULE_NAME
+        return self.start_date.strftime("%d/%m/%Y") if self.start_date else EMPTY_VALUE
 
     def _display(self, field_name):
         value = getattr(self, field_name)
         if value is None:
-            return UNASSIGNED_SCHEDULE_NAME
+            return EMPTY_VALUE
         return f"S/ {value:.2f}" if field_name.endswith("_fee") else str(value)
 
     def capacity_display(self):
@@ -150,32 +133,21 @@ class Course(models.Model):
     def monthly_fee_display(self):
         return self._display("monthly_fee")
 
-    def is_unassigned(self):
-        return (
-            self.name.upper() == UNASSIGNED_COURSE_NAME
-            and self.schedule.upper() == UNASSIGNED_SCHEDULE_NAME
-        )
-
     def clean(self):
         super().clean()
-        if not self.is_unassigned():
-            required = {
-                "start_date": "La fecha de inicio es obligatoria.",
-                "capacity": "La capacidad es obligatoria.",
-                "enrollment_fee": "El costo de matrícula es obligatorio.",
-                "monthly_fee": "La mensualidad es obligatoria.",
-            }
-            errors = {
-                field: message
-                for field, message in required.items()
-                if getattr(self, field) is None
-            }
-            if errors:
-                raise ValidationError(errors)
+        required = {
+            "start_date": "La fecha de inicio es obligatoria.",
+            "capacity": "La capacidad es obligatoria.",
+            "enrollment_fee": "El costo de matrícula es obligatorio.",
+            "monthly_fee": "La mensualidad es obligatoria.",
+        }
+        errors = {
+            field: message for field, message in required.items() if getattr(self, field) is None
+        }
+        if errors:
+            raise ValidationError(errors)
         group = (self.group or "").strip()
-        if not self.is_unassigned() and not (
-            group.isascii() and group.isdigit() and int(group) > 0
-        ):
+        if not (group.isascii() and group.isdigit() and int(group) > 0):
             raise ValidationError({"group": "El grupo debe ser un número entero positivo."})
 
     def save(self, *args, **kwargs):
@@ -233,11 +205,22 @@ class Promoter(models.Model):
 
 class Enrollment(models.Model):
     campus = models.ForeignKey(Campus, on_delete=models.PROTECT, verbose_name="Sede")
+    # Sin estudiante la matrícula es un cupo reservado; sin curso, un estudiante por ubicar.
     student = models.ForeignKey(
-        Student, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Estudiante"
+        Student,
+        on_delete=models.PROTECT,
+        related_name="enrollments",
+        verbose_name="Estudiante",
+        null=True,
+        blank=True,
     )
     course = models.ForeignKey(
-        Course, on_delete=models.PROTECT, related_name="enrollments", verbose_name="Curso"
+        Course,
+        on_delete=models.PROTECT,
+        related_name="enrollments",
+        verbose_name="Curso",
+        null=True,
+        blank=True,
     )
     promoter = models.ManyToManyField(
         Promoter,
@@ -267,6 +250,12 @@ class Enrollment(models.Model):
         ordering = ["-course__start_date", "student__full_name"]
         verbose_name = "matrícula"
         verbose_name_plural = "matrículas"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(student__isnull=False) | models.Q(course__isnull=False),
+                name="enrollment_requires_student_or_course",
+            ),
+        ]
 
     def clean(self):
         from django.core.exceptions import ValidationError
@@ -275,7 +264,9 @@ class Enrollment(models.Model):
             raise ValidationError("El estudiante debe pertenecer a la misma sede de la matrícula.")
         if self.course_id and self.campus_id and self.course.campus_id != self.campus_id:
             raise ValidationError("El curso debe pertenecer a la misma sede de la matrícula.")
-        if self.student_id and self.course_id and not self.course.is_unassigned():
+        if not self.student_id and not self.course_id:
+            raise ValidationError("La matrícula necesita un estudiante o un curso.")
+        if self.student_id and self.course_id:
             duplicates = Enrollment.objects.filter(
                 student_id=self.student_id, course_id=self.course_id
             )
@@ -302,8 +293,25 @@ class Enrollment(models.Model):
     def has_record(self):
         return getattr(self, "ficha", None) is not None
 
+    @property
+    def is_pending(self):
+        """Matrícula sin estudiante o sin curso asignado."""
+        return not self.student_id or not self.course_id
+
+    @property
+    def student_label(self):
+        return self.student.full_name if self.student_id else NO_STUDENT_LABEL
+
+    @property
+    def course_label(self):
+        return str(self.course) if self.course_id else PENDING_COURSE_LABEL
+
+    @property
+    def course_start_date(self):
+        return self.course.start_date if self.course_id else None
+
     def __str__(self):
-        return f"{self.student} — {self.course}"
+        return f"{self.student_label} — {self.course_label}"
 
 
 def validate_ficha_image_size(file):

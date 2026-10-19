@@ -11,8 +11,7 @@ from .models import (
     Ficha,
     record_code_validator,
     validate_ficha_image_size,
-    UNASSIGNED_COURSE_NAME,
-    UNASSIGNED_SCHEDULE_NAME,
+    PENDING_COURSE_LABEL,
     Student,
     Enrollment,
     Course,
@@ -24,9 +23,8 @@ from .images import DEFAULT_QUALITY, QUALITY_CHOICES, to_jpeg
 
 
 class CourseSelectWidget(forms.Select):
-    def __init__(self, course_prices=None, unassigned_ids=None, *args, **kwargs):
+    def __init__(self, course_prices=None, *args, **kwargs):
         self.course_prices = course_prices or {}
-        self.unassigned_ids = unassigned_ids or {}
         super().__init__(*args, **kwargs)
 
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
@@ -40,7 +38,6 @@ class CourseSelectWidget(forms.Select):
             option["attrs"]["data-monthly-fee"] = "" if monthly is None else str(monthly)
             option["attrs"]["data-capacity"] = "" if capacity is None else str(capacity)
             option["attrs"]["data-enrolled-count"] = str(enrolled_count)
-            option["attrs"]["data-unassigned"] = "true" if self.unassigned_ids.get(key) else "false"
         return option
 
 
@@ -198,8 +195,11 @@ class EnrollmentForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, user=None, request=None, locked_student=None, **kwargs):
+    def __init__(
+        self, *args, user=None, request=None, locked_student=None, without_student=False, **kwargs
+    ):
         super().__init__(*args, **kwargs)
+        self.without_student = without_student and not self.instance.pk
         ficha = getattr(self.instance, "ficha", None) if self.instance.pk else None
         if ficha:
             self.initial["record_code"] = ficha.code
@@ -216,45 +216,44 @@ class EnrollmentForm(forms.ModelForm):
                 )
             else:
                 course_queryset = course_queryset.filter(active=True)
-            if locked_student:
+            if self.without_student:
+                self.fields["course"].required = True
+                self.fields["course"].empty_label = "Seleccione un curso"
+            else:
+                self.fields["course"].empty_label = PENDING_COURSE_LABEL
+            course_student = locked_student or (self.instance.student if self.instance.pk else None)
+            if course_student:
+                taken = Enrollment.objects.filter(student=course_student, course__isnull=False)
+                if self.instance.pk:
+                    taken = taken.exclude(pk=self.instance.pk)
                 course_queryset = course_queryset.exclude(
-                    pk__in=Enrollment.objects.filter(student=locked_student)
-                    .exclude(
-                        course__name=UNASSIGNED_COURSE_NAME,
-                        course__schedule=UNASSIGNED_SCHEDULE_NAME,
-                    )
-                    .values_list("course_id", flat=True)
+                    pk__in=taken.values_list("course_id", flat=True)
                 )
-            # POR ASIGNAR siempre aparece primero y es el valor por defecto al crear.
-            course_queryset = course_queryset.annotate(
-                is_not_unassigned=models.Case(
-                    models.When(
-                        name=UNASSIGNED_COURSE_NAME,
-                        schedule=UNASSIGNED_SCHEDULE_NAME,
-                        then=0,
-                    ),
-                    default=1,
-                    output_field=models.IntegerField(),
-                )
-            ).order_by("is_not_unassigned", "name", "schedule", "group")
+            course_queryset = course_queryset.order_by("name", "schedule", "group")
             self.fields["course"].queryset = course_queryset
-            if self.instance.pk and user and not user.has_perm("core.change_enrollment_course"):
+            can_change_course = bool(
+                user
+                and (
+                    user.has_perm("core.change_enrollment_course")
+                    or (
+                        self.instance.pk
+                        and self.instance.is_pending
+                        and user.has_perm("students.add_enrollment")
+                    )
+                )
+            )
+            if self.instance.pk and user and not can_change_course:
                 self.fields["course"].queryset = course_queryset.filter(pk=self.instance.course_id)
                 self.fields["course"].disabled = True
-            if not self.instance.pk:
-                default_course = course_queryset.filter(is_not_unassigned=0).first()
-                if default_course:
-                    self.fields["course"].empty_label = None
-                    if not self.is_bound and not self.initial.get("course"):
-                        self.initial["course"] = default_course.pk
         else:
             self.fields["course"].queryset = Course.objects.none()
 
-        # No mostrar alumnos hasta que se elija un curso. Si el formulario
-        # se envía o vuelve con errores, validar solo alumnos elegibles para ese curso.
-        selected_course_id = (
-            self.data.get("course") if self.is_bound else self.initial.get("course")
-        )
+        # Si el formulario se envía o vuelve con errores, validar solo alumnos
+        # elegibles para el curso elegido; sin curso se listan todos los alumnos activos.
+        if self.is_bound and not self.fields["course"].disabled:
+            selected_course_id = self.data.get("course")
+        else:
+            selected_course_id = self.initial.get("course")
         selected_course = None
         if selected and selected_course_id:
             try:
@@ -264,11 +263,11 @@ class EnrollmentForm(forms.ModelForm):
 
         if selected_course:
             already_enrolled_ids = Enrollment.objects.filter(course=selected_course)
-            if selected_course.is_unassigned():
-                already_enrolled_ids = already_enrolled_ids.none()
             if self.instance.pk:
                 already_enrolled_ids = already_enrolled_ids.exclude(pk=self.instance.pk)
-            already_enrolled_ids = already_enrolled_ids.values_list("student_id", flat=True)
+            already_enrolled_ids = already_enrolled_ids.filter(student__isnull=False).values_list(
+                "student_id", flat=True
+            )
             eligible_students = Student.objects.filter(campus=selected, active=True)
             if self.instance.pk and self.instance.student_id:
                 eligible_students = Student.objects.filter(campus=selected).filter(
@@ -280,6 +279,15 @@ class EnrollmentForm(forms.ModelForm):
         if locked_student:
             self.fields["student"].queryset = Student.objects.filter(pk=locked_student.pk)
             self.fields["student"].widget = forms.HiddenInput()
+        # Una matrícula que ya tiene estudiante no puede quedarse sin él.
+        self.fields["student"].required = bool(locked_student or self.instance.student_id)
+        if self.instance.pk and self.instance.student_id and not self.instance.course_id:
+            # Al asignar curso a una matrícula pendiente el estudiante no se puede cambiar.
+            self.fields["student"].queryset = Student.objects.filter(pk=self.instance.student_id)
+            self.fields["student"].disabled = True
+            self.student_locked = True
+        else:
+            self.student_locked = False
         if selected:
             promoters = Promoter.objects.filter(
                 models.Q(campuses=selected) | models.Q(campuses__isnull=True)
@@ -314,21 +322,19 @@ class EnrollmentForm(forms.ModelForm):
             )
         self.fields["course"].widget = CourseSelectWidget(
             course_prices=course_info,
-            unassigned_ids={str(c.pk): c.is_unassigned() for c in courses},
             choices=self.fields["course"].choices,
         )
-        # self.fields["course"].widget = CourseSelectWidget(course_info)
         if selected_course and not self.instance.pk:
             self.fields["enrollment_fee"].initial = selected_course.enrollment_fee
             self.fields["monthly_fee"].initial = selected_course.monthly_fee
 
-        # Con POR ASIGNAR los costos son siempre 0 (se validan manualmente en el resto de cursos).
+        # Una matrícula pendiente de curso no genera costos hasta que se asigne uno.
         self.fee_fields = ("enrollment_fee", "monthly_fee")
         for name in self.fee_fields:
             field = self.fields[name]
             field.validators = [v for v in field.validators if not isinstance(v, MinValueValidator)]
-        self.selected_is_unassigned = bool(selected_course and selected_course.is_unassigned())
-        if self.selected_is_unassigned:
+        self.selected_without_course = not selected_course_id
+        if self.selected_without_course:
             if self.is_bound:
                 self.data = self.data.copy()
                 for name in self.fee_fields:
@@ -339,6 +345,8 @@ class EnrollmentForm(forms.ModelForm):
                     self.fields[name].initial = Decimal("0")
             for name in self.fee_fields:
                 self.fields[name].widget.attrs["readonly"] = True
+        if self.without_student:
+            del self.fields["student"]
 
     def _get_validation_exclusions(self):
         exclude = super()._get_validation_exclusions()
@@ -350,7 +358,7 @@ class EnrollmentForm(forms.ModelForm):
         student = cleaned.get("student")
         course = cleaned.get("course")
         campus = self.selected_campus
-        if course and course.is_unassigned():
+        if not course:
             for name in self.fee_fields:
                 cleaned[name] = Decimal("0")
         else:
@@ -367,6 +375,8 @@ class EnrollmentForm(forms.ModelForm):
                 )
         if not campus:
             raise ValidationError("Primero debes seleccionar una sede.")
+        if not student and not course:
+            self.add_error("course", "Una matrícula sin estudiante necesita un curso concreto.")
         if student and course:
             if student.campus_id != campus.pk or course.campus_id != campus.pk:
                 raise ValidationError(
@@ -375,7 +385,7 @@ class EnrollmentForm(forms.ModelForm):
             duplicate = Enrollment.objects.filter(student=student, course=course)
             if self.instance.pk:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
-            if duplicate.exists() and not course.is_unassigned():
+            if duplicate.exists():
                 self.add_error("course", "Este estudiante ya está matriculado en este curso.")
         record_code = (cleaned.get("record_code") or "").strip()
         record_image = cleaned.get("record_image")

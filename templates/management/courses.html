@@ -16,7 +16,7 @@
 </div>
 {% endif %}
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Curso</th><th>Horario</th><th>Grupo</th><th>Inicio</th><th>Capacidad</th><th>Matrícula</th><th>Mensualidad</th><th>Estado</th><th class="right-align">Acciones</th></tr></thead><tbody>
-{% for course in courses %}<tr><td>{{ course.name }}</td><td>{{ course.schedule }}</td><td>{{ course.group }}</td><td>{{ course.start_date_display }}</td><td>{{ course.capacity_display }}</td><td>{{ course.enrollment_fee_display }}</td><td>{{ course.monthly_fee_display }}</td><td>{% if course.active %}Activo{% else %}Inactivo{% endif %}</td><td class="right-align">{% if course.name != "POR ASIGNAR" and perms.students.change_course %}<a class="blue-text" href="{% url 'course-update' course.pk %}">Editar</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="9" class="center-align muted">No hay cursos registrados.</td></tr>{% endfor %}
+{% for course in courses %}<tr><td>{{ course.name }}</td><td>{{ course.schedule }}</td><td>{{ course.group }}</td><td>{{ course.start_date_display }}</td><td>{{ course.capacity_display }}</td><td>{{ course.enrollment_fee_display }}</td><td>{{ course.monthly_fee_display }}</td><td>{% if course.active %}Activo{% else %}Inactivo{% endif %}</td><td class="right-align">{% if perms.students.change_course %}<a class="blue-text" href="{% url 'course-update' course.pk %}">Editar</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="9" class="center-align muted">No hay cursos registrados.</td></tr>{% endfor %}
 </tbody></table></div>
 {% include "shared/pagination.html" %}
 <script>

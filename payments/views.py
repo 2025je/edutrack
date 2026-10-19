@@ -285,7 +285,7 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
                 # Serializa pagos de una misma matrícula para validar el primer pago sin carreras concurrentes.
                 from students.models import Enrollment
 
-                enrollment = Enrollment.objects.select_for_update().get(
+                enrollment = Enrollment.objects.select_for_update(of=("self",)).get(
                     pk=enrollment.pk, campus=campus
                 )
                 has_confirmed_payment = Payment.objects.filter(
@@ -366,7 +366,7 @@ class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
                 pk=self.object.pk, campus=campus, status=Payment.Status.CONFIRMED
             )
             enrollment = (
-                Enrollment.objects.select_for_update()
+                Enrollment.objects.select_for_update(of=("self",))
                 .filter(pk=selected_enrollment.pk, campus=campus, active=True)
                 .first()
             )

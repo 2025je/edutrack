@@ -1,7 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, When
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.dateparse import parse_date
 from django.urls import reverse, reverse_lazy
@@ -11,13 +11,7 @@ from django.views.generic import CreateView, ListView, TemplateView, UpdateView
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
 from core.models import ActivityLog, Campus, CampusFlyer, User
 from core.pagination import paginate_context
-from students.models import (
-    UNASSIGNED_COURSE_NAME,
-    UNASSIGNED_SCHEDULE_NAME,
-    Course,
-    Promoter,
-    Schedule,
-)
+from students.models import Course, Promoter, Schedule
 
 from .forms import (
     CampusFlyerForm,
@@ -209,17 +203,7 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
         context["form"] = form or CourseForm(
             campus=campus, initial={"schedule": self.request.GET.get("schedule")}
         )
-        courses = (
-            Course.objects.filter(campus=campus)
-            .annotate(
-                is_unassigned_course=Case(
-                    When(name=UNASSIGNED_COURSE_NAME, schedule=UNASSIGNED_SCHEDULE_NAME, then=0),
-                    default=1,
-                    output_field=IntegerField(),
-                )
-            )
-            .order_by("is_unassigned_course", "name", "schedule", "group")
-        )
+        courses = Course.objects.filter(campus=campus).order_by("name", "schedule", "group")
         context.update(paginate_context(self.request, courses, 25))
         context["courses"] = context["page_obj"]
         return context
@@ -244,9 +228,7 @@ class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
     success_url = reverse_lazy("course-list")
 
     def get_queryset(self):
-        return Course.objects.filter(campus=get_selected_campus(self.request)).exclude(
-            name=UNASSIGNED_COURSE_NAME, schedule=UNASSIGNED_SCHEDULE_NAME
-        )
+        return Course.objects.filter(campus=get_selected_campus(self.request))
 
     def form_valid(self, form):
         response = super().form_valid(form)

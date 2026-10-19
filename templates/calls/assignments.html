@@ -45,7 +45,7 @@
   <div class="card table-wrap"><table class="highlight"><thead><tr><th class="center-align">Asignar</th><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
   {% for row in rows %}<tr>
     <td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>
-    <td>{{ row.enrollment.student.full_name }}</td><td>{{ row.enrollment.course.name }}</td><td>{{ row.enrollment.course.schedule }}</td><td>{{ row.enrollment.course.group }}</td><td>{{ row.owners|default:"—" }}</td>
+    <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
   </tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
   </tbody></table></div>
   <button class="btn" type="submit">Guardar asignaciones de esta página</button>

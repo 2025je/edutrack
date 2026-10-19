@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
-  <script>try{if(localStorage.getItem("theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+  <script>try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
   <style>
     body{background:#f5f7fb}
     main{padding:1.5rem 1rem 3rem}
@@ -597,6 +597,82 @@
       .has-side main,main{padding-left:0!important}
     }
   </style>
+  <style>
+    /* Paletas inspiradas en Material for MkDocs: "default" (claro) y "slate" (oscuro). */
+    :root{
+      --md-primary:#4051b5;
+      --md-primary-dark:#303f9f;
+      --md-background:#fafafc;
+      --md-surface:#fff;
+      --md-surface-alt:#f4f5fa;
+      --md-text:rgba(0,0,0,.87);
+      --md-muted:rgba(0,0,0,.54);
+      --md-border:rgba(0,0,0,.09);
+      --md-hover:rgba(64,81,181,.08);
+      --md-active:rgba(64,81,181,.12);
+      --md-header:#4051b5;
+      --md-shadow:0 0 .2rem rgba(0,0,0,.07),0 .2rem .5rem rgba(0,0,0,.06);
+    }
+    html[data-theme=dark]{
+      color-scheme:dark;
+      --md-primary:#9aa8ff;
+      --md-primary-dark:#b4bfff;
+      --md-background:#2e303e;
+      --md-surface:#343748;
+      --md-surface-alt:#3b3e51;
+      --md-text:rgba(232,234,246,.88);
+      --md-muted:rgba(232,234,246,.56);
+      --md-border:rgba(255,255,255,.09);
+      --md-hover:rgba(154,168,255,.10);
+      --md-active:rgba(154,168,255,.16);
+      --md-header:#262833;
+      --md-shadow:0 0 .2rem rgba(0,0,0,.2),0 .2rem .5rem rgba(0,0,0,.25);
+    }
+    html:root body{background:var(--md-background);color:var(--md-text)}
+    html:root body main{background:transparent}
+    html:root body main .col-actions{position:sticky;right:0;z-index:2;background:var(--md-surface,#fff);box-shadow:-6px 0 8px -6px rgba(0,0,0,.25);white-space:nowrap;min-width:9.5rem}
+    html:root body main .actions-stack{display:flex;flex-direction:column;align-items:stretch;gap:.35rem}
+    html:root body main .actions-stack .btn-small.action-btn{justify-content:flex-start}
+    html:root body .badge-pending{display:inline-block;padding:0 .6rem;height:22px;line-height:22px;border-radius:11px;font-size:.75rem;font-weight:500;background:#fff3cd;color:#7a5200;border:1px solid #f0c36d}
+    html[data-theme=dark]:root body .badge-pending{background:rgba(255,193,7,.18);color:#ffd666;border-color:rgba(255,193,7,.45)}
+    html:root body header nav.blue{background-color:var(--md-header)!important;box-shadow:0 0 .2rem rgba(0,0,0,.1),0 .2rem .4rem rgba(0,0,0,.2)}
+    html[data-theme=dark]:root body header nav.blue{box-shadow:0 1px 0 rgba(255,255,255,.06),0 .2rem .4rem rgba(0,0,0,.35)}
+    html:root body .sidenav{background:var(--md-surface);border-right:1px solid var(--md-border);box-shadow:none}
+    html[data-theme=dark]:root body .sidenav{background:var(--md-background)}
+    html:root body .sidenav li>a,html:root body .nav-btn{color:var(--md-text)}
+    html:root body .sidenav li>a>i.material-icons{color:var(--md-muted)}
+    html:root body .sidenav li>a:hover{background:var(--md-hover);color:var(--md-primary)}
+    html:root body .sidenav li>a:hover>i.material-icons{color:var(--md-primary)}
+    html:root body .sidenav li>a.active{background:var(--md-active);color:var(--md-primary);font-weight:600}
+    html:root body .sidenav li>a.active>i.material-icons{color:var(--md-primary)}
+    html:root body .sidenav .subheader{color:var(--md-muted)}
+    html:root body .sidenav .sidebar-campus details{background:var(--md-surface-alt)}
+    html:root body .sidenav .sidebar-campus .campus-label,html:root body .sidenav .account-info span{color:var(--md-muted)}
+    html:root body .sidenav .sidebar-campus .campus-current,html:root body .sidenav .sidebar-campus .campus-list button{color:var(--md-text)}
+    html:root body .sidenav .account-avatar{background:var(--md-active)}
+    html:root body .sidenav .account-avatar i,html:root body .sidenav .account-gear,html:root body .sidenav .sidebar-campus .campus-current i{color:var(--md-muted)}
+    html:root body .sidenav li.sidenav-account,html:root body .sidenav .sidebar-campus .campus-list{border-color:var(--md-border)}
+    html:root body .sidenav li.sidenav-toggle button{color:var(--md-muted)}
+    html:root body .sidenav li.sidenav-toggle button:hover{background:var(--md-hover)}
+    html:root body .card{background:var(--md-surface);border:1px solid var(--md-border);box-shadow:var(--md-shadow)}
+    html:root body .card-head,html:root body table thead th{background:var(--md-surface-alt);color:var(--md-muted);border-color:var(--md-border)}
+    html:root body table,html:root body table td{background:transparent;color:var(--md-text);border-color:var(--md-border)}
+    html:root body table.striped>tbody>tr:nth-child(odd){background:var(--md-surface-alt)}
+    html:root body .muted,html:root body .help,html:root body .pager{color:var(--md-muted)}
+    html:root body main h1,html:root body main h2,html:root body main h3{color:var(--md-text)}
+    html[data-theme=dark]:root body main h1,html[data-theme=dark]:root body main h2{color:#f1f2fa}
+    html:root body .btn-flat{background:var(--md-surface);border-color:var(--md-border);color:var(--md-primary)}
+    html:root body .btn-flat:hover{background:var(--md-hover)}
+    html:root body main input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=submit]),html:root body main textarea,html:root body main select.browser-default{background:var(--md-surface);color:var(--md-text);border-color:var(--md-border)}
+    html[data-theme=dark]:root body main input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=submit]),html[data-theme=dark]:root body main textarea,html[data-theme=dark]:root body main select.browser-default{background:var(--md-background);border-color:rgba(255,255,255,.16)}
+    html:root body main input::placeholder,html:root body main textarea::placeholder{color:var(--md-muted)}
+    html:root body header nav .header-search form{background:rgba(255,255,255,.16)}
+    html:root body .check-list{background:var(--md-surface);border-color:var(--md-border)}
+    html[data-theme=dark]:root body .note-info,html[data-theme=dark]:root body .msg-info,html[data-theme=dark]:root body .msg-debug{background:#2f3a52;border-color:#41507a;color:var(--md-text)}
+    html[data-theme=dark]:root body .note-warning,html[data-theme=dark]:root body .msg-warning{background:#473d2c;border-color:#645634;color:var(--md-text)}
+    html[data-theme=dark]:root body .note-danger,html[data-theme=dark]:root body .msg-error,html[data-theme=dark]:root body .msg-danger{background:#4a3238;border-color:#6d444c;color:var(--md-text)}
+    html[data-theme=dark]:root body .note-success,html[data-theme=dark]:root body .msg-success{background:#2f4339;border-color:#41614f;color:var(--md-text)}
+  </style>
 </head>
 <body class="{% if user.is_authenticated %}has-side{% endif %}">
 <header class="no-print">
@@ -608,7 +684,7 @@
       {% if user.is_authenticated and selected_campus and perms.students.view_student or user.is_authenticated and selected_campus and perms.payments.view_payment %}<li class="header-search hide-on-small-only"><form method="get" action="{% url 'global-search' %}" role="search"><i class="material-icons" aria-hidden="true">search</i><input type="search" name="q" value="{% if request.resolver_match.url_name == 'global-search' %}{{ request.GET.q }}{% endif %}" placeholder="Buscar nombre, DNI, ficha o recibo" aria-label="Búsqueda global" autocomplete="off"></form></li>{% endif %}      
             <li class="header-user hide-on-med-and-down"><span title="Fecha actual"><i class="material-icons" aria-hidden="true">calendar_today</i>{% now "d/m/Y" %}</span></li>
             {% if user.is_authenticated %}<li class="header-user hide-on-small-only"><span title="Usuario"><i class="material-icons" aria-hidden="true">account_circle</i>{{ user.get_full_name|default:user.username }}</span></li>{% endif %}
-            <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar modo nocturno" title="Modo nocturno"><i class="material-icons">dark_mode</i></button></li>
+            <li><button type="button" id="theme-toggle" class="theme-toggle" aria-label="Cambiar tema" title="Automático"><i class="material-icons">brightness_auto</i></button></li>
             {% if user.is_authenticated %}<li class="header-logout"><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="logout-btn" title="Cerrar sesión"><i class="material-icons" aria-hidden="true">logout</i><span class="hide-on-small-only">Salir</span></button></form></li>{% endif %}
       </ul>
     </div>
@@ -768,18 +844,32 @@ window.edutrackBoot = function (first) {
   if (first) {
   M.Sidenav.init(document.querySelectorAll(".sidenav"));
   var toggle = document.getElementById("theme-toggle");
-  function syncThemeIcon() {
-    var dark = document.documentElement.getAttribute("data-theme") === "dark";
-    toggle.querySelector("i").textContent = dark ? "light_mode" : "dark_mode";
-    toggle.title = dark ? "Modo claro" : "Modo nocturno";
+  var THEMES = ["light", "dark", "system"];
+  var LABELS = {light: "Modo claro", dark: "Modo oscuro", system: "Automático"};
+  var ICONS = {light: "light_mode", dark: "dark_mode", system: "brightness_auto"};
+  var media = window.matchMedia("(prefers-color-scheme: dark)");
+  function savedTheme() {
+    var value = null;
+    try { value = localStorage.getItem("theme"); } catch (e) {}
+    return THEMES.indexOf(value) === -1 ? "system" : value;
   }
-  syncThemeIcon();
+  function applyTheme(mode) {
+    var dark = mode === "dark" || (mode === "system" && media.matches);
+    if (dark) document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+    toggle.querySelector("i").textContent = ICONS[mode];
+    var next = LABELS[THEMES[(THEMES.indexOf(mode) + 1) % THEMES.length]];
+    toggle.title = LABELS[mode] + " (clic para cambiar a: " + next + ")";
+    toggle.setAttribute("aria-label", "Tema: " + LABELS[mode] + ". Cambiar a: " + next);
+  }
+  applyTheme(savedTheme());
   toggle.addEventListener("click", function () {
-    var dark = document.documentElement.getAttribute("data-theme") === "dark";
-    if (dark) document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.setAttribute("data-theme", "dark");
-    try { localStorage.setItem("theme", dark ? "light" : "dark"); } catch (e) {}
-    syncThemeIcon();
+    var mode = THEMES[(THEMES.indexOf(savedTheme()) + 1) % THEMES.length];
+    try { localStorage.setItem("theme", mode); } catch (e) {}
+    applyTheme(mode);
+  });
+  media.addEventListener("change", function () {
+    if (savedTheme() === "system") applyTheme("system");
   });
   }
   document.querySelectorAll("select").forEach(function (el) { el.classList.add("browser-default"); });

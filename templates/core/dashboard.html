@@ -40,7 +40,7 @@
 {% if recent_enrollments or recent_payments %}
 <div class="row">
   {% if recent_enrollments %}
-  <div class="col s12 l6"><div class="card card-pad"><h2>Últimas matrículas</h2><ul class="mb-0" style="list-style:none;padding:0">{% for e in recent_enrollments %}<li class="py">{{ e.student.full_name }} <span class="muted">· {{ e.course.name }} · {{ e.enrollment_date|date:"d/m/Y" }}</span></li>{% endfor %}</ul></div></div>
+  <div class="col s12 l6"><div class="card card-pad"><h2>Últimas matrículas</h2><ul class="mb-0" style="list-style:none;padding:0">{% for e in recent_enrollments %}<li class="py">{{ e.student_label }} <span class="muted">· {{ e.course_label }} · {{ e.enrollment_date|date:"d/m/Y" }}</span></li>{% endfor %}</ul></div></div>
   {% endif %}
   {% if recent_payments %}
   <div class="col s12 l6"><div class="card card-pad"><h2>Últimos pagos</h2><ul class="mb-0" style="list-style:none;padding:0">{% for p in recent_payments %}<li class="py">{{ p.enrollment.student.full_name }} <span class="muted">· S/ {{ p.amount|floatformat:2 }} · {{ p.created_at|date:"d/m/Y H:i" }}</span></li>{% endfor %}</ul></div></div>

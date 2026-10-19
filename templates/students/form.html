@@ -25,6 +25,11 @@
                     </div>
                 {% endif %}
 
+                {% if without_student %}
+                    <input type="hidden" name="sin_estudiante" value="1">
+                    <div class="note mb"><strong>Matrícula sin estudiante:</strong> reserva un cupo en el curso. El estudiante se asigna después editando la matrícula.
+                        <a class="blue-text" href="{% url 'enrollment-create' %}">Cambiar</a></div>
+                {% endif %}
                 {% if locked_student %}
                     <div class="note mb"><strong>Estudiante:</strong> {{ locked_student.full_name }}
                         <a class="blue-text" href="{% url 'enrollment-create' %}">Cambiar</a></div>
@@ -40,9 +45,9 @@
                                         {% for enrollment in current_enrollments %}
                                             <tr>
                                                 <td>{{ forloop.counter }}</td>
-                                                <td>{{ enrollment.course.name }}</td>
-                                                <td>{{ enrollment.course.schedule }}</td>
-                                                <td>{{ enrollment.course.group }}</td>
+                                                <td>{{ enrollment.course_label }}</td>
+                                                <td>{% if enrollment.course_id %}{{ enrollment.course.schedule }}{% endif %}</td>
+                                                <td>{% if enrollment.course_id %}{{ enrollment.course.group }}{% endif %}</td>
                                                 <td>{{ enrollment.enrollment_date|date:"d/m/Y" }}</td>
                                                 <td>{% if enrollment.active %}Activa{% else %}Inactiva{% endif %}</td>
                                             </tr>
@@ -123,8 +128,12 @@
                             {% endif %}
 
                             {% if field.name == "student" and "matriculas" in request.path %}
+                                {% if form.student_locked %}
+                                    <div class="help">El estudiante no se puede cambiar; solo elige el curso.</div>
+                                {% else %}
                                 <div id="student-course-help" class="help">Primero selecciona un curso para ver los alumnos que aún no están inscritos.</div>
                                 <div id="student-course-status" class="help" role="status" aria-live="polite"></div>
+                                {% endif %}
                             {% endif %}
 
                             {% if field.name == "course" %}
@@ -189,7 +198,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const studentSelect = document.getElementById("id_student");
     const studentStatus = document.getElementById("student-course-status");
-    const isEnrollmentForm = Boolean(courseSelect && studentSelect && studentStatus);
+    const isEnrollmentForm = Boolean(courseSelect && studentSelect && studentStatus && !studentSelect.disabled);
 
     const phoneFields = document.getElementById("phone-fields");
     const addPhoneButton = document.getElementById("add-phone");
@@ -290,7 +299,12 @@ document.addEventListener("DOMContentLoaded", function () {
     if (courseSelect && enrollmentFee && monthlyFee) {
         function updateCourseFees() {
             const option = courseSelect.selectedOptions[0];
-            if (!option || !option.value) {
+            const isPendingCourse = !option || !option.value;
+            enrollmentFee.readOnly = isPendingCourse;
+            monthlyFee.readOnly = isPendingCourse;
+            if (isPendingCourse) {
+                enrollmentFee.value = "0";
+                monthlyFee.value = "0";
                 if (capacityAlert) {
                     capacityAlert.textContent = "";
                     capacityAlert.classList.add("hide");
@@ -300,17 +314,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
             const registrationFee = option.dataset.registrationFee;
             const monthlyFeeValue = option.dataset.monthlyFee;
-            const isUnassigned = option.dataset.unassigned === "true";
-
-            enrollmentFee.readOnly = isUnassigned;
-            monthlyFee.readOnly = isUnassigned;
-            if (isUnassigned) {
-                enrollmentFee.value = "0";
-                monthlyFee.value = "0";
-            } else {
-                if (registrationFee !== undefined) enrollmentFee.value = registrationFee;
-                if (monthlyFeeValue !== undefined) monthlyFee.value = monthlyFeeValue;
-            }
+            enrollmentFee.readOnly = false;
+            monthlyFee.readOnly = false;
+            if (registrationFee !== undefined) enrollmentFee.value = registrationFee;
+            if (monthlyFeeValue !== undefined) monthlyFee.value = monthlyFeeValue;
 
             if (capacityAlert) {
                 const capacity = Number(option.dataset.capacity);

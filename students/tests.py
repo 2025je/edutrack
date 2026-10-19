@@ -508,22 +508,22 @@ class StudentEnrollmentCrudTests(TestCase):
         with self.assertRaises(ValidationError):
             duplicate_at_same_campus.full_clean()
 
-    def test_only_unassigned_course_allows_repeated_enrollments(self):
-        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
+    def test_pending_course_enrollments_allow_repeated_records_without_a_fake_course(self):
         for _ in range(2):
             Enrollment(
                 campus=self.campus,
                 student=self.student,
-                course=unassigned,
+                course=None,
                 enrollment_fee=10,
                 monthly_fee=10,
             ).full_clean()
-            Enrollment.objects.create(campus=self.campus, student=self.student, course=unassigned)
+            Enrollment.objects.create(campus=self.campus, student=self.student, course=None)
         self.assertEqual(
-            Enrollment.objects.filter(student=self.student, course=unassigned).count(), 2
+            Enrollment.objects.filter(student=self.student, course__isnull=True).count(), 2
         )
         response = self.client.get(reverse("enrollment-create"), {"student": self.student.pk})
-        self.assertContains(response, f'<option value="{unassigned.pk}"')
+        self.assertContains(response, "PENDIENTE DE ASIGNACIÓN")
+        self.assertNotContains(response, "SIN CURSO")
         self.assertNotContains(response, f'<option value="{self.course.pk}"')
         with self.assertRaises(ValidationError):
             Enrollment(campus=self.campus, student=self.student, course=self.course).full_clean(
@@ -597,27 +597,24 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(self.client.post(url, data).status_code, 302)
         self.assertTrue(Enrollment.objects.filter(student=other).exists())
 
-    def test_enrollment_form_defaults_to_unassigned_course_listed_first(self):
-        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
-        response = self.client.get(reverse("enrollment-create"), {"student": self.student.pk})
-        form = response.context["form"]
-        self.assertEqual(form.initial["course"], unassigned.pk)
-        self.assertEqual(form.fields["course"].queryset.first(), unassigned)
-        self.assertEqual(list(form.fields["course"].choices)[0][0].value, unassigned.pk)
-        self.assertContains(response, 'data-unassigned="true"')
-
-    def test_enrollment_in_unassigned_course_forces_zero_fees(self):
-        unassigned = Course.objects.get(campus=self.campus, name="POR ASIGNAR")
-        new_student = Student.objects.create(campus=self.campus, full_name="Alumno por asignar")
-        response = self.client.get(
-            reverse("enrollment-create"), {"student": new_student.pk, "course": unassigned.pk}
+    def test_enrollment_form_offers_pending_course_as_an_empty_choice(self):
+        available_student = Student.objects.create(
+            campus=self.campus, full_name="Estudiante pendiente"
         )
-        self.assertContains(response, 'data-unassigned="true"')
-        self.assertContains(response, "readonly")
+        response = self.client.get(reverse("enrollment-create"), {"student": available_student.pk})
+        form = response.context["form"]
+        self.assertIsNone(form.initial.get("course"))
+        self.assertEqual(form.fields["course"].queryset.first(), self.course)
+        self.assertEqual(str(list(form.fields["course"].choices)[0][0]), "")
+        self.assertEqual(form.fields["course"].empty_label, "PENDIENTE DE ASIGNACIÓN")
+        self.assertNotContains(response, "SIN CURSO")
+
+    def test_enrollment_without_course_forces_zero_fees(self):
+        new_student = Student.objects.create(campus=self.campus, full_name="Alumno por asignar")
         response = self.client.post(
             reverse("enrollment-create") + f"?student={new_student.pk}",
             {
-                "course": unassigned.pk,
+                "course": "",
                 "student": new_student.pk,
                 "promoter": [],
                 "enrollment_date": "2026-09-29",
@@ -627,10 +624,189 @@ class StudentEnrollmentCrudTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        enrollment = Enrollment.objects.get(student=new_student, course=unassigned)
+        enrollment = Enrollment.objects.get(student=new_student, course__isnull=True)
         self.assertEqual(enrollment.enrollment_fee, 0)
         self.assertEqual(enrollment.monthly_fee, 0)
         self.assertFalse(Installment.objects.filter(enrollment=enrollment).exists())
+
+    def test_enrollment_without_course_creates_pending_enrollment_in_one_click(self):
+        new_student = Student.objects.create(campus=self.campus, full_name="Alumno sin curso")
+        self.assertContains(self.client.get(reverse("enrollment-create")), "Matrícula sin curso")
+        response = self.client.post(
+            reverse("enrollment-create") + f"?student={new_student.pk}",
+            {"student": new_student.pk, "pending_course": "1"},
+        )
+        self.assertEqual(response.status_code, 302)
+        enrollment = Enrollment.objects.get(student=new_student)
+        self.assertIsNone(enrollment.course)
+        self.assertEqual(enrollment.course_label, "PENDIENTE DE ASIGNACIÓN")
+        self.assertEqual(enrollment.enrollment_fee, 0)
+        self.assertFalse(Installment.objects.filter(enrollment=enrollment).exists())
+
+    def test_pending_course_enrollment_is_not_payable(self):
+        pending = Enrollment.objects.create(campus=self.campus, student=self.student, course=None)
+        Installment.objects.create(
+            enrollment=pending,
+            concept="Cuota incorrecta",
+            amount=10,
+            due_date=date(2026, 10, 14),
+        )
+
+        from payments.forms import pending_enrollments_for_campus
+
+        self.assertNotIn(pending, pending_enrollments_for_campus(self.campus))
+
+    def test_enrollment_without_student_reserves_course_seat(self):
+        url = reverse("enrollment-create") + "?sin_estudiante=1"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertNotIn("student", form.fields)
+        self.assertTrue(form.fields["course"].required)
+        self.assertContains(self.client.get(reverse("enrollment-create")), "sin_estudiante=1")
+
+        data = {
+            "sin_estudiante": "1",
+            "course": self.course.pk,
+            "promoter": [],
+            "enrollment_date": "2026-09-29",
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        bad = self.client.post(url, {**data, "course": ""})
+        self.assertEqual(bad.status_code, 200)
+        self.assertIn("course", bad.context["form"].errors)
+
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        seat = Enrollment.objects.get(course=self.course, student__isnull=True)
+        self.assertEqual(seat.student_label, "SIN ESTUDIANTE")
+        self.assertEqual(Installment.objects.filter(enrollment=seat).count(), 2)
+        self.assertContains(self.client.get(reverse("enrollment-list")), "SIN ESTUDIANTE")
+
+        from payments.forms import pending_enrollments_for_campus
+
+        self.assertNotIn(seat, pending_enrollments_for_campus(self.campus))
+
+    def test_enrollment_without_student_can_be_assigned_later(self):
+        seat = Enrollment.objects.create(
+            campus=self.campus, course=self.course, enrollment_fee=40, monthly_fee=60
+        )
+        new_student = Student.objects.create(campus=self.campus, full_name="Alumno asignado")
+        url = reverse("enrollment-update", args=[seat.pk])
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertContains(self.client.get(reverse("enrollment-list")), "Pendiente")
+        self.assertContains(self.client.get(reverse("enrollment-list")), "Asignar Estudiante")
+        data = {
+            "course": self.course.pk,
+            "student": new_student.pk,
+            "promoter": [],
+            "enrollment_date": "2026-09-29",
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        from django.contrib.auth.models import Group, Permission
+
+        group = Group.objects.create(name="solo_matricula")
+        group.permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label="students",
+                codename__in=["view_enrollment", "add_enrollment", "view_student", "view_course"],
+            )
+        )
+        clerk = create_user(username="clerk", password="Segura12345!")
+        clerk.groups.add(group)
+        clerk.campuses.add(self.campus)
+        self.client.force_login(clerk)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.assertFalse(clerk.has_perm("students.change_enrollment"))
+        self.assertFalse(clerk.has_perm("core.change_enrollment_course"))
+
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        seat.refresh_from_db()
+        self.assertEqual(seat.student, new_student)
+
+        # Una matrícula completa sigue exigiendo permiso de edición.
+        self.assertEqual(
+            self.client.get(reverse("enrollment-update", args=[self.enrollment.pk])).status_code,
+            403,
+        )
+
+        pending = Enrollment.objects.create(campus=self.campus, student=self.student, course=None)
+        free = Course.objects.create(
+            campus=self.campus,
+            name="Libre",
+            start_date=date(2026, 10, 14),
+            enrollment_fee=10,
+            monthly_fee=10,
+        )
+        self.assertEqual(
+            self.client.get(reverse("enrollment-update", args=[pending.pk])).status_code, 200
+        )
+        response = self.client.post(
+            reverse("enrollment-update", args=[pending.pk]),
+            {
+                "course": free.pk,
+                "student": self.student.pk,
+                "promoter": [],
+                "enrollment_date": "2026-09-29",
+                "enrollment_fee": "10.00",
+                "monthly_fee": "10.00",
+                "active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        pending.refresh_from_db()
+        self.assertEqual(pending.course, free)
+
+    def test_pending_enrollment_locks_student_and_hides_taken_courses(self):
+        free = Course.objects.create(
+            campus=self.campus,
+            name="Libre",
+            start_date=date(2026, 10, 14),
+            enrollment_fee=10,
+            monthly_fee=10,
+        )
+        pending = Enrollment.objects.create(campus=self.campus, student=self.student, course=None)
+        response = self.client.get(reverse("enrollment-update", args=[pending.pk]))
+        form = response.context["form"]
+        self.assertTrue(form.fields["student"].disabled)
+        courses = form.fields["course"].queryset
+        self.assertIn(free, courses)
+        self.assertNotIn(self.course, courses)
+        self.assertContains(self.client.get(reverse("enrollment-list")), "Asignar curso")
+
+    def test_available_students_ignore_seats_without_student(self):
+        seat = Enrollment.objects.create(
+            campus=self.campus, course=self.course, enrollment_fee=40, monthly_fee=60
+        )
+        other = Student.objects.create(campus=self.campus, full_name="Alumno libre")
+        response = self.client.get(
+            reverse("course-students-available"),
+            {"course_id": self.course.pk, "enrollment_id": seat.pk},
+        )
+        self.assertIn(other.pk, [s["id"] for s in response.json()["students"]])
+        edit = self.client.get(reverse("enrollment-update", args=[seat.pk]))
+        self.assertIn(other, edit.context["form"].fields["student"].queryset)
+
+    def test_enrollment_with_student_cannot_lose_it(self):
+        response = self.client.post(
+            reverse("enrollment-update", args=[self.enrollment.pk]),
+            {
+                "course": self.course.pk,
+                "student": "",
+                "promoter": [],
+                "enrollment_date": "2026-09-29",
+                "enrollment_fee": "40.00",
+                "monthly_fee": "60.00",
+                "active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("student", response.context["form"].errors)
 
     def test_enrollment_creation_saves_user_selected_date(self):
         new_student = Student.objects.create(
@@ -1409,7 +1585,7 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(self.student.phone, "987654321")
 
 
-class UnassignedCourseTests(TestCase):
+class PendingEnrollmentTests(TestCase):
     def test_course_and_enrollment_fees_must_be_greater_than_zero(self):
         campus = Campus.objects.create(name="Sede Montos")
         course = Course(campus=campus, name="X", schedule="Y", enrollment_fee=0, monthly_fee=-5)
@@ -1431,55 +1607,23 @@ class UnassignedCourseTests(TestCase):
         self.assertEqual(Promoter.objects.filter(name="NN").count(), 1)
         self.assertTrue(other.promoters.filter(name="NN").exists())
 
-    def test_new_campus_gets_unassigned_course_and_schedule(self):
+    def test_new_campus_does_not_get_a_placeholder_course_or_schedule(self):
         campus = Campus.objects.create(name="Sede Nueva")
-        course = Course.objects.get(campus=campus, name="POR ASIGNAR")
-        self.assertEqual(course.schedule, "PENDIENTE DE ASIGNACION")
-        self.assertEqual(course.group, "PENDIENTE DE ASIGNACION")
-        self.assertIsNone(course.start_date)
-        self.assertEqual(course.start_date_display(), "PENDIENTE DE ASIGNACION")
-        for field in ("capacity", "enrollment_fee", "monthly_fee"):
-            self.assertIsNone(getattr(course, field))
-        self.assertEqual(course.capacity_display(), "PENDIENTE DE ASIGNACION")
-        self.assertEqual(course.enrollment_fee_display(), "PENDIENTE DE ASIGNACION")
-        self.assertEqual(course.monthly_fee_display(), "PENDIENTE DE ASIGNACION")
-        regular = Course(
-            campus=campus,
-            name="X",
-            schedule="Y",
-            group="1",
-            start_date=None,
-            capacity=None,
-            enrollment_fee=None,
-            monthly_fee=None,
-        )
-        with self.assertRaises(ValidationError) as context:
-            regular.full_clean()
-        for field in ("start_date", "capacity", "enrollment_fee", "monthly_fee"):
-            self.assertIn(field, context.exception.message_dict)
-        self.assertTrue(
-            Schedule.objects.filter(campus=campus, name="PENDIENTE DE ASIGNACION").exists()
+        self.assertFalse(Course.objects.filter(campus=campus).exists())
+        self.assertFalse(Schedule.objects.filter(campus=campus, name="-").exists())
+        self.assertEqual(
+            set(Schedule.objects.filter(campus=campus).values_list("name", flat=True)),
+            {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM"},
         )
 
-    def test_only_superuser_can_modify_unassigned_course(self):
-        from django.contrib.admin.sites import site
-        from django.contrib.auth.models import Permission
-        from django.test import RequestFactory
-
-        campus = Campus.objects.create(name="Sede Admin")
-        course = Course.objects.get(campus=campus, name="POR ASIGNAR")
-        schedule = Schedule.objects.get(campus=campus, name="PENDIENTE DE ASIGNACION")
-        staff = create_user("staff", password="x", is_staff=True)
-        staff.user_permissions.set(Permission.objects.filter(content_type__app_label="students"))
-        admin_user = User.objects.create_superuser("root", password="x")
-        request = RequestFactory().get("/")
-        for obj in (course, schedule):
-            model_admin = site._registry[type(obj)]
-            request.user = User.objects.get(pk=staff.pk)
-            self.assertFalse(model_admin.has_change_permission(request, obj))
-            self.assertFalse(model_admin.has_delete_permission(request, obj))
-            request.user = admin_user
-            self.assertTrue(model_admin.has_change_permission(request, obj))
+    def test_enrollment_must_have_a_student_or_a_course(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Enrollment.objects.create(
+                    campus=Campus.objects.create(name="Sede sin asignación"),
+                    student=None,
+                    course=None,
+                )
 
 
 class CourseUniquenessTests(TestCase):
@@ -1492,16 +1636,13 @@ class CourseUniquenessTests(TestCase):
             "group": "A",
         }
 
-    def test_course_group_must_be_positive_integer_except_unassigned(self):
+    def test_course_group_must_be_positive_integer(self):
         for bad in ("A", "0", "-1", "1.5", ""):
             with self.assertRaises(ValidationError, msg=bad) as context:
                 Course(**{**self.course_data, "group": bad}).full_clean()
             self.assertIn("group", context.exception.message_dict)
         fees = {"enrollment_fee": 10, "monthly_fee": 10}
         Course(**{**self.course_data, "group": "2", **fees}).full_clean()
-        Course.objects.get(campus=self.campus, name="POR ASIGNAR").full_clean(
-            exclude=["enrollment_fee", "monthly_fee"]
-        )
 
     def test_same_course_identity_cannot_be_created_twice_in_one_campus(self):
         Course.objects.create(**self.course_data)
@@ -1526,5 +1667,5 @@ class CourseUniquenessTests(TestCase):
     def test_default_schedules_are_available_in_the_catalog(self):
         self.assertEqual(
             set(Schedule.objects.filter(campus=self.campus).values_list("name", flat=True)),
-            {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM", "PENDIENTE DE ASIGNACION"},
+            {"SÁBADOS DE 8AM A 11AM", "SÁBADOS DE 11AM A 2PM"},
         )

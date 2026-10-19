@@ -52,6 +52,8 @@ def pending_enrollments_for_campus(campus):
         Enrollment.objects.filter(
             campus=campus,
             active=True,
+            student__isnull=False,
+            course__isnull=False,
         )
         .annotate(pending_balance=Subquery(pending_totals, output_field=money_field))
         .filter(pending_balance__gt=0)
@@ -294,6 +296,7 @@ class PaymentUpdateForm(VoucherFieldsMixin, forms.ModelForm):
         if campus:
             self.fields["enrollment"].queryset = (
                 Enrollment.objects.filter(campus=campus)
+                .filter(Q(student__isnull=False) | Q(pk=self.instance.enrollment_id))
                 .filter(Q(active=True) | Q(pk=self.instance.enrollment_id))
                 .select_related("student", "course")
             )

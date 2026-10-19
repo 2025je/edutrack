@@ -10,10 +10,10 @@ class StudentsConfig(AppConfig):
 
         from core.models import Campus
 
-        from .signals import create_unassigned_course
+        from .signals import create_campus_defaults
 
         post_save.connect(
-            create_unassigned_course,
+            create_campus_defaults,
             sender=Campus,
-            dispatch_uid="create_unassigned_course",
+            dispatch_uid="create_campus_defaults",
         )

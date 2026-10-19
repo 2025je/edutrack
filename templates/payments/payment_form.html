@@ -10,7 +10,7 @@
 <dl class="pay-summary" style="margin:0">
 <div><dt>Estudiante</dt><dd>{{ enrollment.student.full_name }}</dd></div>
 <div><dt>DNI</dt><dd>{{ enrollment.student.document_number|default:"—" }}</dd></div>
-<div><dt>Curso</dt><dd>{{ enrollment.course.name }}</dd></div>
+<div><dt>Curso</dt><dd>{{ enrollment.course_label }}</dd></div>
 <div><dt>Costo matrícula</dt><dd>S/ {{ enrollment.enrollment_fee|floatformat:2 }}</dd></div>
 <div><dt>Mensualidad</dt><dd>S/ {{ enrollment.monthly_fee|floatformat:2 }}</dd></div>
 <div><dt>Deuda pendiente</dt><dd>S/ {{ enrollment.pending_balance|floatformat:2 }}</dd></div>

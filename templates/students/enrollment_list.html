@@ -42,18 +42,18 @@
 <th><a href="{{ sort_urls.total_debt }}">Deuda{% if current_sort == "total_debt" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
 <th>Recibos</th>
 <th><a href="{{ sort_urls.active }}">Estado{% if current_sort == "active" %}{% if current_direction == "asc" %} ↑{% else %} ↓{% endif %}{% endif %}</a></th>
-<th class="right-align">Acciones</th></tr></thead><tbody>
+<th class="right-align col-actions">Acciones</th></tr></thead><tbody>
 {% for e in enrollments %}
 <tr>
 	<td>{{ e.row_number }}</td>
-	<td><a href="{% url 'student-enrollment-list' e.student.pk %}">{{ e.student.full_name }}</a></td>
-	<td><a href="{% url 'enrollment-list' %}?course_id={{ e.course.pk }}">{{ e.course.name }}</a></td>
-	<td>{{ e.course.schedule }}</td>
-	<td>{{ e.course.group }}</td>
+	<td>{% if e.student_id %}<a href="{% url 'student-enrollment-list' e.student_id %}">{{ e.student.full_name }}</a>{% else %}<span class="muted">{{ e.student_label }}</span>{% endif %}{% if e.is_pending %} <span class="badge-pending">Pendiente</span>{% endif %}</td>
+	<td>{% if e.course_id %}<a href="{% url 'enrollment-list' %}?course_id={{ e.course_id }}">{{ e.course.name }}</a>{% else %}<span class="muted">{{ e.course_label }}</span>{% endif %}</td>
+	<td>{% if e.course_id %}{{ e.course.schedule }}{% endif %}</td>
+	<td>{% if e.course_id %}{{ e.course.group }}{% endif %}</td>
 	<td>{{ e.record_code|default:"—" }}{% if e.ficha.image %} <a href="{{ e.ficha.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td>
 	<td>{% for promoter in e.promoter.all %}<a href="{% url 'enrollment-list' %}?promoter_id={{ promoter.pk }}">{{ promoter.name }}</a>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
 	<td><a href="{% url 'enrollment-list' %}?enrollment_date={{ e.enrollment_date|date:'Y-m-d' }}">{{ e.enrollment_date|date:"d/m/Y" }}</a></td>
-	<td>{{ e.course.start_date_display }}</td>
+	<td>{% if e.course_id %}{{ e.course.start_date_display }}{% else %}—{% endif %}</td>
 	<td>S/ {{ e.enrollment_fee|floatformat:2 }}</td>
 	<td>S/ {{ e.monthly_fee|floatformat:2 }}</td>
 	<td class="strong">S/ {{ e.total_enrollment_cost|floatformat:2 }}</td>
@@ -71,14 +71,14 @@
 		{% endfor %}
 	</td>
 	<td>{% if e.active %}Activa{% else %}Inactiva{% endif %}</td>
-	<td class="right-align">
-		<div class="flex gap" style="justify-content:flex-end">
+	<td class="right-align col-actions">
+		<div class="actions-stack">
 			{% if perms.payments.add_payment %}
 				{% if e.pk in payable_enrollment_ids %}
 				<a class="btn-small action-btn green darken-1" href="{% url 'payment-create-for' e.pk %}" aria-label="Pagar matrícula" title="Pagar matrícula"><i class="material-icons" aria-hidden="true">payments</i>Pagar</a>
 				{% endif %}
 			{% endif %}
-			{% if perms.students.change_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula">			<i class="material-icons" aria-hidden="true">edit</i>Editar</a>{% endif %}
+			{% if perms.students.change_enrollment or perms.students.add_enrollment and e.is_pending %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' e.pk %}" aria-label="Editar matrícula" title="Editar matrícula">			<i class="material-icons" aria-hidden="true">edit</i>{% if not e.student_id %}Asignar Estudiante{% elif not e.course_id %}Asignar curso{% else %}Editar{% endif %}</a>{% endif %}
 						{% if e.active and perms.core.deactivate_enrollment %}<a class="btn-small action-btn red darken-1" href="{% url 'enrollment-delete' e.pk %}" aria-label="Dar de baja matrícula" title="Dar de baja matrícula"><i class="material-icons" aria-hidden="true">person_remove</i>Dar de baja</a>{% endif %}
 		</div>
 	</td>
