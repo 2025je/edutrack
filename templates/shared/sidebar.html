@@ -55,9 +55,15 @@
   {% if perms.core.view_call_reports %}<li><a href="{% url 'calls-report' %}"><i class="material-icons">assessment</i>Reporte de llamadas</a></li>{% endif %}
   {% endif %}
 
-  {% if perms.core.view_academic_reports or perms.students.add_enrollment or perms.payments.add_payment %}
+  {% if perms.core.view_academic_reports or perms.core.view_financial_reports or perms.core.view_pending_balances or perms.students.add_enrollment or perms.payments.add_payment %}
   <li><div class="subheader">Informes</div></li>
-  {% if perms.core.view_academic_reports %}<li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>{% endif %}
+  {% if perms.core.view_academic_reports %}<li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>
+  <li><a href="{% url 'report-pending-course' %}"><i class="material-icons">pending_actions</i>Pendientes de curso</a></li>
+  <li><a href="{% url 'report-enrollments-by-month' %}"><i class="material-icons">calendar_month</i>Matrículas por mes</a></li>
+  <li><a href="{% url 'report-enrollments-by-promoter' %}"><i class="material-icons">badge</i>Matrículas por promotor</a></li>
+  <li><a href="{% url 'report-course-occupancy' %}"><i class="material-icons">event_seat</i>Ocupación por curso</a></li>{% endif %}
+  {% if perms.core.view_pending_balances %}<li><a href="{% url 'report-debt-by-course' %}"><i class="material-icons">trending_down</i>Morosidad por curso</a></li>{% endif %}
+  {% if perms.core.view_financial_reports %}<li><a href="{% url 'report-income-by-month' %}"><i class="material-icons">savings</i>Ingresos por mes</a></li>{% endif %}
   {% if perms.students.add_enrollment or perms.payments.add_payment %}<li><a href="{% url 'tools' %}"><i class="material-icons">build</i>Herramientas</a></li>{% endif %}
   {% endif %}
 
@@ -154,6 +160,17 @@
   var KEY = "edutrack.sidebar.collapsed";
   function stored() { try { return localStorage.getItem(KEY) === "1"; } catch (e) { return false; } }
   document.body.classList.toggle("side-collapsed", stored());
+
+  // Cargas completas: se recuerda la posición del scroll del menú.
+  var SCROLL_KEY = "edutrack.sidebar.scroll";
+  var scroller = document.querySelector("#slide-out .sidenav-scroll");
+  if (scroller) {
+    try { scroller.scrollTop = parseInt(sessionStorage.getItem(SCROLL_KEY), 10) || 0; } catch (e) {}
+    window.addEventListener("pagehide", function () {
+      var current = document.querySelector("#slide-out .sidenav-scroll");
+      try { if (current) sessionStorage.setItem(SCROLL_KEY, current.scrollTop); } catch (e) {}
+    });
+  }
 
   document.addEventListener("click", function (event) {
     if (!event.target.closest("#sidebar-toggle")) return;
@@ -262,8 +279,12 @@
           var fresh = doc.querySelector("main");
           var menu = doc.getElementById("slide-out");
           if (!fresh || !menu) return fallback(method === "GET" ? null : html, response.url);
+          var scroller = document.querySelector("#slide-out .sidenav-scroll");
+          var menuScroll = scroller ? scroller.scrollTop : 0;
           main.innerHTML = fresh.innerHTML;
           document.getElementById("slide-out").innerHTML = menu.innerHTML;
+          var newScroller = document.querySelector("#slide-out .sidenav-scroll");
+          if (newScroller) newScroller.scrollTop = menuScroll;
           var search = document.querySelector("header .header-search");
           var freshSearch = doc.querySelector("header .header-search");
           if (search && freshSearch) search.innerHTML = freshSearch.innerHTML;

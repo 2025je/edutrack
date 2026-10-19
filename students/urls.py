@@ -1,4 +1,12 @@
 from django.urls import path
+from .reports import (
+    CourseOccupancyReportView,
+    DebtByCourseReportView,
+    EnrollmentsByMonthReportView,
+    EnrollmentsByPromoterReportView,
+    IncomeByMonthReportView,
+    PendingCourseReportView,
+)
 from .views import (
     StudentListView,
     StudentCreateView,
@@ -47,6 +55,36 @@ urlpatterns = [
         "reportes/alumnos-por-curso/",
         CourseStudentTablesView.as_view(),
         name="course-student-tables",
+    ),
+    path(
+        "reportes/matriculas-por-promotor/",
+        EnrollmentsByPromoterReportView.as_view(),
+        name="report-enrollments-by-promoter",
+    ),
+    path(
+        "reportes/matriculas-por-mes/",
+        EnrollmentsByMonthReportView.as_view(),
+        name="report-enrollments-by-month",
+    ),
+    path(
+        "reportes/pendientes-de-curso/",
+        PendingCourseReportView.as_view(),
+        name="report-pending-course",
+    ),
+    path(
+        "reportes/ingresos-por-mes/",
+        IncomeByMonthReportView.as_view(),
+        name="report-income-by-month",
+    ),
+    path(
+        "reportes/morosidad-por-curso/",
+        DebtByCourseReportView.as_view(),
+        name="report-debt-by-course",
+    ),
+    path(
+        "reportes/ocupacion-por-curso/",
+        CourseOccupancyReportView.as_view(),
+        name="report-course-occupancy",
     ),
     path("herramientas/", ToolsView.as_view(), name="tools"),
 ]

@@ -810,6 +810,9 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
             form.add_error("course", "Este estudiante ya está matriculado en este curso.")
             return self.form_invalid(form)
         messages.success(self.request, "Matrícula registrada y cuotas iniciales generadas.")
+        message = seats_message(self.object.course)
+        if message:
+            messages.info(self.request, message)
         return redirect(self.get_success_url())
 
 
@@ -869,6 +872,9 @@ class EnrollmentUpdateView(CampusScopedMixin, UpdateView):
                 Installment.objects.filter(enrollment=self.object).update(active=True)
             self.sync_installments(installments)
         messages.success(self.request, "Matrícula actualizada y deuda recalculada.")
+        message = seats_message(self.object.course)
+        if message:
+            messages.info(self.request, message)
         return response
 
     @staticmethod
@@ -963,10 +969,29 @@ class EnrollmentDeleteView(CampusScopedMixin, DeleteView):
         return redirect(self.get_success_url())
 
 
+def seats_message(course):
+    if not course or not course.capacity:
+        return None
+    occupied = (
+        Enrollment.objects.filter(course=course, active=True)
+        .filter(Q(student__isnull=True) | Q(student__active=True))
+        .count()
+    )
+    left = course.capacity - occupied
+    label = f"{course.name} (grupo {course.group})" if course.group else course.name
+    if left > 0:
+        noun = "vacante" if left == 1 else "vacantes"
+        return f"Quedan {left} {noun} disponibles en {label}."
+    if left == 0:
+        return f"El curso {label} ya no tiene vacantes disponibles."
+    return f"El curso {label} excede su capacidad en {-left}."
+
+
 def course_students_queryset(request):
     campus = get_selected_campus(request)
     enrollments = (
-        Enrollment.objects.filter(campus=campus, active=True, student__active=True)
+        Enrollment.objects.filter(campus=campus, active=True)
+        .filter(Q(student__isnull=True) | Q(student__active=True))
         .select_related("student", "course")
         .order_by("student__full_name")
     )
@@ -976,7 +1001,12 @@ def course_students_queryset(request):
             student_count=Count(
                 "enrollments",
                 filter=Q(enrollments__active=True, enrollments__student__active=True),
-            )
+            ),
+            enrollment_count=Count(
+                "enrollments",
+                filter=Q(enrollments__active=True)
+                & (Q(enrollments__student__isnull=True) | Q(enrollments__student__active=True)),
+            ),
         )
         .prefetch_related(Prefetch("enrollments", queryset=enrollments))
         .order_by("name", "schedule", "group")
@@ -1009,6 +1039,19 @@ class CourseStudentTablesView(CampusScopedMixin, ListView):
         params = self.request.GET.copy()
         params.pop("page", None)
         context["pagination_query"] = params.urlencode()
+        summary = []
+        for course in course_students_queryset(self.request):
+            capacity = course.capacity
+            summary.append(
+                {
+                    "course": course,
+                    "occupied": course.enrollment_count,
+                    "reserved": course.enrollment_count - course.student_count,
+                    "available": max(capacity - course.enrollment_count, 0) if capacity else None,
+                    "over": bool(capacity) and course.enrollment_count > capacity,
+                }
+            )
+        context["seat_summary"] = summary
         context["total_students"] = (
             Enrollment.objects.filter(
                 campus=get_selected_campus(self.request), active=True, student__active=True
@@ -1025,7 +1068,7 @@ class CourseStudentExportView(CampusScopedMixin, View):
 
     def get(self, request, *args, **kwargs):
         workbook = Workbook()
-        courses = list(course_students_queryset(request).filter(student_count__gt=0))
+        courses = list(course_students_queryset(request).filter(enrollment_count__gt=0))
         grouped_courses = [
             (name, list(course_group))
             for name, course_group in groupby(courses, key=lambda course: course.name)
@@ -1094,15 +1137,21 @@ class CourseStudentExportView(CampusScopedMixin, View):
 
                 course_enrollments = list(course.enrollments.all())
                 for row_number, enrollment in enumerate(course_enrollments, start=1):
-                    worksheet.append(
-                        [
-                            row_number,
-                            enrollment.student.full_name,
-                            enrollment.student.document_number,
-                            enrollment.student.phone,
-                            enrollment.enrollment_date,
-                        ]
-                    )
+                    row = [
+                        row_number,
+                        enrollment.student.full_name
+                        if enrollment.student_id
+                        else "VACANTE RESERVADA",
+                        enrollment.student.document_number
+                        if enrollment.student_id
+                        else EMPTY_VALUE,
+                        enrollment.student.phone if enrollment.student_id else EMPTY_VALUE,
+                        enrollment.enrollment_date,
+                    ]
+                    worksheet.append(row)
+                    if not enrollment.student_id:
+                        for cell in worksheet[worksheet.max_row]:
+                            cell.fill = PatternFill("solid", fgColor="FFF3CD")
 
                 table = Table(
                     displayName=f"Course_{course.pk}",

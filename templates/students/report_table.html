@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · EduTrack{% endblock %}
+{% block content %}
+<div class="flex wrap between items-center gap mb"><div><h1>{{ title }}</h1><div class="muted">{{ description }}</div></div><div class="flex gap no-print"><button class="btn-flat grey-text text-darken-2" onclick="window.print()">Imprimir reporte</button></div></div>
+<div class="card table-wrap"><table class="highlight"><thead><tr>{% for column in columns %}<th{% if forloop.counter0 in numeric_columns %} class="right-align"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead><tbody>
+{% for row in rows %}<tr>{% for value in row %}<td{% if forloop.counter0 in numeric_columns %} class="right-align"{% endif %}>{{ value }}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="{{ columns|length }}" class="center-align muted">{{ empty_message }}</td></tr>{% endfor %}
+</tbody>{% if totals %}<tfoot><tr class="strong">{% for value in totals %}<td{% if forloop.counter0 in numeric_columns %} class="right-align"{% endif %}>{{ value }}</td>{% endfor %}</tr></tfoot>{% endif %}</table></div>
+{% endblock %}

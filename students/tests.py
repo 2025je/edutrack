@@ -140,6 +140,136 @@ class CourseStudentExportTests(TestCase):
         self.assertEqual(workbook["MATEMÁTICAS"].cell(header_row + 1, 1).value, 1)
         self.assertEqual(workbook["MATEMÁTICAS"].cell(header_row + 2, 1).value, 2)
 
+    def test_course_student_report_shows_reserved_seats_as_distinct_rows(self):
+        course = Course.objects.get(campus=self.campus, name="FÍSICA")
+        Enrollment.objects.create(campus=self.campus, course=course)
+
+        response = self.client.get(reverse("course-student-tables"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FÍSICA")
+        self.assertContains(response, "Vacante reservada · Sin estudiante")
+        course_in_context = next(
+            item for item in response.context["courses"] if item.pk == course.pk
+        )
+        self.assertEqual(course_in_context.enrollment_count, 1)
+        self.assertEqual(course_in_context.student_count, 0)
+
+    def test_course_student_report_has_vacancy_summary(self):
+        course = Course.objects.get(campus=self.campus, name="FÍSICA")
+        course.capacity = 3
+        course.save()
+        Enrollment.objects.create(campus=self.campus, course=course)
+
+        response = self.client.get(reverse("course-student-tables"))
+
+        self.assertContains(response, "Resumen de vacantes")
+        row = next(r for r in response.context["seat_summary"] if r["course"].pk == course.pk)
+        self.assertEqual(row["occupied"], 1)
+        self.assertEqual(row["reserved"], 1)
+        self.assertEqual(row["available"], 2)
+        self.assertFalse(row["over"])
+
+    def test_course_student_export_includes_and_highlights_reserved_seats(self):
+        course = Course.objects.get(campus=self.campus, name="FÍSICA")
+        Enrollment.objects.create(campus=self.campus, course=course)
+
+        response = self.client.get(reverse("course-student-export"))
+
+        workbook = load_workbook(BytesIO(response.content), data_only=True)
+        worksheet = workbook["FÍSICA"]
+        rows = list(worksheet.iter_rows(values_only=True))
+        self.assertIn("VACANTE RESERVADA", [value for row in rows for value in row])
+        reserved_row = next(
+            row for row in worksheet.iter_rows() if row[1].value == "VACANTE RESERVADA"
+        )
+        self.assertTrue(reserved_row[1].fill.fgColor.rgb.endswith("FFF3CD"))
+
+
+class ExtraReportsTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Informes", active=True)
+        self.user = create_user(
+            username="reporter",
+            password="x-Test-pass-123",
+            manage_students=True,
+            register_payments=True,
+        )
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.course = Course.objects.create(
+            campus=self.campus, name="Álgebra", schedule="Lunes", start_date=date(2026, 10, 1)
+        )
+        self.promoter = Promoter.objects.create(name="Promotor Uno")
+        self.promoter.campuses.add(self.campus)
+        self.student = Student.objects.create(
+            campus=self.campus, full_name="Ana Pérez", document_number="1", phone="987654321"
+        )
+        self.with_course = Enrollment.objects.create(
+            campus=self.campus, student=self.student, course=self.course
+        )
+        self.with_course.promoter.add(self.promoter)
+        self.pending = Enrollment.objects.create(
+            campus=self.campus,
+            student=Student.objects.create(
+                campus=self.campus, full_name="Luis Gómez", document_number="2", phone="912345678"
+            ),
+        )
+        self.seat = Enrollment.objects.create(campus=self.campus, course=self.course)
+        Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.with_course,
+            cashier=self.user,
+            receipt_number="R-1",
+            amount=50,
+        )
+        Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.with_course,
+            cashier=self.user,
+            receipt_number="R-2",
+            amount=30,
+            status=Payment.Status.VOID,
+        )
+
+    def test_reports_render_with_expected_figures(self):
+        response = self.client.get(reverse("report-enrollments-by-promoter"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(["PROMOTOR UNO", 1, 1, 0], response.context["rows"])
+        self.assertIn(["Sin promotor", 2, 1, 1], response.context["rows"])
+
+        response = self.client.get(reverse("report-enrollments-by-month"))
+        self.assertEqual(response.context["totals"], ["Total", 3, 2, 1, 1])
+
+        response = self.client.get(reverse("report-pending-course"))
+        self.assertEqual([row[0] for row in response.context["rows"]], ["LUIS GÓMEZ"])
+
+        response = self.client.get(reverse("report-income-by-month"))
+        self.assertEqual(response.context["totals"], ["Total", 1, "50.00"])
+
+        response = self.client.get(reverse("report-course-occupancy"))
+        row = next(r for r in response.context["rows"] if r[0] == "ÁLGEBRA")
+        self.assertEqual(row[4], 2)
+
+        Installment.objects.create(
+            enrollment=self.with_course, concept="Cuota", amount=80, due_date=date(2026, 10, 1)
+        )
+        response = self.client.get(reverse("report-debt-by-course"))
+        self.assertEqual(response.context["totals"], ["Total", "", "", 1, "80.00"])
+
+    def test_financial_report_requires_permission(self):
+        limited = create_user(username="limited", password="x-Test-pass-123", manage_students=True)
+        limited.campuses.add(self.campus)
+        self.client.force_login(limited)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.assertEqual(self.client.get(reverse("report-income-by-month")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("report-pending-course")).status_code, 200)
+
 
 class StudentEnrollmentCrudTests(TestCase):
     def setUp(self):
@@ -687,6 +817,23 @@ class StudentEnrollmentCrudTests(TestCase):
         from payments.forms import pending_enrollments_for_campus
 
         self.assertNotIn(seat, pending_enrollments_for_campus(self.campus))
+
+    def test_enrollment_shows_remaining_seats_message(self):
+        self.course.capacity = 5
+        self.course.save()
+        url = reverse("enrollment-create") + "?sin_estudiante=1"
+        data = {
+            "sin_estudiante": "1",
+            "course": self.course.pk,
+            "promoter": [],
+            "enrollment_date": "2026-09-29",
+            "enrollment_fee": "40.00",
+            "monthly_fee": "60.00",
+            "active": "on",
+        }
+        response = self.client.post(url, data, follow=True)
+        texts = [str(m) for m in response.context["messages"]]
+        self.assertTrue(any("Quedan 3 vacantes disponibles" in t for t in texts), texts)
 
     def test_enrollment_without_student_can_be_assigned_later(self):
         seat = Enrollment.objects.create(
