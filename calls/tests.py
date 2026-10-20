@@ -279,7 +279,9 @@ class CallAssignmentTests(TestCase):
         url = reverse("calls-assignments")
         page = self.client.get(url)
         self.assertEqual(len(page.context["rows"]), 2)
-        self.assertContains(page, "Selecciona un usuario para poder asignar")
+        self.assertContains(
+            page, "Selecciona un usuario arriba para mostrar las casillas de asignación"
+        )
         page = self.client.get(url, {"usuario": self.caller.pk, "curso": "Ingles"})
         self.assertContains(page, "Llamadas ya asignadas a llamador (1)")
         self.assertEqual(len(page.context["assigned_list"]), 1)
