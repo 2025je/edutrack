@@ -12,6 +12,11 @@ from core.testing import create_user
 
 
 class BaseTemplateTests(TestCase):
+    def test_login_displays_copyright(self):
+        response = self.client.get(reverse("login"))
+
+        self.assertContains(response, "Copyright ©")
+
     def test_sidebar_displays_current_copyright_year(self):
         campus = Campus.objects.create(name="Sede copyright", active=True)
         user = User.objects.create_superuser(username="copyright-test", password="password")

@@ -1,5 +1,9 @@
     body{background:#f5f7fb}
     main{padding:1.5rem 1rem 3rem}
+    body:not(.has-side){min-height:100vh;display:flex;flex-direction:column}
+    body:not(.has-side) main{flex:1}
+    .site-footer{padding:1rem;color:#757575;font-size:.85rem;text-align:center}
+    html[data-theme=dark] .site-footer{color:#9e9e9e}
     .has-side main,.has-side header{padding-left:calc(300px + 2rem);padding-right:2rem}
     @media only screen and (max-width:992px){.has-side main,.has-side header{padding-left:1rem;padding-right:1rem}}
     .container-wide{max-width:1200px;margin:0 auto}
