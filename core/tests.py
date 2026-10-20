@@ -5,9 +5,27 @@ import sys
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import ActivityLog, Campus, User
 from core.testing import create_user
+
+
+class BaseTemplateTests(TestCase):
+    def test_sidebar_displays_current_copyright_year(self):
+        campus = Campus.objects.create(name="Sede copyright", active=True)
+        user = User.objects.create_superuser(username="copyright-test", password="password")
+        user.campuses.add(campus)
+        self.client.force_login(user)
+        session = self.client.session
+        session["selected_campus_id"] = campus.pk
+        session.save()
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(
+            response,
+            f"Copyright © {timezone.localdate().year} EduTrack",
+        )
 
 
 class CampusLogoTests(TestCase):
