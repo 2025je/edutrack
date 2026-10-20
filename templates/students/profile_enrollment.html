@@ -1,7 +1,7 @@
 <div class="card pad">
   <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <div>
-      <span class="strong">{{ card.enrollment.course_label }}</span>
+      <span class="strong">{{ card.enrollment.course_label }}</span>{% if card.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}
       {% if card.enrollment.active %}<span class="chip green darken-1 white-text">Activa</span>{% else %}<span class="chip grey">Inactiva</span>{% endif %}
       <div class="muted">
         Matrícula del {{ card.enrollment.enrollment_date|date:"d/m/Y" }}

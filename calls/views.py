@@ -667,6 +667,21 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             "grupo": params.get("grupo", "").strip(),
             "estado": params.get("estado", "").strip(),
             "deuda": params.get("deuda", "") == "1",
+            "situacion": (
+                params.get("situacion", "")
+                if params.get("situacion", "") in ("ya_inicio", "por_iniciar", "incorporacion")
+                else ""
+            ),
+            **{
+                key: params.get(key, "").strip()
+                for key in (
+                    "matricula_desde",
+                    "matricula_hasta",
+                    "inicio_desde",
+                    "inicio_hasta",
+                )
+                if parse_date(params.get(key, "").strip())
+            },
         }
 
     def get_base_enrollments(self):
@@ -679,9 +694,25 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
         target = self.get_target()
         qs = self.get_base_enrollments().select_related("student", "course")
         if f["q"]:
+            qs = qs.filter(student__full_name__unaccent__icontains=f["q"])
+        for key, lookup in (
+            ("matricula_desde", "enrollment_date__gte"),
+            ("matricula_hasta", "enrollment_date__lte"),
+            ("inicio_desde", "course__start_date__gte"),
+            ("inicio_hasta", "course__start_date__lte"),
+        ):
+            if f.get(key):
+                qs = qs.filter(**{lookup: parse_date(f[key])})
+        today = timezone.localdate()
+        if f["situacion"] == "incorporacion":
+            qs = qs.filter(enrollment_date__gt=F("course__start_date"))
+        elif f["situacion"] == "ya_inicio":
             qs = qs.filter(
-                Q(student__full_name__unaccent__icontains=f["q"])
-                | Q(course__name__unaccent__icontains=f["q"])
+                course__start_date__lte=today, enrollment_date__lte=F("course__start_date")
+            )
+        elif f["situacion"] == "por_iniciar":
+            qs = qs.filter(
+                course__start_date__gt=today, enrollment_date__lte=F("course__start_date")
             )
         if f["curso"]:
             qs = qs.filter(course__name=f["curso"])

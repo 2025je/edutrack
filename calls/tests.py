@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import Campus, User
 from core.testing import create_user, grant, revoke
@@ -334,6 +335,32 @@ class CallAssignmentTests(TestCase):
         self.assertEqual(ids(estado="asignadas"), {self.enrollments[0].pk})
         self.assertNotIn(self.enrollments[0].pk, ids(estado="sin_asignar"))
         self.assertEqual(ids(estado="otros"), set())
+        Enrollment.objects.filter(pk=extra.pk).update(enrollment_date="2026-01-10")
+        Course.objects.exclude(pk=other_course.pk).update(start_date="2026-02-01")
+        Course.objects.filter(pk=other_course.pk).update(start_date="2026-03-01")
+        self.assertEqual(
+            ids(matricula_desde="2026-01-10", matricula_hasta="2026-01-10"), {extra.pk}
+        )
+        self.assertEqual(ids(inicio_desde="2026-03-01", inicio_hasta="2026-03-31"), {extra.pk})
+        self.assertEqual(ids(inicio_desde="2026-04-01"), set())
+        today = timezone.localdate()
+        Course.objects.filter(pk=other_course.pk).update(start_date=today + timedelta(days=10))
+        Enrollment.objects.filter(pk=extra.pk).update(enrollment_date=today)
+        self.assertEqual(ids(situacion="por_iniciar"), {extra.pk})
+        self.assertNotIn(extra.pk, ids(situacion="ya_inicio"))
+        Enrollment.objects.filter(pk=extra.pk).update(enrollment_date=today + timedelta(days=11))
+        self.assertIn(extra.pk, ids(situacion="incorporacion"))
+        Course.objects.filter(pk=other_course.pk).update(start_date=today - timedelta(days=20))
+        Enrollment.objects.filter(pk=extra.pk).update(enrollment_date=today - timedelta(days=30))
+        self.assertIn(extra.pk, ids(situacion="ya_inicio"))
+        self.assertNotIn(extra.pk, ids(situacion="incorporacion"))
+        self.assertFalse(Enrollment.objects.get(pk=extra.pk).is_incorporation)
+        Enrollment.objects.filter(pk=extra.pk).update(enrollment_date=today)
+        self.assertTrue(Enrollment.objects.get(pk=extra.pk).is_incorporation)
+        self.assertContains(
+            self.client.get(url, {"usuario": self.caller.pk, "situacion": "incorporacion"}),
+            "chip orange darken-2",
+        )
 
 
 class CallWorkflowTests(TestCase):

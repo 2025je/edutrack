@@ -33,7 +33,7 @@
 <details class="card card-pad mt"><summary class="strong">Llamadas ya asignadas a {{ target.username }} ({{ assigned_list|length }})</summary>
   {% if assigned_list %}
   <div class="table-wrap mt" style="max-height:320px;overflow:auto"><table class="highlight"><thead><tr><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th></tr></thead><tbody>
-  {% for a in assigned_list %}<tr><td>{{ a.enrollment.student_label }}</td><td>{{ a.enrollment.course_label }}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.schedule }}{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.group }}{% endif %}</td></tr>{% endfor %}
+  {% for a in assigned_list %}<tr><td>{{ a.enrollment.student_label }}</td><td>{{ a.enrollment.course_label }}{% if a.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.schedule }}{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.group }}{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}<p class="muted mt mb-0">Este usuario aún no tiene llamadas asignadas.</p>{% endif %}
 </details>
@@ -42,13 +42,25 @@
 <div class="card card-pad mt">
   <form id="assign-filters" method="get" class="row mb-0" data-live-filter data-filter-collapse>
     <h6 class="col s12 strong">Alumno y curso</h6>
-    <div class="col s12 m6 l3" data-primary><label for="q">Alumno o curso</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
+    <div class="col s12 m6 l3" data-primary><label for="q">Alumno</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
     <div class="col s12 m6 l3" data-primary><label for="curso">Curso</label>
       <select id="curso" name="curso" class="browser-default"><option value="">Todos</option>{% for c in courses %}<option value="{{ c }}" {% if filters.curso == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
     <div class="col s12 m6 l3"><label for="horario">Horario</label>
       <select id="horario" name="horario" class="browser-default"><option value="">Todos</option>{% for s in schedules %}<option value="{{ s }}" {% if filters.horario == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
     <div class="col s12 m6 l3"><label for="grupo">Grupo</label>
       <select id="grupo" name="grupo" class="browser-default"><option value="">Todos</option>{% for g in groups %}<option value="{{ g }}" {% if filters.grupo == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
+    <h6 class="col s12 strong">Fechas</h6>
+    <div class="col s12 m6 l3"><label for="matricula_desde">Matrícula desde</label><input id="matricula_desde" type="date" name="matricula_desde" value="{{ filters.matricula_desde }}"></div>
+    <div class="col s12 m6 l3"><label for="matricula_hasta">Matrícula hasta</label><input id="matricula_hasta" type="date" name="matricula_hasta" value="{{ filters.matricula_hasta }}"></div>
+    <div class="col s12 m6 l3"><label for="inicio_desde">Inicio del curso desde</label><input id="inicio_desde" type="date" name="inicio_desde" value="{{ filters.inicio_desde }}"></div>
+    <div class="col s12 m6 l3"><label for="inicio_hasta">Inicio del curso hasta</label><input id="inicio_hasta" type="date" name="inicio_hasta" value="{{ filters.inicio_hasta }}"></div>
+    <div class="col s12 m6 l3"><label for="situacion">Situación del curso</label>
+      <select id="situacion" name="situacion" class="browser-default">
+        <option value="">Todas</option>
+        <option value="ya_inicio" {% if filters.situacion == "ya_inicio" %}selected{% endif %}>Ya inició</option>
+        <option value="por_iniciar" {% if filters.situacion == "por_iniciar" %}selected{% endif %}>Va a iniciar</option>
+        <option value="incorporacion" {% if filters.situacion == "incorporacion" %}selected{% endif %}>Incorporación (matrícula tras el inicio)</option>
+      </select></div>
     <h6 class="col s12 strong">Asignación y deuda</h6>
     <div class="col s12 m6 l3" data-primary><label for="estado">Estado de asignación</label>
       <select id="estado" name="estado" class="browser-default">
@@ -74,7 +86,7 @@
   <div class="card table-wrap"><table class="highlight"><thead><tr>{% if target %}<th class="center-align"><label title="Marcar o desmarcar todas las de esta página"><input type="checkbox" data-check-all><span>Todas</span></label></th>{% endif %}<th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
   {% for row in rows %}<tr>
     {% if target %}<td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>{% endif %}
-    <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
+    <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}{% if row.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
   </tr>{% empty %}<tr><td colspan="{% if target %}6{% else %}5{% endif %}" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
   </tbody></table></div>
   {% if target %}<button class="btn" type="submit">Guardar asignaciones de esta página</button>{% else %}<span class="muted">Selecciona un usuario arriba para mostrar las casillas de asignación.</span>{% endif %}

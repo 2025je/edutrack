@@ -47,7 +47,7 @@
 <tr>
 	<td>{{ e.row_number }}</td>
 	<td>{% if e.student_id %}<a href="{% url 'student-enrollment-list' e.student_id %}">{{ e.student.full_name }}</a>{% else %}<span class="muted">{{ e.student_label }}</span>{% endif %}{% if e.is_pending %} <span class="badge-pending">Pendiente</span>{% endif %}</td>
-	<td>{% if e.course_id %}<a href="{% url 'enrollment-list' %}?course_id={{ e.course_id }}">{{ e.course.name }}</a>{% else %}<span class="muted">{{ e.course_label }}</span>{% endif %}</td>
+	<td>{% if e.course_id %}<a href="{% url 'enrollment-list' %}?course_id={{ e.course_id }}">{{ e.course.name }}</a>{% else %}<span class="muted">{{ e.course_label }}</span>{% endif %}{% if e.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td>
 	<td>{% if e.course_id %}{{ e.course.schedule }}{% endif %}</td>
 	<td>{% if e.course_id %}{{ e.course.group }}{% endif %}</td>
 	<td>{{ e.record_code|default:"—" }}{% if e.ficha.image %} <a href="{{ e.ficha.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td>

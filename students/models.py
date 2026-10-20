@@ -360,6 +360,11 @@ class Enrollment(models.Model):
         return str(self.course) if self.course_id else PENDING_COURSE_LABEL
 
     @property
+    def is_incorporation(self):
+        start = self.course_start_date
+        return bool(start and self.enrollment_date and self.enrollment_date > start)
+
+    @property
     def course_start_date(self):
         return self.course.start_date if self.course_id else None
 
