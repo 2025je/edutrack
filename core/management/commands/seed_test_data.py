@@ -37,6 +37,7 @@ ROLE_USERS = {
     "demo_asignador": "Asignador de llamadas",
     "demo_supervisor": "Supervisor de campus",
     "demo_administrador": "Administrador general",
+    "demo_catalogo": "Gestor de catálogo académico",
 }
 PNG_1X1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"

@@ -60,7 +60,11 @@ SECTIONS = [
         "talleres horarios vacantes",
     ),
     entry(
-        "Académico", "Nuevo curso", "course-list", ("students.add_course",), "crear taller agregar"
+        "Académico",
+        "Nuevo curso",
+        "course-create",
+        ("students.add_course",),
+        "crear taller agregar",
     ),
     entry("Académico", "Nuevo horario", "schedule-create", ("students.add_course",), "crear turno"),
     entry(
@@ -85,6 +89,13 @@ SECTIONS = [
         "descargar xlsx",
     ),
     entry("Académico", "Promotores", "promoter-list", ("students.view_promoter",), "vendedores"),
+    entry(
+        "Académico",
+        "Nuevo promotor",
+        "promoter-create",
+        ("students.add_promoter",),
+        "crear vendedor agregar",
+    ),
     entry("Caja", "Pagos", "payment-list", ("payments.view_payment",), "recibos cobros"),
     entry(
         "Caja", "Registrar pago", "payment-create", ("payments.add_payment",), "cobrar recibo nuevo"

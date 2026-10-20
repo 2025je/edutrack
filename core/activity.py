@@ -37,8 +37,8 @@ URL_ACTIONS = {
     "user-create": (ActivityLog.Action.CREATE, "Creó un usuario"),
     "user-update": (ActivityLog.Action.UPDATE, "Editó un usuario"),
     "schedule-create": (ActivityLog.Action.CREATE, "Creó un horario"),
-    "promoter-list": (ActivityLog.Action.UPDATE, "Modificó promotores"),
-    "course-list": (ActivityLog.Action.UPDATE, "Modificó cursos"),
+    "promoter-create": (ActivityLog.Action.CREATE, "Creó un promotor"),
+    "course-create": (ActivityLog.Action.CREATE, "Creó un curso"),
     "course-update": (ActivityLog.Action.UPDATE, "Editó un curso"),
     "select-campus": (ActivityLog.Action.OTHER, "Cambió de sede"),
 }

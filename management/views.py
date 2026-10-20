@@ -32,7 +32,6 @@ class CampusManagementMixin(FeaturePermissionMixin):
 
 class CatalogManagerMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin, LoginRequiredMixin):
     required_permission = "students.view_course"
-    method_permissions = {"POST": "students.add_course"}
 
 
 def manageable_users(editor):
@@ -195,18 +194,29 @@ class UserUpdateView(UserManagementMixin, UpdateView):
 # Catálogo
 
 
-class CourseCreateView(CatalogManagerMixin, TemplateView):
+class CourseListView(CatalogManagerMixin, TemplateView):
     template_name = "management/courses.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        courses = Course.objects.filter(campus=get_selected_campus(self.request)).order_by(
+            "name", "schedule", "group"
+        )
+        context.update(paginate_context(self.request, courses, 25))
+        context["courses"] = context["page_obj"]
+        return context
+
+
+class CourseCreateView(CatalogManagerMixin, TemplateView):
+    required_permission = "students.add_course"
+    template_name = "management/course_form.html"
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
-        campus = get_selected_campus(self.request)
         context["form"] = form or CourseForm(
-            campus=campus, initial={"schedule": self.request.GET.get("schedule")}
+            campus=get_selected_campus(self.request),
+            initial={"schedule": self.request.GET.get("schedule")},
         )
-        courses = Course.objects.filter(campus=campus).order_by("name", "schedule", "group")
-        context.update(paginate_context(self.request, courses, 25))
-        context["courses"] = context["page_obj"]
         return context
 
     def post(self, request, *args, **kwargs):
@@ -223,7 +233,6 @@ class CourseCreateView(CatalogManagerMixin, TemplateView):
 
 class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
     required_permission = "students.change_course"
-    method_permissions = {}
     template_name = "management/course_edit.html"
     form_class = CourseStartDateForm
     success_url = reverse_lazy("course-list")
@@ -239,7 +248,6 @@ class CourseStartDateUpdateView(CatalogManagerMixin, UpdateView):
 
 class ScheduleCreateView(CatalogManagerMixin, TemplateView):
     required_permission = "students.add_course"
-    method_permissions = {}
     template_name = "management/schedule_form.html"
 
     def get_context_data(self, form=None, **kwargs):
@@ -259,26 +267,17 @@ class ScheduleCreateView(CatalogManagerMixin, TemplateView):
             schedule.campus = campus
             schedule.save()
             messages.success(request, f"Horario «{schedule.name}» creado.")
-            return redirect(f"{reverse('course-list')}?schedule={schedule.pk}")
+            return redirect(f"{reverse('course-create')}?schedule={schedule.pk}")
         return self.render_to_response(self.get_context_data(form=form))
 
 
-class PromoterView(CatalogManagerMixin, TemplateView):
-    required_permission = "students.view_promoter"
-    method_permissions = {"POST": "students.add_promoter"}
-    template_name = "management/promoters.html"
+class PromoterCreateView(CatalogManagerMixin, TemplateView):
+    required_permission = "students.add_promoter"
+    template_name = "management/promoter_form.html"
 
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
-        campus = get_selected_campus(self.request)
         context["form"] = form or PromoterForm()
-        promoters = (
-            Promoter.objects.filter(Q(campuses=campus) | Q(campuses__isnull=True))
-            .distinct()
-            .order_by("name")
-        )
-        context.update(paginate_context(self.request, promoters, 25))
-        context["promoters"] = context["page_obj"]
         return context
 
     def post(self, request, *args, **kwargs):
@@ -289,6 +288,23 @@ class PromoterView(CatalogManagerMixin, TemplateView):
             messages.success(request, f"Promotor «{promoter.name}» creado.")
             return redirect("promoter-list")
         return self.render_to_response(self.get_context_data(form=form))
+
+
+class PromoterView(CatalogManagerMixin, TemplateView):
+    required_permission = "students.view_promoter"
+    template_name = "management/promoters.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        campus = get_selected_campus(self.request)
+        promoters = (
+            Promoter.objects.filter(Q(campuses=campus) | Q(campuses__isnull=True))
+            .distinct()
+            .order_by("name")
+        )
+        context.update(paginate_context(self.request, promoters, 25))
+        context["promoters"] = context["page_obj"]
+        return context
 
 
 class ActivityLogView(LoginRequiredMixin, UserPassesTestMixin, ListView):

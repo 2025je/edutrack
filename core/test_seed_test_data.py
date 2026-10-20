@@ -90,7 +90,7 @@ class SeedTestDataCommandTests(TransactionTestCase):
 
         self.assertFalse(Campus.objects.filter(name="Sede que será reemplazada").exists())
         self.assertEqual(Campus.objects.count(), 3)
-        self.assertEqual(User.objects.count(), 7)
+        self.assertEqual(User.objects.count(), 8)
         self.assertEqual(Student.objects.count(), 6)
         self.assertEqual(StudentPhone.objects.count(), 7)
         self.assertEqual(Enrollment.objects.count(), 6)

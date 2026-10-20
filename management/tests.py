@@ -193,7 +193,7 @@ class PromoterCreationTests(TestCase):
     def test_user_with_permission_creates_promoter_for_selected_campus(self):
         self.login(manage_promoters=True)
 
-        response = self.client.post(reverse("promoter-list"), {"name": "  Ana   Pérez "})
+        response = self.client.post(reverse("promoter-create"), {"name": "  Ana   Pérez "})
 
         self.assertRedirects(response, reverse("promoter-list"))
         promoter = Promoter.objects.get(name="ANA PÉREZ")
@@ -203,7 +203,7 @@ class PromoterCreationTests(TestCase):
         self.login(manage_promoters=True)
         Promoter.objects.create(name="Ana Pérez")
 
-        response = self.client.post(reverse("promoter-list"), {"name": "ana pérez"})
+        response = self.client.post(reverse("promoter-create"), {"name": "ana pérez"})
 
         self.assertContains(response, "Ya existe un promotor")
         custom = Promoter.objects.exclude(name__in=["PARTICULAR", "NN"])
@@ -214,7 +214,10 @@ class PromoterCreationTests(TestCase):
         self.login(manage_students=True, register_payments=True)
 
         self.assertEqual(self.client.get(reverse("promoter-list")).status_code, 403)
-        self.assertEqual(self.client.post(reverse("promoter-list"), {"name": "X"}).status_code, 403)
+        self.assertEqual(self.client.get(reverse("promoter-create")).status_code, 403)
+        self.assertEqual(
+            self.client.post(reverse("promoter-create"), {"name": "X"}).status_code, 403
+        )
         self.assertFalse(Promoter.objects.exclude(name__in=["PARTICULAR", "NN"]).exists())
 
 
@@ -247,7 +250,7 @@ class CourseCreationTests(TestCase):
     def test_user_with_permission_creates_course_for_selected_campus(self):
         self.login(manage_promoters=True)
 
-        response = self.client.post(reverse("course-list"), self.data())
+        response = self.client.post(reverse("course-create"), self.data())
 
         self.assertRedirects(response, reverse("course-list"))
         course = Course.objects.get(name="INGLÉS")
@@ -257,7 +260,7 @@ class CourseCreationTests(TestCase):
     def test_course_form_hides_placeholder_schedule(self):
         self.login(manage_promoters=True)
 
-        response = self.client.get(reverse("course-list"))
+        response = self.client.get(reverse("course-create"))
 
         self.assertNotIn(
             "-",
@@ -267,7 +270,7 @@ class CourseCreationTests(TestCase):
     def test_course_form_offers_new_schedule_option(self):
         self.login(manage_promoters=True)
 
-        response = self.client.get(reverse("course-list"))
+        response = self.client.get(reverse("course-create"))
 
         self.assertContains(response, reverse("schedule-create"))
         self.assertContains(response, "data-uppercase")
@@ -277,21 +280,21 @@ class CourseCreationTests(TestCase):
         other_campus = Campus.objects.create(name="Otra Sede Cursos", active=True)
         other_schedule = Schedule.objects.create(campus=other_campus, name="Lunes 8:00")
 
-        response = self.client.get(reverse("course-list"))
+        response = self.client.get(reverse("course-create"))
 
         available_schedule_ids = list(
             response.context["form"].fields["schedule"].queryset.values_list("pk", flat=True)
         )
         self.assertIn(self.schedule.pk, available_schedule_ids)
         self.assertNotIn(other_schedule.pk, available_schedule_ids)
-        response = self.client.post(reverse("course-list"), self.data(schedule=other_schedule.pk))
+        response = self.client.post(reverse("course-create"), self.data(schedule=other_schedule.pk))
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Course.objects.filter(name="INGLÉS").exists())
 
     def test_catalog_name_inputs_convert_text_to_uppercase(self):
         self.login(manage_promoters=True)
 
-        for url_name in ("schedule-create", "promoter-list"):
+        for url_name in ("schedule-create", "promoter-create"):
             with self.subTest(url_name=url_name):
                 self.assertContains(self.client.get(reverse(url_name)), "data-uppercase")
 
@@ -303,11 +306,11 @@ class CourseCreationTests(TestCase):
         schedule = Schedule.objects.get(campus=self.campus, name="SÁBADO 9:00")
         self.assertRedirects(
             response,
-            f"{reverse('course-list')}?schedule={schedule.pk}",
+            f"{reverse('course-create')}?schedule={schedule.pk}",
         )
         page = self.client.get(response.url)
         self.assertContains(page, f'<option value="{schedule.pk}" selected>SÁBADO 9:00</option>')
-        self.client.post(reverse("course-list"), self.data(schedule=schedule.pk))
+        self.client.post(reverse("course-create"), self.data(schedule=schedule.pk))
         self.assertEqual(Course.objects.get(name="INGLÉS").schedule, "SÁBADO 9:00")
 
     def test_duplicate_schedule_is_rejected(self):
@@ -332,7 +335,7 @@ class CourseCreationTests(TestCase):
 
         self.assertRedirects(
             response,
-            f"{reverse('course-list')}?schedule="
+            f"{reverse('course-create')}?schedule="
             f"{Schedule.objects.get(campus=other_campus, name='LUNES 8:00').pk}",
         )
 
@@ -346,7 +349,7 @@ class CourseCreationTests(TestCase):
 
     def test_course_start_date_can_be_updated(self):
         self.login(manage_promoters=True)
-        self.client.post(reverse("course-list"), self.data())
+        self.client.post(reverse("course-create"), self.data())
         course = Course.objects.get(name="INGLÉS")
         url = reverse("course-update", args=[course.pk])
 
@@ -388,9 +391,9 @@ class CourseCreationTests(TestCase):
 
     def test_duplicate_course_is_rejected(self):
         self.login(manage_promoters=True)
-        self.client.post(reverse("course-list"), self.data())
+        self.client.post(reverse("course-create"), self.data())
 
-        response = self.client.post(reverse("course-list"), self.data(name="inglés"))
+        response = self.client.post(reverse("course-create"), self.data(name="inglés"))
 
         self.assertContains(response, "Ya existe un curso")
         self.assertEqual(Course.objects.count(), 1)
@@ -399,7 +402,7 @@ class CourseCreationTests(TestCase):
         self.login(manage_students=True, register_payments=True)
 
         self.assertEqual(self.client.get(reverse("course-list")).status_code, 403)
-        self.assertEqual(self.client.post(reverse("course-list"), self.data()).status_code, 403)
+        self.assertEqual(self.client.post(reverse("course-create"), self.data()).status_code, 403)
         self.assertFalse(Course.objects.exists())
 
 

@@ -162,8 +162,49 @@ class RoleGroupMatrixTests(TestCase):
                 "Asignador de llamadas",
                 "Supervisor de campus",
                 "Administrador general",
+                "Gestor de catálogo académico",
             },
         )
+
+    def test_catalog_group_manages_courses_and_promoters_only(self):
+        user = self.user_in("Gestor de catálogo académico")
+        for perm in (
+            "students.add_course",
+            "students.change_course",
+            "students.add_promoter",
+            "students.change_promoter",
+        ):
+            self.assertTrue(user.has_perm(perm), perm)
+        self.assertFalse(user.has_perm("students.add_student"))
+        self.assertFalse(user.has_perm("students.delete_course"))
+        course_page = self.client.get(reverse("course-list"))
+        promoter_page = self.client.get(reverse("promoter-list"))
+        self.assertContains(course_page, reverse("course-create"))
+        self.assertContains(promoter_page, reverse("promoter-create"))
+        self.assertNotContains(course_page, "Crear curso")
+        self.assertEqual(self.client.get(reverse("course-create")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("promoter-create")).status_code, 200)
+
+    def test_catalog_lists_hide_create_button_without_add_permission(self):
+        self.user_in("Supervisor de campus")
+        for list_name, create_name in (
+            ("course-list", "course-create"),
+            ("promoter-list", "promoter-create"),
+        ):
+            with self.subTest(list_name=list_name):
+                page = self.client.get(reverse(list_name))
+                self.assertEqual(page.status_code, 200)
+                self.assertNotContains(page, reverse(create_name))
+                self.assertEqual(self.client.get(reverse(create_name)).status_code, 403)
+
+    def test_student_list_hides_create_button_without_permission(self):
+        self.user_in("Supervisor de campus")
+        response = self.client.get(reverse("student-list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "+ Nuevo estudiante")
+        self.assertEqual(self.client.get(reverse("student-create")).status_code, 403)
+        self.user_in("Matrículas")
+        self.assertContains(self.client.get(reverse("student-list")), "+ Nuevo estudiante")
 
     def test_special_permissions_are_not_granted_by_default(self):
         user = self.user_in("Matrículas", "Caja", "Supervisor de campus", "Administrador general")

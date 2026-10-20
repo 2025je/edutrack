@@ -18,7 +18,7 @@ Los recibos son comprobantes internos; no son comprobantes electrónicos autoriz
 
 Los permisos se acumulan: un usuario recibe los permisos de todos sus grupos y de los permisos asignados directamente. Las vistas comprueban autorización en el servidor; ocultar un enlace del menú no sustituye el permiso.
 
-Las migraciones crean estos seis grupos. La tabla muestra los permisos que cada grupo recibe por defecto después de aplicar las migraciones actuales:
+Las migraciones crean estos siete grupos. La tabla muestra los permisos que cada grupo recibe por defecto después de aplicar las migraciones actuales:
 
 | Grupo | Permisos asignados |
 |---|---|
@@ -28,6 +28,7 @@ Las migraciones crean estos seis grupos. La tabla muestra los permisos que cada 
 | **Asignador de llamadas** | `calls.view_callnote`, `core.assign_calls` |
 | **Supervisor de campus** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports` |
 | **Administrador general** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports`, `core.view_call_reports`, `core.view_financial_reports`, `core.export_reports`, `core.view_user`, `core.manage_user_access`, `core.view_campus`, `core.add_campus`, `core.change_campus`, `auth.view_group`, `auth.add_group`, `auth.change_group`, `auth.view_permission` |
+| **Gestor de catálogo académico** | `students.view_course`, `students.add_course`, `students.change_course`, `students.view_promoter`, `students.add_promoter`, `students.change_promoter` |
 
 **Administrador general no equivale a superusuario.** Un superusuario de Django tiene acceso global; el grupo Administrador general solo recibe los permisos indicados y sigue sujeto a la selección y al alcance de campus de la aplicación.
 
@@ -185,7 +186,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\seed-test-data.ps1
 
 El comando es **destructivo**: pide escribir `BORRAR Y CREAR DATOS`, luego solicita una contraseña
 común para las cuentas `demo_admin`, `demo_matriculas`, `demo_caja`, `demo_gestor`,
-`demo_asignador`, `demo_supervisor` y `demo_administrador`. Borra también los archivos multimedia
+`demo_asignador`, `demo_supervisor`, `demo_administrador` y `demo_catalogo`. Borra también los archivos multimedia
 subidos; conserva los grupos, permisos y el historial de migraciones del sistema. Haz un respaldo
 antes de confirmar y úsalo únicamente en una base de datos de desarrollo o pruebas.
 

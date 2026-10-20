@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Nuevo promotor · EduTrack{% endblock %}
+{% block content %}
+<div class="mb"><h1 class="mb-0">Nuevo promotor</h1><div class="muted">El promotor se asigna a la sede seleccionada.</div></div>
+<div class="card card-pad">
+	<form method="post" class="row mb-0">
+		{% csrf_token %}
+		<div class="col s12 m8"><label for="{{ form.name.id_for_label }}">Nombre del promotor</label>{{ form.name }}{% for error in form.name.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+		<div class="col s12"><button class="btn" type="submit">Crear promotor</button> <a class="btn-flat" href="{% url 'promoter-list' %}">Cancelar</a></div>
+	</form>
+</div>
+{% endblock %}
