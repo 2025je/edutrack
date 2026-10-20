@@ -55,13 +55,16 @@ class CallStudentListTests(TestCase):
         self.assertEqual([p.receipt_number for p in row["courses"][0]["receipts"]], ["1"])
 
     def test_template_supports_emojis_and_icon_link(self):
-        self.client.post(reverse("calls-template"), {"body": "Hola {alumno} 👋💰"})
+        self.client.post(
+            reverse("calls-template"), {"tipo": "BIENVENIDA", "body": "Hola {alumno} 👋💰"}
+        )
         student = Student.objects.create(campus=self.campus, full_name="Eva", phone="933333333")
         course = Course.objects.create(campus=self.campus, name="Arte", schedule="L", group="A")
         Enrollment.objects.create(campus=self.campus, student=student, course=course)
 
         self.assertEqual(
-            WhatsAppTemplate.objects.get(campus=self.campus).body, "Hola {alumno} 👋💰"
+            WhatsAppTemplate.objects.get(campus=self.campus, kind="BIENVENIDA").body,
+            "Hola {alumno} 👋💰",
         )
         response = self.client.get(reverse("calls-students"))
 
@@ -207,7 +210,7 @@ class CallStudentListTests(TestCase):
         response = self.client.post(
             reverse("calls-template"), {"body": "Hola {alumno}, debes S/ {deuda_total}"}
         )
-        self.assertRedirects(response, reverse("calls-template"))
+        self.assertRedirects(response, reverse("calls-template") + "?tipo=DEUDA")
         student = Student.objects.create(
             campus=self.campus, full_name="Luis", phone="911111111, 922222222"
         )

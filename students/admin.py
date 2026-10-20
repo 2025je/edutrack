@@ -8,7 +8,10 @@ from .models import (
     Promoter,
     Schedule,
     Student,
+    StudentPhone,
+    sync_legacy_student_phone,
 )
+from .forms import BaseStudentPhoneFormSet, StudentPhoneForm
 
 
 class StudentAdminForm(forms.ModelForm):
@@ -17,7 +20,7 @@ class StudentAdminForm(forms.ModelForm):
 
     class Meta:
         model = Student
-        fields = ["campus", "last_name", "first_name", "document_number", "phone", "active"]
+        fields = ["campus", "last_name", "first_name", "document_number", "active"]
 
     def clean(self):
         cleaned_data = super().clean()
@@ -48,12 +51,26 @@ class StudentAdminForm(forms.ModelForm):
         return student
 
 
+class StudentPhoneInline(admin.TabularInline):
+    model = StudentPhone
+    form = StudentPhoneForm
+    formset = BaseStudentPhoneFormSet
+    extra = 1
+    min_num = 1
+    validate_min = True
+
+
 @admin.register(Student)
 class StudentAdmin(admin.ModelAdmin):
     form = StudentAdminForm
     list_display = ("full_name", "campus", "phone", "active")
     list_filter = ("campus", "active")
     search_fields = ("full_name", "document_number")
+    inlines = [StudentPhoneInline]
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        sync_legacy_student_phone(form.instance)
 
 
 class CourseAdminForm(forms.ModelForm):

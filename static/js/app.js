@@ -451,3 +451,82 @@ document.addEventListener("keydown", function (e) {
   box.focus();
   box.select();
 });
+
+// Busqueda global: resultados al escribir (secciones, subsecciones y acciones) con teclado.
+(function () {
+  var timer = null, seq = 0, active = -1;
+  function box() { return document.querySelector(".header-search input[name=q]"); }
+  function panel() {
+    var p = document.getElementById("global-search-results");
+    if (p) return p;
+    var input = box();
+    if (!input) return null;
+    p = document.createElement("ul");
+    p.id = "global-search-results";
+    p.setAttribute("role", "listbox");
+    p.hidden = true;
+    input.closest(".header-search").appendChild(p);
+    return p;
+  }
+  function close() { var p = panel(); if (p) { p.hidden = true; p.innerHTML = ""; } active = -1; }
+  function mark(index) {
+    var items = panel().querySelectorAll("a");
+    if (!items.length) return;
+    active = (index + items.length) % items.length;
+    items.forEach(function (a, i) { a.classList.toggle("active", i === active); });
+    items[active].scrollIntoView({ block: "nearest" });
+  }
+  function render(results, term) {
+    var p = panel();
+    p.innerHTML = "";
+    if (!results.length) {
+      var empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = "No hay secciones para \u00ab" + term + "\u00bb";
+      p.appendChild(empty);
+    }
+    results.forEach(function (r) {
+      var li = document.createElement("li"), a = document.createElement("a"), small = document.createElement("small");
+      a.href = r.url;
+      a.setAttribute("role", "option");
+      a.textContent = r.name;
+      small.textContent = r.group;
+      a.appendChild(small);
+      li.appendChild(a);
+      p.appendChild(li);
+    });
+    p.hidden = false;
+    active = -1;
+  }
+  function search(input) {
+    var term = input.value.trim();
+    if (!term) { close(); return; }
+    var mine = ++seq;
+    fetch(input.form.action + "?json=1&q=" + encodeURIComponent(term), { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : { results: [] }; })
+      .then(function (data) { if (mine === seq) render(data.results, term); })
+      .catch(function () {});
+  }
+  document.addEventListener("input", function (e) {
+    var input = box();
+    if (!input || e.target !== input) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () { search(input); }, 150);
+  });
+  document.addEventListener("keydown", function (e) {
+    var input = box();
+    if (!input || e.target !== input) return;
+    var p = panel();
+    if (e.key === "Escape") { close(); input.blur(); }
+    else if (p && !p.hidden && e.key === "ArrowDown") { e.preventDefault(); mark(active + 1); }
+    else if (p && !p.hidden && e.key === "ArrowUp") { e.preventDefault(); mark(active - 1); }
+    else if (e.key === "Enter" && p && !p.hidden && active >= 0) {
+      e.preventDefault();
+      window.location.href = p.querySelectorAll("a")[active].href;
+    }
+  });
+  document.addEventListener("click", function (e) {
+    var input = box();
+    if (input && !input.closest(".header-search").contains(e.target)) close();
+  });
+})();

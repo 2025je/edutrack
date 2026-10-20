@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Importar desde Excel · EduTrack{% endblock %}
+{% block content %}
+<div class="card card-pad">
+  <h5 style="margin-top:0">Importar estudiantes desde Excel</h5>
+  <p class="muted">Archivo <strong>.xlsx</strong> con encabezados en la primera fila: <strong>Nombre</strong> (obligatorio), DNI, Teléfono y Curso (opcional; si existe, se crea la matrícula con las tarifas del curso). Los nombres repetidos se omiten.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    <input type="file" name="archivo" accept=".xlsx" required>
+    <button class="btn" type="submit"><i class="material-icons left">upload_file</i>Revisar archivo</button>
+  </form>
+</div>
+{% if rows is not None %}
+<div class="card card-pad" style="margin-top:16px">
+  <p><strong>{{ counts.new }}</strong> nueva(s) · <strong>{{ counts.duplicate }}</strong> duplicada(s) · <strong>{{ counts.error }}</strong> con error</p>
+  {% if counts.new %}<form method="post">{% csrf_token %}<input type="hidden" name="accion" value="confirmar">
+    <button class="btn" type="submit"><i class="material-icons left">check</i>Importar {{ counts.new }} fila(s) nuevas</button></form>{% endif %}
+</div>
+<div class="card table-wrap" style="margin-top:16px"><table class="highlight">
+  <thead><tr><th>Fila</th><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Curso</th><th>Estado</th></tr></thead>
+  <tbody>{% for r in rows %}<tr>
+    <td>{{ r.line }}</td><td>{{ r.name }}</td><td>{{ r.document }}</td><td>{{ r.phone }}</td><td>{{ r.course }}</td>
+    <td>{% if r.state == "new" %}Nueva{% elif r.state == "duplicate" %}Duplicada: {{ r.message }}{% else %}Error: {{ r.message }}{% endif %}</td>
+  </tr>{% endfor %}</tbody></table></div>
+{% endif %}
+{% endblock %}

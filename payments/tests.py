@@ -1,19 +1,21 @@
+import threading
 from datetime import date, datetime
 from io import BytesIO
 from decimal import Decimal
 
-from django.db import IntegrityError, transaction
-from django.db.models import Sum
-from django.test import RequestFactory, TestCase
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connections, transaction
+from django.db.models import ProtectedError, Sum
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.urls import reverse
 from openpyxl import load_workbook
 from django.utils import timezone
 
 from core.models import Campus
-from core.testing import create_user, revoke
+from core.testing import create_user, grant, revoke
 from payments.forms import PaymentForm, PaymentUpdateForm
 from payments.models import Installment, Payment, PaymentAllocation
-from students.models import Course, Enrollment, Ficha, Student
+from students.models import Course, Enrollment, Student
 
 
 class PaymentCrudTests(TestCase):
@@ -135,6 +137,36 @@ class PaymentCrudTests(TestCase):
         past = self.client.get(reverse("cash-closing"), {"fecha": "2000-01-01"})
         self.assertEqual(past.context["groups"], [])
 
+    def test_signed_cash_closing_freezes_totals_and_locks_payments(self):
+        from payments.models import CashClosing
+
+        today = timezone.localdate().strftime("%Y-%m-%d")
+        self.assertEqual(
+            self.client.post(reverse("cash-closing-close"), {"fecha": today}).status_code, 403
+        )
+        grant(self.user, "core.close_cash")
+        self.client.post(reverse("cash-closing-close"), {"fecha": today, "nota": "ok"})
+        closing = CashClosing.objects.get(campus=self.campus)
+        self.assertEqual(closing.confirmed_total, Decimal("40"))
+        self.assertEqual(closing.closed_by, self.user)
+
+        edit = self.client.post(reverse("payment-update", args=[self.payment.pk]), {})
+        self.assertRedirects(edit, reverse("payment-list"), fetch_redirect_response=False)
+        self.client.post(reverse("payment-delete", args=[self.payment.pk]))
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.CONFIRMED)
+        # Cerrar de nuevo no duplica el cierre
+        self.client.post(reverse("cash-closing-close"), {"fecha": today})
+        self.assertEqual(CashClosing.objects.count(), 1)
+
+        # Solo un superusuario reabre
+        reopen = self.client.post(reverse("cash-closing-reopen"), {"cierre": closing.pk})
+        self.assertEqual(reopen.status_code, 403)
+        self.user.is_superuser = True
+        self.user.save()
+        self.client.post(reverse("cash-closing-reopen"), {"cierre": closing.pk})
+        self.assertFalse(CashClosing.objects.exists())
+
     def test_cash_closing_excel_and_permissions(self):
         response = self.client.get(reverse("cash-closing-excel"))
         sheet = load_workbook(BytesIO(response.content)).active
@@ -168,6 +200,64 @@ class PaymentCrudTests(TestCase):
         foreign = Enrollment.objects.create(campus=other, student=student)
         response = self.client.get(reverse("enrollment-statement", args=[foreign.pk]))
         self.assertEqual(response.status_code, 404)
+
+    def test_payment_views_are_limited_to_the_selected_campus(self):
+        other = Campus.objects.create(name="Otra sede para pagos", active=True)
+        student = Student.objects.create(campus=other, full_name="Alumno ajeno")
+        enrollment = Enrollment.objects.create(campus=other, student=student)
+        payment = Payment.objects.create(
+            campus=other,
+            enrollment=enrollment,
+            cashier=self.user,
+            receipt_number="AJENO-1",
+            amount=10,
+        )
+
+        for url, method in (
+            (reverse("payment-update", args=[payment.pk]), "get"),
+            (reverse("payment-delete", args=[payment.pk]), "get"),
+            (reverse("payment-receipt", args=[payment.pk]), "get"),
+            (reverse("payment-delete", args=[payment.pk]), "post"),
+        ):
+            with self.subTest(url=url, method=method):
+                self.assertEqual(getattr(self.client, method)(url).status_code, 404)
+
+    def test_payment_views_require_their_permissions(self):
+        revoke(self.user, "register_payments")
+
+        self.assertEqual(self.client.get(reverse("payment-list")).status_code, 403)
+        self.assertEqual(
+            self.client.get(reverse("payment-create-for", args=[self.enrollment.pk])).status_code,
+            403,
+        )
+
+    def test_partial_payment_updates_balance_and_void_restores_it(self):
+        url = reverse("payment-create-for", args=[self.enrollment.pk])
+        response = self.client.post(
+            url,
+            {
+                "receipt_number_0": "D",
+                "receipt_number_1": "2",
+                "enrollment": self.enrollment.pk,
+                "amount": "50.00",
+                "reference": "",
+                "notes": "",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        payment = Payment.objects.get(receipt_number="D2")
+        self.installment.refresh_from_db()
+        self.assertEqual(self.installment.balance, Decimal("30.00"))
+        allocation = PaymentAllocation.objects.get(payment=payment)
+        self.assertEqual(allocation.amount, Decimal("50.00"))
+
+        response = self.client.post(reverse("payment-delete", args=[payment.pk]))
+        self.assertEqual(response.status_code, 302)
+        payment.refresh_from_db()
+        self.installment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.VOID)
+        self.assertEqual(self.installment.balance, Decimal("80.00"))
+        self.assertTrue(PaymentAllocation.objects.filter(pk=allocation.pk).exists())
 
     def test_voucher_is_served_only_to_users_of_its_campus(self):
         self.payment.voucher = "vouchers/prueba.png"
@@ -519,26 +609,46 @@ class PaymentCrudTests(TestCase):
         self.assertEqual(len(rows({"date_from": "2999-01-01"})), 0)
         self.assertEqual(len(rows({"ficha": "abc"})), 0)
 
-    def test_global_search_finds_students_fichas_and_receipts(self):
-        Ficha.objects.create(
-            enrollment=self.enrollment,
-            campus=self.campus,
-            date=self.enrollment.enrollment_date,
-            code=777,
-        )
+    def test_global_search_does_not_return_records(self):
         url = reverse("global-search")
-        by_name = self.client.get(url, {"q": "alumno para"})
-        self.assertContains(by_name, "ALUMNO PARA PAGO")
-        by_ficha = self.client.get(url, {"q": "777"})
-        self.assertEqual([f.code for f in by_ficha.context["fichas"]], [777])
-        by_receipt = self.client.get(url, {"q": "d1"})
-        self.assertEqual([p.pk for p in by_receipt.context["payments"]], [self.payment.pk])
-        self.assertContains(self.client.get(url, {"q": "zzzz"}), "No se encontraron resultados")
+        for term in ("alumno para", "d1"):
+            response = self.client.get(url, {"q": term})
+            self.assertNotContains(response, "ALUMNO PARA PAGO")
+            self.assertNotContains(response, "Ver recibo")
+        self.assertContains(self.client.get(url, {"q": "zzzz"}), "No se encontraron secciones")
 
     def test_global_search_hides_sections_without_permission(self):
         revoke(self.user, "register_payments")
-        response = self.client.get(reverse("global-search"), {"q": "D1"})
-        self.assertEqual(response.context["payments"], [])
+        response = self.client.get(reverse("global-search"), {"q": "pagos"})
+        self.assertNotContains(response, f'href="{reverse("payment-list")}"')
+
+    def test_cannot_register_payment_when_todays_cash_is_closed(self):
+        from payments.models import CashClosing
+
+        CashClosing.objects.create(
+            campus=self.campus,
+            date=timezone.localdate(),
+            confirmed_total=0,
+            voided_total=0,
+            payments_count=0,
+            closed_by=self.user,
+        )
+        before = Payment.objects.count()
+        response = self.client.post(
+            reverse("payment-create-for", args=[self.enrollment.pk]), {"amount": "40"}
+        )
+        self.assertRedirects(response, reverse("payment-list"), fetch_redirect_response=False)
+        self.assertEqual(Payment.objects.count(), before)
+
+    def test_cash_closing_rejects_future_dates_and_hides_button_without_permission(self):
+        self.assertNotContains(self.client.get(reverse("cash-closing")), "Cerrar caja del")
+        grant(self.user, "core.close_cash")
+        self.assertContains(self.client.get(reverse("cash-closing")), "Cerrar caja del")
+        response = self.client.post(reverse("cash-closing-close"), {"fecha": "2999-01-01"})
+        self.assertRedirects(response, reverse("cash-closing"))
+        response = self.client.post(reverse("cash-closing-close"), {"fecha": "no-es-fecha"})
+        self.assertRedirects(response, reverse("cash-closing"))
+        self.assertEqual(self.client.get(reverse("cash-closing-close")).status_code, 405)
 
     def test_global_search_requires_login(self):
         self.client.logout()
@@ -599,3 +709,162 @@ class PaymentListExtraFiltersTests(TestCase):
         self.assertEqual([p.receipt_number for p in response.context["payments"]], ["2"])
         response = self.client.get(url, {"amount_max": "abc"})
         self.assertEqual(len(response.context["payments"]), 0)
+
+
+class PaymentAllocationIntegrityTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede integridad", active=True)
+        self.user = create_user(username="cashier2", password="x" * 12, register_payments=True)
+        course = Course.objects.create(
+            campus=self.campus, name="Curso", start_date=date(2026, 10, 14)
+        )
+        self.enrollments = [
+            Enrollment.objects.create(
+                campus=self.campus,
+                student=Student.objects.create(campus=self.campus, full_name=f"Alumno {n}"),
+                course=course,
+            )
+            for n in range(2)
+        ]
+        self.installment = Installment.objects.create(
+            enrollment=self.enrollments[0], concept="Cuota", amount=100, due_date=date(2026, 10, 14)
+        )
+        self.payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollments[0],
+            cashier=self.user,
+            receipt_number="X1",
+            amount=60,
+        )
+
+    def test_rejects_installment_from_another_enrollment(self):
+        other = Installment.objects.create(
+            enrollment=self.enrollments[1], concept="Otra", amount=100, due_date=date(2026, 10, 14)
+        )
+        with self.assertRaises(ValidationError):
+            PaymentAllocation.objects.create(payment=self.payment, installment=other, amount=10)
+
+    def test_rejects_allocation_above_payment_amount(self):
+        PaymentAllocation.objects.create(
+            payment=self.payment, installment=self.installment, amount=50
+        )
+        with self.assertRaises(ValidationError):
+            PaymentAllocation.objects.create(
+                payment=self.payment, installment=self.installment, amount=11
+            )
+
+    def test_rejects_allocation_above_installment_amount(self):
+        PaymentAllocation.objects.create(
+            payment=self.payment, installment=self.installment, amount=60
+        )
+        second = Payment.objects.create(
+            campus=self.campus,
+            enrollment=self.enrollments[0],
+            cashier=self.user,
+            receipt_number="X2",
+            amount=60,
+        )
+        with self.assertRaises(ValidationError):
+            PaymentAllocation.objects.create(
+                payment=second, installment=self.installment, amount=41
+            )
+
+    def test_database_rejects_non_positive_allocation(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PaymentAllocation.objects.bulk_create(
+                [PaymentAllocation(payment=self.payment, installment=self.installment, amount=0)]
+            )
+
+    def test_payments_cannot_be_deleted(self):
+        with self.assertRaises(ProtectedError):
+            self.payment.delete()
+        self.assertTrue(Payment.objects.filter(pk=self.payment.pk).exists())
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentPaymentRegistrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def test_two_cashiers_cannot_collect_more_than_the_remaining_balance(self):
+        campus = Campus.objects.create(name="Sede pagos concurrentes", active=True)
+        course = Course.objects.create(
+            campus=campus,
+            name="Curso concurrente",
+            start_date=date(2026, 10, 14),
+            enrollment_fee=40,
+            monthly_fee=60,
+        )
+        student = Student.objects.create(campus=campus, full_name="Alumno concurrente")
+        enrollment = Enrollment.objects.create(
+            campus=campus,
+            student=student,
+            course=course,
+            enrollment_fee=40,
+            monthly_fee=60,
+        )
+        installment = Installment.objects.create(
+            enrollment=enrollment,
+            concept="Cuota concurrente",
+            amount=100,
+            due_date=date(2026, 10, 14),
+        )
+        cashiers = [
+            create_user(username=f"cajero-{index}", register_payments=True) for index in range(2)
+        ]
+        for cashier in cashiers:
+            cashier.campuses.add(campus)
+
+        barrier = threading.Barrier(2)
+        results = []
+        errors = []
+
+        def submit(cashier, receipt_number):
+            connections.close_all()
+            try:
+                client = Client()
+                client.force_login(cashier)
+                session = client.session
+                session["selected_campus_id"] = campus.pk
+                session.save()
+                barrier.wait(timeout=10)
+                response = client.post(
+                    reverse("payment-create-for", args=[enrollment.pk]),
+                    {
+                        "receipt_number_0": "C",
+                        "receipt_number_1": receipt_number,
+                        "enrollment": enrollment.pk,
+                        "amount": "60.00",
+                        "reference": "",
+                        "notes": "",
+                    },
+                )
+                results.append(response.status_code)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                connections.close_all()
+
+        threads = [
+            threading.Thread(target=submit, args=(cashiers[0], "1")),
+            threading.Thread(target=submit, args=(cashiers[1], "2")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads), "Payment request hung.")
+        self.assertEqual(errors, [])
+        self.assertCountEqual(results, [200, 302])
+        self.assertEqual(
+            Payment.objects.filter(enrollment=enrollment, status=Payment.Status.CONFIRMED).count(),
+            1,
+        )
+        self.assertEqual(
+            PaymentAllocation.objects.filter(payment__enrollment=enrollment).aggregate(
+                total=Sum("amount")
+            )["total"],
+            Decimal("60.00"),
+        )
+        installment.refresh_from_db()
+        self.assertEqual(installment.balance, Decimal("40.00"))

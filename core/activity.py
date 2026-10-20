@@ -4,7 +4,12 @@ from django.dispatch import receiver
 from .models import ActivityLog
 
 SKIPPED_PREFIXES = ("/admin/jsi18n", "/__debug__/", "/static/", "/media/")
-SKIPPED_URL_NAMES = {"login", "logout", "student-duplicates"}  # esta última se registra a mano
+SKIPPED_URL_NAMES = {
+    "login",
+    "logout",
+    "student-duplicates",
+    "student-import",
+}  # se registran a mano
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 # (nombre de la ruta) -> (acción, descripción)
@@ -50,6 +55,8 @@ LOGGED_GET_URL_NAMES |= {"payment-excel", "pending-debts-excel", "enrollment-sta
 URL_ACTIONS["cash-closing-excel"] = (ActivityLog.Action.EXPORT, "Exportó un cierre de caja")
 GET_ACTIONS["cash-closing"] = (ActivityLog.Action.OTHER, "Consultó un cierre de caja")
 LOGGED_GET_URL_NAMES |= {"cash-closing", "cash-closing-excel"}
+URL_ACTIONS["cash-closing-close"] = (ActivityLog.Action.CREATE, "Cerró la caja del día")
+URL_ACTIONS["cash-closing-reopen"] = (ActivityLog.Action.DELETE, "Reabrió una caja cerrada")
 
 
 def client_ip(request):

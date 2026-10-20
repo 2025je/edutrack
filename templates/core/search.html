@@ -1,37 +1,18 @@
 {% extends "base.html" %}{% block title %}Buscar · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Búsqueda global</h1><div class="muted">Estudiantes (nombre o DNI), fichas (código) y recibos de la sede seleccionada.</div></div>
+<div class="mb"><h1 class="mb-0">Búsqueda global</h1><div class="muted">Encuentra secciones de la aplicación (por ejemplo «pagos», «reporte» o «usuarios»).</div></div>
 <form method="get" action="{% url 'global-search' %}" class="card card-pad no-print mb">
-	<div class="flex gap wrap" style="align-items:center"><input type="search" name="q" value="{{ q }}" placeholder="Nombre, DNI, código de ficha o recibo" autocomplete="off" autofocus style="flex:1;min-width:220px;margin:0"><button class="btn" type="submit"><i class="material-icons left" aria-hidden="true">search</i>Buscar</button></div>
+	<div class="flex gap wrap" style="align-items:center"><input type="search" name="q" value="{{ q }}" placeholder="Buscar una sección" autocomplete="off" autofocus style="flex:1;min-width:220px;margin:0"><button class="btn" type="submit"><i class="material-icons left" aria-hidden="true">search</i>Buscar</button></div>
 </form>
 {% if not q %}
-<div class="note note-info">Escribe al menos un dato para buscar.</div>
-{% elif not total %}
-<div class="note note-info">No se encontraron resultados para «{{ q }}».</div>
+<div class="note note-info">Escribe el nombre de una sección para ir a ella.</div>
+{% elif not sections %}
+<div class="note note-info">No se encontraron secciones para «{{ q }}».</div>
 {% else %}
-{% if students %}
 <div class="card card-pad">
-	<div class="tool-head"><span class="tool-icon"><i class="material-icons">school</i></span><h2>Estudiantes ({{ students|length }})</h2></div>
-	<div class="table-wrap"><table class="highlight"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfonos</th><th>Estado</th><th></th></tr></thead><tbody>
-	{% for s in students %}<tr><td>{{ s.full_name }}</td><td>{{ s.document_number|default:"—" }}</td><td>{{ s.phone|default:"—" }}</td><td>{% if s.active %}<span class="chip green darken-1">Activo</span>{% else %}<span class="chip grey">Inactivo</span>{% endif %}</td><td class="right-align">{% if perms.students.view_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'student-enrollment-list' s.pk %}">Matrículas</a>{% endif %} {% if perms.students.change_student %}<a class="btn-small action-btn blue darken-2" href="{% url 'student-update' s.pk %}">Editar</a>{% endif %}</td></tr>{% endfor %}
+	<div class="table-wrap"><table class="highlight"><thead><tr><th>Sección</th><th>Grupo</th></tr></thead><tbody>
+	{% for s in sections %}<tr><td><a href="{{ s.url }}"><strong>{{ s.name }}</strong></a></td><td>{{ s.group }}</td></tr>{% endfor %}
 	</tbody></table></div>
 </div>
-{% endif %}
-{% if fichas %}
-<div class="card card-pad">
-	<div class="tool-head"><span class="tool-icon"><i class="material-icons">description</i></span><h2>Fichas ({{ fichas|length }})</h2></div>
-	<div class="table-wrap"><table class="highlight"><thead><tr><th>Código</th><th>Fecha</th><th>Estudiante</th><th>Curso</th><th></th></tr></thead><tbody>
-	{% for f in fichas %}<tr><td>{{ f.code }}{% if f.image %} <a href="{{ f.image.url }}" data-zoom title="Ver imagen de la ficha"><i class="material-icons tiny">image</i></a>{% endif %}</td><td>{{ f.date|date:"d/m/Y" }}</td><td>{{ f.enrollment.student_label }}</td><td>{{ f.enrollment.course_label }}</td><td class="right-align">{% if perms.students.change_enrollment %}<a class="btn-small action-btn blue darken-2" href="{% url 'enrollment-update' f.enrollment_id %}">Ver matrícula</a>{% endif %}</td></tr>{% endfor %}
-	</tbody></table></div>
-</div>
-{% endif %}
-{% if payments %}
-<div class="card card-pad">
-	<div class="tool-head"><span class="tool-icon"><i class="material-icons">receipt_long</i></span><h2>Recibos ({{ payments|length }})</h2></div>
-	<div class="table-wrap"><table class="highlight"><thead><tr><th>Recibo</th><th>Estudiante</th><th>Importe</th><th>Estado</th><th></th></tr></thead><tbody>
-	{% for p in payments %}<tr><td>{{ p.receipt_number }}</td><td>{{ p.enrollment.student.full_name }}</td><td>S/ {{ p.amount|floatformat:2 }}</td><td>{{ p.get_status_display }}</td><td class="right-align"><a class="btn-small action-btn blue darken-2" href="{% url 'payment-receipt' p.pk %}">Ver recibo</a></td></tr>{% endfor %}
-	</tbody></table></div>
-</div>
-{% endif %}
 {% endif %}
 {% endblock %}

@@ -38,8 +38,9 @@ from .models import (
     Course,
     Ficha,
 )
-from .forms import StudentForm, EnrollmentForm
+from .forms import StudentForm, StudentPhoneFormSet, EnrollmentForm
 from .installments import fee_conflicts, sync_initial_installments
+from .search import filter_students
 
 
 MAX_RECORD_CODE_CHECK_RANGE = 10_000
@@ -83,7 +84,7 @@ class StudentListView(CampusScopedMixin, ListView):
         )
         q = self.request.GET.get("q", "").strip()
         if q:
-            qs = qs.filter(Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q))
+            qs = filter_students(qs, q, with_fichas=True)
         sort = self.request.GET.get("sort", "row_number")
         direction = self.request.GET.get("direction", "desc")
         sort_field = self.sortable_fields.get(sort, "full_name")
@@ -134,12 +135,57 @@ class StudentListView(CampusScopedMixin, ListView):
         return context
 
 
-class StudentCreateView(CampusScopedMixin, CreateView):
+class StudentPhoneFormMixin:
+    def get_phone_formset(self, instance=None):
+        instance = instance or getattr(self, "object", None)
+        return StudentPhoneFormSet(
+            data=self.request.POST if self.request.method == "POST" else None,
+            instance=instance,
+            prefix="phones",
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["phone_formset"] = kwargs.get("phone_formset") or self.get_phone_formset(
+            instance=context["form"].instance
+        )
+        return context
+
+    def form_invalid(self, form):
+        phone_formset = self.get_phone_formset(instance=form.instance)
+        return self.render_to_response(
+            self.get_context_data(form=form, phone_formset=phone_formset)
+        )
+
+    def form_valid(self, form):
+        phone_formset = self.get_phone_formset(instance=form.instance)
+        if not phone_formset.is_valid():
+            return self.form_invalid(form)
+
+        student = form.save(commit=False)
+        student.campus = get_selected_campus(self.request)
+        student.phone = ", ".join(
+            phone_form.cleaned_data["number"].strip()
+            for phone_form in phone_formset.forms
+            if phone_form.cleaned_data and not phone_form.cleaned_data.get("DELETE")
+        )
+        with transaction.atomic():
+            student.save()
+            phone_formset.instance = student
+            phone_formset.save()
+            form.save_m2m()
+        self.object = student
+        messages.success(self.request, self.success_message)
+        return redirect(self.get_success_url())
+
+
+class StudentCreateView(StudentPhoneFormMixin, CampusScopedMixin, CreateView):
     required_permission = "students.add_student"
     model = Student
     form_class = StudentForm
     template_name = "students/form.html"
     success_url = reverse_lazy("student-list")
+    success_message = "Estudiante registrado correctamente."
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -147,19 +193,14 @@ class StudentCreateView(CampusScopedMixin, CreateView):
         kwargs["request"] = self.request
         return kwargs
 
-    def form_valid(self, form):
-        form.instance.campus = get_selected_campus(self.request)
-        response = super().form_valid(form)
-        messages.success(self.request, "Estudiante registrado correctamente.")
-        return response
 
-
-class StudentUpdateView(CampusScopedMixin, UpdateView):
+class StudentUpdateView(StudentPhoneFormMixin, CampusScopedMixin, UpdateView):
     required_permission = "students.change_student"
     model = Student
     form_class = StudentForm
     template_name = "students/form.html"
     success_url = reverse_lazy("student-list")
+    success_message = "Estudiante actualizado correctamente."
 
     def get_queryset(self):
         return self.campus_queryset(Student.objects.all())
@@ -169,12 +210,6 @@ class StudentUpdateView(CampusScopedMixin, UpdateView):
         kwargs["user"] = self.request.user
         kwargs["request"] = self.request
         return kwargs
-
-    def form_valid(self, form):
-        form.instance.campus = get_selected_campus(self.request)
-        response = super().form_valid(form)
-        messages.success(self.request, "Estudiante actualizado correctamente.")
-        return response
 
 
 class StudentDeleteView(CampusScopedMixin, DeleteView):
@@ -738,9 +773,7 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
         ).order_by("full_name", "pk")
         q = self.request.GET.get("q", "").strip()
         if q:
-            students = students.filter(
-                Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q)
-            )
+            students = filter_students(students, q)
         paginator = Paginator(students, self.students_per_page)
         page_obj = paginator.get_page(self.request.GET.get("page"))
         pagination_query = self.request.GET.copy()

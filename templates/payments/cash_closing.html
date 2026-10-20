@@ -16,6 +16,21 @@
   <div><strong>Total confirmado:</strong> S/ {{ total_confirmed }}</div>
   <div><strong>Anulado:</strong> S/ {{ total_voided }}</div>
 </div>
+{% if closing %}
+<div class="card card-pad" style="border-left:4px solid #2e7d32">
+  <strong>Caja cerrada</strong> por {{ closing.closed_by.username|default:"—" }} el {{ closing.closed_at|date:"d/m/Y H:i" }}.
+  Totales firmados: confirmado S/ {{ closing.confirmed_total }}, anulado S/ {{ closing.voided_total }}, {{ closing.payments_count }} pago(s).
+  {% if closing.note %}<div class="muted">{{ closing.note }}</div>{% endif %}
+  <div class="muted">Los pagos de esta fecha ya no se pueden editar ni anular.</div>
+  {% if user.is_superuser %}<form method="post" action="{% url 'cash-closing-reopen' %}" class="no-print" onsubmit="return confirm('¿Reabrir esta caja?')">{% csrf_token %}<input type="hidden" name="cierre" value="{{ closing.pk }}"><button class="btn-flat red-text" type="submit">Reabrir caja</button></form>{% endif %}
+</div>
+{% elif can_close %}
+<form method="post" action="{% url 'cash-closing-close' %}" class="card card-pad no-print" onsubmit="return confirm('Al cerrar la caja de {{ day|date:'d/m/Y' }} no se podrán editar ni anular sus pagos. ¿Continuar?')">
+  {% csrf_token %}<input type="hidden" name="fecha" value="{{ day|date:'Y-m-d' }}">
+  <input type="text" name="nota" maxlength="255" placeholder="Observación (opcional)">
+  <button class="btn" type="submit"><i class="material-icons left">lock</i>Cerrar caja del {{ day|date:"d/m/Y" }}</button>
+</form>
+{% endif %}
 {% for g in groups %}
 <div class="card table-wrap" style="margin-bottom:16px">
   <table class="striped">

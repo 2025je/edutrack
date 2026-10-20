@@ -16,8 +16,8 @@ from django.db.models import (
 )
 from django.db.models.functions import Cast, Coalesce, Substr
 from django.http import HttpResponseForbidden
-from django.shortcuts import redirect
-from django.urls import reverse_lazy
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.generic import (
@@ -27,6 +27,7 @@ from django.views.generic import (
     UpdateView,
     DeleteView,
     TemplateView,
+    View,
 )
 from core.campus import SelectedCampusRequiredMixin, FeaturePermissionMixin, get_selected_campus
 from core.excel import xlsx_response
@@ -38,7 +39,14 @@ from .forms import (
     filter_pending_enrollments,
     pending_enrollments_for_campus,
 )
-from .models import Payment, PaymentAllocation, Installment, receipt_number_validator
+from .models import (
+    CashClosing,
+    Installment,
+    Payment,
+    PaymentAllocation,
+    is_cash_closed,
+    receipt_number_validator,
+)
 
 
 MAX_RECEIPT_CHECK_RANGE = 10_000
@@ -255,6 +263,12 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
         return self._load_enrollment() or super().get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
+        campus = get_selected_campus(request)
+        if campus and is_cash_closed(campus.pk, timezone.localdate()):
+            messages.error(
+                request, "La caja de hoy está cerrada; no se pueden registrar más pagos."
+            )
+            return redirect("payment-list")
         return self._load_enrollment() or super().post(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -341,7 +355,28 @@ class PaymentCreateView(SelectedCampusViewMixin, FormView):
         return redirect("payment-receipt", pk=payment.pk)
 
 
-class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
+class ClosedCashGuardMixin:
+    """Impide editar o anular pagos de un día cuya caja ya fue cerrada."""
+
+    def locked_response(self):
+        payment = self.get_object()
+        day = timezone.localtime(payment.created_at).date()
+        if is_cash_closed(payment.campus_id, day):
+            messages.error(
+                self.request,
+                f"La caja del {day:%d/%m/%Y} está cerrada; sus pagos ya no se pueden modificar.",
+            )
+            return redirect("payment-list")
+        return None
+
+    def get(self, request, *args, **kwargs):
+        return self.locked_response() or super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self.locked_response() or super().post(request, *args, **kwargs)
+
+
+class PaymentUpdateView(ClosedCashGuardMixin, SelectedCampusViewMixin, UpdateView):
     required_permission = "payments.change_payment"
     model = Payment
     form_class = PaymentUpdateForm
@@ -445,7 +480,7 @@ class PaymentUpdateView(SelectedCampusViewMixin, UpdateView):
         return redirect(self.get_success_url())
 
 
-class PaymentDeleteView(SelectedCampusViewMixin, DeleteView):
+class PaymentDeleteView(ClosedCashGuardMixin, SelectedCampusViewMixin, DeleteView):
     required_permission = "core.void_payment"
     model = Payment
     template_name = "payments/payment_confirm_delete.html"
@@ -457,6 +492,9 @@ class PaymentDeleteView(SelectedCampusViewMixin, DeleteView):
         ).select_related("enrollment__student", "enrollment__course")
 
     def post(self, request, *args, **kwargs):
+        locked = self.locked_response()
+        if locked:
+            return locked
         payment = self.get_object()
         self.object = payment
         payment.status = Payment.Status.VOID
@@ -562,7 +600,7 @@ class PendingDebtsView(SelectedCampusViewMixin, ListView):
         from calls.views import build_phone_links
 
         campus = get_selected_campus(self.request)
-        template, _ = WhatsAppTemplate.objects.get_or_create(campus=campus)
+        template = WhatsAppTemplate.for_campus(campus)[WhatsAppTemplate.Kind.DEBT]
         for debt in debts:
             student = debt.enrollment.student
             debt.reminder_links = []
@@ -661,6 +699,13 @@ class CashClosingView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Templ
             .distinct()
             .order_by("cashier__username")
         )
+        closing = (
+            CashClosing.objects.filter(
+                campus=get_selected_campus(self.request), date=self.get_day()
+            )
+            .select_related("closed_by")
+            .first()
+        )
         context.update(
             day=self.get_day(),
             groups=list(groups.values()),
@@ -668,8 +713,68 @@ class CashClosingView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Templ
             total_voided=sum((g["voided"] for g in groups.values()), Decimal("0.00")),
             cashiers=cashiers,
             cashier=self.request.GET.get("cajero", ""),
+            closing=closing,
+            can_close=(
+                closing is None
+                and self.get_day() <= timezone.localdate()
+                and self.request.user.has_perm("core.close_cash")
+            ),
         )
         return context
+
+
+class CashClosingCloseView(FeaturePermissionMixin, SelectedCampusRequiredMixin, View):
+    """Firma el cierre de caja de una fecha: congela sus totales y bloquea sus pagos."""
+
+    required_permission = ("payments.view_payment", "core.close_cash")
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        campus = get_selected_campus(request)
+        day = parse_date(request.POST.get("fecha", ""))
+        back = f"{reverse('cash-closing')}?fecha={day:%Y-%m-%d}" if day else reverse("cash-closing")
+        if day is None or day > timezone.localdate():
+            messages.error(request, "Elige una fecha válida (no futura) para cerrar la caja.")
+            return redirect("cash-closing")
+        payments = Payment.objects.filter(campus=campus, created_at__date=day)
+        totals = payments.aggregate(
+            confirmed=Sum("amount", filter=Q(status=Payment.Status.CONFIRMED)),
+            voided=Sum("amount", filter=~Q(status=Payment.Status.CONFIRMED)),
+        )
+        with transaction.atomic():
+            _, created = CashClosing.objects.get_or_create(
+                campus=campus,
+                date=day,
+                defaults={
+                    "confirmed_total": totals["confirmed"] or Decimal("0.00"),
+                    "voided_total": totals["voided"] or Decimal("0.00"),
+                    "payments_count": payments.count(),
+                    "note": request.POST.get("nota", "").strip()[:255],
+                    "closed_by": request.user,
+                },
+            )
+        if created:
+            messages.success(request, f"Caja del {day:%d/%m/%Y} cerrada.")
+        else:
+            messages.info(request, "Esa caja ya estaba cerrada.")
+        return redirect(back)
+
+
+class CashClosingReopenView(SelectedCampusRequiredMixin, View):
+    """Solo un superusuario puede reabrir una caja cerrada."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("Solo un superusuario puede reabrir una caja.")
+        closing = get_object_or_404(
+            CashClosing, pk=request.POST.get("cierre"), campus=get_selected_campus(request)
+        )
+        day = closing.date
+        closing.delete()
+        messages.success(request, f"Caja del {day:%d/%m/%Y} reabierta.")
+        return redirect(f"{reverse('cash-closing')}?fecha={day:%Y-%m-%d}")
 
 
 class CashClosingExcelView(CashClosingView):

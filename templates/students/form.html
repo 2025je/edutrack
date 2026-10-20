@@ -64,7 +64,6 @@
                         {% if field.is_hidden %}{{ field }}{% else %}
                         {% if "matriculas" not in request.path %}
                             {% if field.name == "last_name" %}<h6 class="col s12 strong mt">Datos personales</h6>
-                            {% elif field.name == "phone_numbers" %}<h6 class="col s12 strong mt">Contacto</h6>
                             {% elif field.name == "active" %}<h6 class="col s12 strong mt">Estado</h6>{% endif %}
                         {% endif %}
                         {% if "matriculas" in request.path %}
@@ -113,18 +112,7 @@
                                 {% if field.field.required %}<span class="danger">*</span>{% endif %}
                             </label>
 
-                            {% if field.name == "phone_numbers" %}
-                                <div id="phone-fields">
-                                    <div class="phone-row">
-                                        {{ field }}
-                                        <button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>
-                                    </div>
-                                </div>
-                                <button type="button" id="add-phone" class="btn-flat btn-small grey-text text-darken-2">+ Agregar teléfono</button>
-                                <div class="help">Ingrese celulares peruanos de 9 dígitos.</div>
-                            {% else %}
-                                {{ field }}
-                            {% endif %}
+                            {{ field }}
                             {% endif %}
 
                             {% if field.name == "student" and "matriculas" in request.path %}
@@ -172,6 +160,42 @@
                         {% endif %}
                         {% endif %}
                     {% endfor %}
+                    {% if phone_formset %}
+                        <div class="col s12 field">
+                            <h6 class="strong mt">Teléfonos</h6>
+                            {{ phone_formset.management_form }}
+                            {% if phone_formset.non_form_errors %}
+                                <div class="field-error" role="alert">
+                                    {% for error in phone_formset.non_form_errors %}<div>{{ error }}</div>{% endfor %}
+                                </div>
+                            {% endif %}
+                            <div id="phone-fields">
+                                {% for phone_form in phone_formset %}
+                                    <div class="phone-row">
+                                        {% for hidden in phone_form.hidden_fields %}{{ hidden }}{% endfor %}
+                                        <label for="{{ phone_form.number.id_for_label }}">Teléfono <span class="danger">*</span></label>
+                                        {{ phone_form.number }}
+                                        {% for error in phone_form.number.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                                        {% if phone_form.DELETE %}
+                                            <span style="display:none">{{ phone_form.DELETE }}</span>
+                                        {% endif %}
+                                        <button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                            <template id="phone-empty-form">
+                                <div class="phone-row">
+                                    {% for hidden in phone_formset.empty_form.hidden_fields %}{{ hidden }}{% endfor %}
+                                    <label for="{{ phone_formset.empty_form.number.id_for_label }}">Teléfono <span class="danger">*</span></label>
+                                    {{ phone_formset.empty_form.number }}
+                                    <span style="display:none">{{ phone_formset.empty_form.DELETE }}</span>
+                                    <button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>
+                                </div>
+                            </template>
+                            <button type="button" id="add-phone" class="btn-flat btn-small grey-text text-darken-2">+ Agregar teléfono</button>
+                            <div class="help">Ingrese un celular peruano de 9 dígitos por fila.</div>
+                        </div>
+                    {% endif %}
                 </div>
 
                 <div class="flex gap mt">
@@ -203,31 +227,27 @@ document.addEventListener("DOMContentLoaded", function () {
     const phoneFields = document.getElementById("phone-fields");
     const addPhoneButton = document.getElementById("add-phone");
     if (phoneFields && addPhoneButton) {
-        const firstPhone = phoneFields.querySelector("input");
-        const initialPhones = (firstPhone.value || "").split(",").map(function (phone) {
-            return phone.trim();
-        }).filter(Boolean);
-        firstPhone.value = initialPhones.shift() || "";
-        initialPhones.forEach(function (phone) {
-            addPhoneRow(phone);
-        });
-
-        function addPhoneRow(value) {
-            const row = document.createElement("div");
-            row.className = "phone-row";
-            row.innerHTML = '<input type="text" name="phone_numbers" placeholder="987654321" inputmode="numeric" pattern="9[0-9]{8}" maxlength="9" required value="' +
-                value.replace(/"/g, "&quot;") +
-                '"><button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>';
+        const totalForms = document.getElementById("id_phones-TOTAL_FORMS");
+        const emptyForm = document.getElementById("phone-empty-form");
+        function addPhoneRow() {
+            const index = Number(totalForms.value);
+            const row = emptyForm.content.firstElementChild.cloneNode(true);
+            row.innerHTML = row.innerHTML.replace(/__prefix__/g, index);
             phoneFields.appendChild(row);
+            totalForms.value = index + 1;
         }
 
-        addPhoneButton.addEventListener("click", function () {
-            addPhoneRow("");
-        });
+        addPhoneButton.addEventListener("click", addPhoneRow);
         phoneFields.addEventListener("click", function (event) {
-            if (event.target.classList.contains("remove-phone") &&
-                phoneFields.querySelectorAll(".phone-row").length > 1) {
-                event.target.closest(".phone-row").remove();
+            if (event.target.classList.contains("remove-phone")) {
+                const row = event.target.closest(".phone-row");
+                const deleteInput = row.querySelector('input[name$="-DELETE"]');
+                if (deleteInput) {
+                    deleteInput.checked = true;
+                    row.hidden = true;
+                } else {
+                    row.remove();
+                }
             }
         });
     }

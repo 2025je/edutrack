@@ -24,7 +24,7 @@
   {% endif %}
   <li><div class="subheader">General</div></li>
   <li><a href="{% url 'dashboard' %}"><i class="material-icons">dashboard</i>Panel principal</a></li>
-  {% if perms.students.view_student or perms.payments.view_payment %}<li class="hide-on-med-and-up"><a href="{% url 'global-search' %}"><i class="material-icons">search</i>Buscar</a></li>{% endif %}
+  {% if selected_campus %}<li class="hide-on-med-and-up"><a href="{% url 'global-search' %}"><i class="material-icons">search</i>Buscar</a></li>{% endif %}
 
   {% if perms.students.view_student or perms.students.view_course or perms.students.view_enrollment or perms.students.view_promoter %}
   <li><div class="subheader">Académico</div></li>
@@ -32,6 +32,7 @@
   {% if perms.students.view_course %}<li><a href="{% url 'course-list' %}"><i class="material-icons">menu_book</i>Cursos</a></li>{% endif %}
   {% if perms.students.view_enrollment %}<li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>{% endif %}
   {% if perms.students.view_promoter %}<li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>{% endif %}
+  {% if perms.students.add_student %}<li><a href="{% url 'student-import' %}"><i class="material-icons">upload_file</i>Importar Excel</a></li>{% endif %}
   {% if perms.core.deactivate_student and perms.students.change_student %}<li><a href="{% url 'student-duplicates' %}"><i class="material-icons">merge_type</i>Duplicados</a></li>{% endif %}
   {% if perms.core.deactivate_student or perms.core.deactivate_enrollment %}<li><a href="{% url 'trash' %}"><i class="material-icons">delete_sweep</i>Papelera</a></li>{% endif %}
   {% endif %}

@@ -18,7 +18,7 @@ Sistema web en español para administrar estudiantes, matrículas, cursos, promo
 **Académico**
 
 - Estudiantes, cursos y matrículas, con edición y bajas lógicas.
-- Un estudiante puede tener varios teléfonos peruanos separados por comas; el documento es el DNI.
+- Los teléfonos peruanos se gestionan individualmente en cada estudiante; el documento es el DNI.
 - Cada matrícula tiene fecha propia, costos editables y varios promotores. Los costos de inscripción y mensualidad se copian del curso, pero quedan guardados en la matrícula.
 - La lista de matrículas muestra pago total, pagos confirmados, deuda, recibos y estado, con filtros y orden. Los nombres de estudiantes llevan a sus matrículas, desde donde también se puede iniciar un pago.
 
@@ -249,3 +249,11 @@ Antes de exponer el servicio a Internet:
 - Restringe `DJANGO_ALLOWED_HOSTS` al dominio.
 - Configura HTTPS (el Nginx incluido no termina TLS), directamente o con un proxy TLS de confianza.
 - Aplica reglas de firewall y prueba el procedimiento de restauración.
+
+## Novedades recientes
+
+- **Dependencias**: Dependabot semanal y job `audit` (pip-audit) en CI.
+- **Llamadas**: filtro de promesas «hoy» (vencen hoy o mañana) y plantillas de WhatsApp por situación (deuda, promesa incumplida, bienvenida).
+- **Importar desde Excel** (`/estudiantes/importar/`): vista previa, detección de duplicados y matrícula opcional por curso.
+- **Historial del estudiante** (`/estudiantes/<id>/historial/`): matrículas, pagos, llamadas y cambios en una línea de tiempo.
+- **Cierre de caja firmado**: el permiso `core.close_cash` congela los totales del día y bloquea editar, anular o crear pagos de esa fecha; solo un superusuario puede reabrirla.

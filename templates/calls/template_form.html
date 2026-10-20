@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Plantilla de WhatsApp · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Plantilla de mensaje de WhatsApp</h1><div class="muted">Se usa al hacer clic en un teléfono de la lista de llamadas de la sede seleccionada.</div></div>
+<div class="mb"><h1 class="mb-0">Plantillas de mensaje de WhatsApp</h1><div class="muted">Se usan al hacer clic en un teléfono de la lista de llamadas de la sede seleccionada. Se elige la plantilla según la situación del alumno: promesa incumplida, deuda vencida o, si no debe nada, bienvenida.</div></div>
+<div class="no-print mb" style="display:flex;gap:8px;flex-wrap:wrap">{% for key, label in kinds %}<a class="btn{% if key != kind %}-flat{% endif %}" href="?tipo={{ key }}">{{ label }}</a>{% endfor %}</div>
 <div class="card card-pad">
   <form method="post">
     {% csrf_token %}
+    <input type="hidden" name="tipo" value="{{ kind }}">
     <label for="{{ form.body.id_for_label }}">Mensaje</label>
     {{ form.body }}
     <div class="no-print mb" id="emoji-bar" aria-label="Insertar emoji" style="max-height:150px;overflow-y:auto;border:1px solid #cfd4dc;border-radius:4px;padding:4px">{% for e in emojis %}<button type="button" class="btn-flat" style="padding:0 6px;font-size:1.3rem" data-emoji="{{ e }}">{{ e }}</button>{% endfor %}</div>

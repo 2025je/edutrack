@@ -1,6 +1,7 @@
 from decimal import Decimal
+from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Sum
+from django.db.models import ProtectedError, Q, Sum
 from django.core.validators import MinValueValidator, RegexValidator
 from core.models import Campus, User
 from students.models import Enrollment, validate_ficha_image_size
@@ -106,6 +107,11 @@ class Payment(models.Model):
         self.receipt_number = self.receipt_number.strip().upper()
         super().save(*args, **kwargs)
 
+    def delete(self, *args, **kwargs):
+        raise ProtectedError(
+            "Los pagos no se eliminan; deben anularse para conservar el historial.", {self}
+        )
+
     def __str__(self):
         return self.receipt_number
 
@@ -127,3 +133,66 @@ class PaymentAllocation(models.Model):
     class Meta:
         verbose_name = "aplicación de pago"
         verbose_name_plural = "aplicaciones de pagos"
+        constraints = [
+            models.CheckConstraint(condition=Q(amount__gt=0), name="allocation_amount_positive"),
+        ]
+
+    def clean(self):
+        """Reglas críticas: misma matrícula y sin exceder el pago ni la cuota."""
+        if not self.payment_id or not self.installment_id:
+            return
+        payment, installment = self.payment, self.installment
+        if installment.enrollment_id != payment.enrollment_id:
+            raise ValidationError("La cuota debe pertenecer a la misma matrícula del pago.")
+        if self.amount is None:
+            return
+        others = PaymentAllocation.objects.exclude(pk=self.pk)
+        applied_to_payment = others.filter(payment=payment).aggregate(v=Sum("amount"))["v"]
+        if (applied_to_payment or Decimal("0.00")) + self.amount > payment.amount:
+            raise ValidationError("Lo aplicado no puede exceder el importe recibido del pago.")
+        if payment.status == Payment.Status.CONFIRMED:
+            applied_to_installment = others.filter(
+                installment=installment, payment__status=Payment.Status.CONFIRMED
+            ).aggregate(v=Sum("amount"))["v"]
+            if (applied_to_installment or Decimal("0.00")) + self.amount > installment.amount:
+                raise ValidationError("Lo aplicado no puede exceder el importe de la cuota.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+
+class CashClosing(models.Model):
+    """Cierre de caja de un día: congela los totales y bloquea cambios en los pagos de esa fecha."""
+
+    campus = models.ForeignKey(
+        Campus, on_delete=models.PROTECT, related_name="cash_closings", verbose_name="Sede"
+    )
+    date = models.DateField("Fecha")
+    confirmed_total = models.DecimalField("Total confirmado", max_digits=12, decimal_places=2)
+    voided_total = models.DecimalField("Total anulado", max_digits=12, decimal_places=2)
+    payments_count = models.PositiveIntegerField("Pagos del día")
+    note = models.CharField("Observación", max_length=255, blank=True)
+    closed_by = models.ForeignKey(
+        User,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="cash_closings",
+        verbose_name="Cerrada por",
+    )
+    closed_at = models.DateTimeField("Cerrada el", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "cierre de caja"
+        verbose_name_plural = "cierres de caja"
+        ordering = ["-date"]
+        constraints = [
+            models.UniqueConstraint(fields=["campus", "date"], name="unique_cash_closing_per_day"),
+        ]
+
+    def __str__(self):
+        return f"Cierre {self.campus} {self.date:%d/%m/%Y}"
+
+
+def is_cash_closed(campus_id, day):
+    return CashClosing.objects.filter(campus_id=campus_id, date=day).exists()

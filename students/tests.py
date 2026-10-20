@@ -1,19 +1,28 @@
 from datetime import date
 from io import BytesIO
 
-from django.db import IntegrityError, transaction
+import threading
+
+from django.db import IntegrityError, connections, transaction
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.urls import reverse
-from django.http import QueryDict
 from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Campus, User
-from core.testing import create_user
+from core.testing import create_user, grant, revoke
 from payments.models import Installment, Payment, PaymentAllocation
-from students.forms import PhoneListWidget
-from students.models import Course, Enrollment, Ficha, Promoter, Schedule, Student
+from students.models import (
+    Course,
+    Enrollment,
+    Ficha,
+    Promoter,
+    Schedule,
+    Student,
+    StudentPhone,
+    create_student_phones_from_legacy,
+)
 
 
 class CourseStudentExportTests(TestCase):
@@ -443,6 +452,7 @@ class StudentEnrollmentCrudTests(TestCase):
             document_number="11112222",
             phone="987654321",
         )
+        self.student_phone = StudentPhone.objects.create(student=self.student, number="987654321")
         self.course = Course.objects.create(
             campus=self.campus,
             name="Curso de prueba",
@@ -479,6 +489,21 @@ class StudentEnrollmentCrudTests(TestCase):
         )
         return installment, payment, allocation
 
+    def phone_formset_data(self, numbers):
+        existing = list(self.student.phones.order_by("pk"))
+        form_count = max(len(existing), len(numbers), 1)
+        data = {
+            "phones-TOTAL_FORMS": str(form_count),
+            "phones-INITIAL_FORMS": str(len(existing)),
+            "phones-MIN_NUM_FORMS": "1",
+            "phones-MAX_NUM_FORMS": "1000",
+        }
+        for index, phone in enumerate(existing):
+            data[f"phones-{index}-id"] = str(phone.pk)
+        for index, number in enumerate(numbers):
+            data[f"phones-{index}-number"] = number
+        return data
+
     def test_student_and_enrollment_can_be_updated(self):
         response = self.client.get(reverse("student-update", args=[self.student.pk]))
         self.assertEqual(response.status_code, 200)
@@ -488,8 +513,8 @@ class StudentEnrollmentCrudTests(TestCase):
                 "last_name": "Apellidos actualizados",
                 "first_name": "Nombres",
                 "document_number": self.student.document_number,
-                "phone_numbers": self.student.phone,
                 "active": "on",
+                **self.phone_formset_data(["987654321"]),
             },
             follow=True,
         )
@@ -516,6 +541,38 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.enrollment.refresh_from_db()
         self.assertEqual(self.enrollment.record_code, 202601)
+
+    def test_student_and_enrollment_views_reject_other_campus_records(self):
+        other_campus = Campus.objects.create(name="Sede ajena")
+        other_student = Student.objects.create(campus=other_campus, full_name="Alumno ajeno")
+        other_course = Course.objects.create(
+            campus=other_campus, name="Curso ajeno", start_date=date(2026, 10, 14)
+        )
+        other_enrollment = Enrollment.objects.create(
+            campus=other_campus, student=other_student, course=other_course
+        )
+
+        requests = (
+            ("get", reverse("student-update", args=[other_student.pk])),
+            ("post", reverse("student-delete", args=[other_student.pk])),
+            ("get", reverse("enrollment-update", args=[other_enrollment.pk])),
+            ("post", reverse("enrollment-delete", args=[other_enrollment.pk])),
+            ("get", reverse("enrollment-transfer", args=[other_enrollment.pk])),
+            ("post", reverse("student-restore", args=[other_student.pk])),
+            ("post", reverse("enrollment-restore", args=[other_enrollment.pk])),
+        )
+        for method, url in requests:
+            with self.subTest(url=url, method=method):
+                self.assertEqual(getattr(self.client, method)(url).status_code, 404)
+
+    def test_student_views_require_the_assigned_permission_group(self):
+        revoke(self.user, "manage_students")
+
+        self.assertEqual(self.client.get(reverse("student-list")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("student-create")).status_code, 403)
+        self.assertEqual(
+            self.client.get(reverse("student-update", args=[self.student.pk])).status_code, 403
+        )
 
     def test_enrollment_record_code_accepts_only_numbers_or_empty(self):
         response = self.client.post(
@@ -750,8 +807,12 @@ class StudentEnrollmentCrudTests(TestCase):
                 "last_name": "Pérez",
                 "first_name": "Ana",
                 "document_number": "12345678",
-                "phone_numbers": "987654321",
                 "active": "on",
+                "phones-TOTAL_FORMS": "1",
+                "phones-INITIAL_FORMS": "0",
+                "phones-MIN_NUM_FORMS": "1",
+                "phones-MAX_NUM_FORMS": "1000",
+                "phones-0-number": "987654321",
             },
             follow=True,
         )
@@ -760,14 +821,20 @@ class StudentEnrollmentCrudTests(TestCase):
         student = Student.objects.get(full_name="PÉREZ ANA")
         self.assertEqual(student.last_name, "PÉREZ")
         self.assertEqual(student.first_name, "ANA")
+        self.assertEqual(student.phone, "987654321")
+        self.assertEqual(list(student.phones.values_list("number", flat=True)), ["987654321"])
 
         invalid_response = self.client.post(
             reverse("student-create"),
             {
                 "last_name": "",
                 "first_name": "Ana",
-                "phone_numbers": "987654321",
                 "active": "on",
+                "phones-TOTAL_FORMS": "1",
+                "phones-INITIAL_FORMS": "0",
+                "phones-MIN_NUM_FORMS": "1",
+                "phones-MAX_NUM_FORMS": "1000",
+                "phones-0-number": "987654321",
             },
         )
         self.assertEqual(invalid_response.status_code, 200)
@@ -1819,35 +1886,25 @@ class StudentEnrollmentCrudTests(TestCase):
     def test_student_form_accepts_multiple_phones_and_labels_document_as_dni(self):
         response = self.client.get(reverse("student-update", args=[self.student.pk]))
         self.assertContains(response, "DNI")
-        self.assertContains(response, "Teléfonos")
-        form_data = QueryDict(mutable=True)
-        form_data.update(
-            {
-                "last_name": "Estudiante de",
-                "first_name": "prueba",
-                "document_number": self.student.document_number,
-                "active": "on",
-            }
-        )
-        form_data.setlist("phone_numbers", ["987654321", "912345678"])
-        self.assertEqual(
-            PhoneListWidget().value_from_datadict(form_data, None, "phone_numbers"),
-            "987654321, 912345678",
-        )
+        self.assertContains(response, "Teléfonos", count=1)
         response = self.client.post(
             reverse("student-update", args=[self.student.pk]),
             {
                 "last_name": "Estudiante de",
                 "first_name": "prueba",
                 "document_number": self.student.document_number,
-                "phone_numbers": "987654321, 912345678",
                 "active": "on",
+                **self.phone_formset_data(["987654321", "912345678"]),
             },
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
         self.student.refresh_from_db()
         self.assertEqual(self.student.phone, "987654321, 912345678")
+        self.assertEqual(
+            list(self.student.phones.values_list("number", flat=True)),
+            ["987654321", "912345678"],
+        )
 
     def test_student_form_requires_at_least_one_phone(self):
         response = self.client.post(
@@ -1856,8 +1913,8 @@ class StudentEnrollmentCrudTests(TestCase):
                 "last_name": "Estudiante de",
                 "first_name": "prueba",
                 "document_number": self.student.document_number,
-                "phone_numbers": "",
                 "active": "on",
+                **self.phone_formset_data([""]),
             },
         )
 
@@ -1873,15 +1930,50 @@ class StudentEnrollmentCrudTests(TestCase):
                 "last_name": "Estudiante de",
                 "first_name": "prueba",
                 "document_number": self.student.document_number,
-                "phone_numbers": "987654321, 123456789",
                 "active": "on",
+                **self.phone_formset_data(["987654321", "123456789"]),
             },
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "no es válido")
+        self.assertContains(response, "celular peruano")
         self.student.refresh_from_db()
         self.assertEqual(self.student.phone, "987654321")
+
+    def test_student_form_can_remove_a_phone_individually(self):
+        data = self.phone_formset_data(["987654321", "912345678"])
+        data["phones-0-DELETE"] = "on"
+        response = self.client.post(
+            reverse("student-update", args=[self.student.pk]),
+            {
+                "last_name": "Estudiante de",
+                "first_name": "prueba",
+                "document_number": self.student.document_number,
+                "active": "on",
+                **data,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.phone, "912345678")
+        self.assertEqual(list(self.student.phones.values_list("number", flat=True)), ["912345678"])
+
+    def test_legacy_comma_separated_phones_convert_to_related_rows(self):
+        student = Student.objects.create(
+            campus=self.campus,
+            full_name="Estudiante importado",
+            phone="987654321, 912345678, 987654321",
+        )
+
+        create_student_phones_from_legacy(student)
+
+        self.assertEqual(
+            list(student.phones.values_list("number", flat=True)),
+            ["987654321", "912345678"],
+        )
+        student.refresh_from_db()
+        self.assertEqual(student.phone, "987654321, 912345678")
 
 
 class PendingEnrollmentTests(TestCase):
@@ -2012,6 +2104,21 @@ class StudentMergeTests(TestCase):
         self.assertFalse(self.dup.active)
         self.assertEqual(self.client.get(reverse("student-duplicates")).context["groups"], [])
 
+    def test_merge_preserves_distinct_phone_records_and_updates_compatibility_value(self):
+        StudentPhone.objects.create(student=self.keep, number="988888888")
+        StudentPhone.objects.create(student=self.dup, number="977777777")
+        StudentPhone.objects.create(student=self.dup, number="988888888")
+
+        self.merge(self.keep, self.dup)
+
+        self.keep.refresh_from_db()
+        self.assertEqual(
+            list(self.keep.phones.values_list("number", flat=True)),
+            ["988888888", "977777777"],
+        )
+        self.assertEqual(self.keep.phone, "988888888, 977777777")
+        self.assertFalse(self.dup.phones.exists())
+
     def test_merge_rejects_different_people_and_requires_permission(self):
         other = Student.objects.get(full_name="OTRA PERSONA")
         self.merge(self.keep, other)
@@ -2020,3 +2127,253 @@ class StudentMergeTests(TestCase):
         self.user.groups.clear()
         self.user._perm_cache = None
         self.assertEqual(self.client.get(reverse("student-duplicates")).status_code, 403)
+
+
+class StudentImportAndTimelineTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Import", active=True)
+        self.user = create_user(
+            username="importer", manage_students=True, register_payments=True, manage_calls=True
+        )
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        Student.objects.create(campus=self.campus, full_name="Juan Pérez", phone="911111111")
+        self.course = Course.objects.create(
+            campus=self.campus, name="Inglés", enrollment_fee=30, monthly_fee=50
+        )
+
+    def upload(self, rows):
+        from openpyxl import Workbook
+
+        book = Workbook()
+        book.active.append(["Nombre", "DNI", "Teléfono", "Curso"])
+        for row in rows:
+            book.active.append(row)
+        buffer = BytesIO()
+        book.save(buffer)
+        buffer.name = "alumnos.xlsx"
+        buffer.seek(0)
+        return self.client.post(reverse("student-import"), {"archivo": buffer})
+
+    def test_preview_classifies_rows_and_confirm_creates_students_and_enrollments(self):
+        response = self.upload(
+            [
+                ["Ana Torres", "12345678", "922222222", "Inglés"],
+                ["Perez Juan", "", "", ""],
+                ["Luis Ruiz", "", "123", ""],
+                ["Eva Soto", "", "", "No existe"],
+            ]
+        )
+        self.assertEqual(response.context["counts"], {"new": 1, "duplicate": 1, "error": 2})
+        self.assertEqual(Student.objects.filter(campus=self.campus).count(), 1)
+
+        self.client.post(reverse("student-import"), {"accion": "confirmar"})
+
+        ana = Student.objects.get(full_name="ANA TORRES")
+        enrollment = Enrollment.objects.get(student=ana)
+        self.assertEqual(enrollment.course, self.course)
+        self.assertEqual(list(ana.phones.values_list("number", flat=True)), ["922222222"])
+        self.assertEqual(ana.phone, "922222222")
+        self.assertEqual(Installment.objects.filter(enrollment=enrollment).count(), 2)
+        self.assertEqual(Student.objects.filter(campus=self.campus).count(), 2)
+
+    def test_import_requires_permission_and_rejects_non_excel(self):
+        revoke(self.user, "manage_students")
+        self.assertEqual(self.client.get(reverse("student-import")).status_code, 403)
+
+    def test_timeline_merges_enrollments_payments_and_calls(self):
+        from calls.models import CallNote
+
+        student = Student.objects.get(full_name="JUAN PÉREZ")
+        enrollment = Enrollment.objects.create(
+            campus=self.campus, student=student, course=self.course
+        )
+        Payment.objects.create(
+            campus=self.campus,
+            enrollment=enrollment,
+            cashier=self.user,
+            receipt_number="T1",
+            amount=10,
+        )
+        CallNote.objects.create(campus=self.campus, student=student, author=self.user, note="hola")
+
+        response = self.client.get(reverse("student-timeline", args=[student.pk]))
+
+        kinds = {event["kind"] for event in response.context["events"]}
+        self.assertTrue({"Matrícula", "Pago", "Llamada"} <= kinds)
+        revoke(self.user, "register_payments")
+        kinds = {
+            e["kind"]
+            for e in self.client.get(reverse("student-timeline", args=[student.pk])).context[
+                "events"
+            ]
+        }
+        self.assertNotIn("Pago", kinds)
+
+
+class StudentImportErrorPathTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Errores", active=True)
+        self.user = create_user(username="imp2")
+        grant(self.user, "students.add_student")
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def post_file(self, name, content):
+        upload = BytesIO(content)
+        upload.name = name
+        return self.client.post(reverse("student-import"), {"archivo": upload}, follow=True)
+
+    def xlsx(self, rows):
+        from openpyxl import Workbook
+
+        book = Workbook()
+        for row in rows:
+            book.active.append(row)
+        buffer = BytesIO()
+        book.save(buffer)
+        return buffer.getvalue()
+
+    def test_rejects_missing_or_non_excel_files(self):
+        response = self.client.post(reverse("student-import"), follow=True)
+        self.assertContains(response, "Sube un archivo Excel")
+        response = self.post_file("alumnos.csv", b"Nombre\nAna")
+        self.assertContains(response, "Sube un archivo Excel")
+
+    def test_rejects_corrupt_excel_and_missing_name_column(self):
+        response = self.post_file("roto.xlsx", b"no es un excel")
+        self.assertContains(response, "No se pudo leer el archivo")
+        response = self.post_file("sin_nombre.xlsx", self.xlsx([["DNI"], ["123"]]))
+        self.assertContains(response, "Falta la columna")
+        self.assertEqual(Student.objects.count(), 0)
+
+    def test_confirm_without_preview_creates_nothing(self):
+        response = self.client.post(reverse("student-import"), {"accion": "confirmar"}, follow=True)
+        self.assertContains(response, "No hay una vista previa pendiente")
+        self.assertEqual(Student.objects.count(), 0)
+
+    def test_enrollments_need_permission_and_repeated_names_in_file_are_duplicates(self):
+        course = Course.objects.create(campus=self.campus, name="Arte", monthly_fee=10)
+        response = self.post_file(
+            "alumnos.xlsx",
+            self.xlsx(
+                [
+                    ["Nombre", "Telefono", "Curso"],
+                    ["Ana Gil", "955555555", "Arte"],
+                    ["Gil Ana", "944444444", ""],
+                    [None, None, None],
+                ]
+            ),
+        )
+        self.assertEqual(response.context["counts"], {"new": 1, "duplicate": 1, "error": 0})
+        self.client.post(reverse("student-import"), {"accion": "confirmar"})
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertEqual(Enrollment.objects.filter(course=course).count(), 0)
+
+
+class StudentSearchTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Búsqueda", active=True)
+        self.user = create_user(username="buscador", manage_students=True)
+        self.user.campuses.add(self.campus)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        self.ana = Student.objects.create(
+            campus=self.campus,
+            full_name="María Pérez Soto",
+            document_number="45678912",
+            phone="987654321",
+        )
+        Student.objects.create(campus=self.campus, full_name="Luis Ramos", phone="911222333")
+
+    def names(self, q):
+        response = self.client.get(reverse("student-list"), {"q": q})
+        return [s.full_name for s in response.context["students"]]
+
+    def test_matches_name_in_any_order_without_accents_dni_and_phone(self):
+        self.assertEqual(self.names("perez maria"), ["MARÍA PÉREZ SOTO"])
+        self.assertEqual(self.names("soto"), ["MARÍA PÉREZ SOTO"])
+        self.assertEqual(self.names("456789"), ["MARÍA PÉREZ SOTO"])
+        self.assertEqual(self.names("98765"), ["MARÍA PÉREZ SOTO"])
+        self.assertEqual(self.names("maria ramos"), [])
+
+    def test_matches_ficha_code(self):
+        course = Course.objects.create(campus=self.campus, name="Arte")
+        enrollment = Enrollment.objects.create(campus=self.campus, student=self.ana, course=course)
+        Ficha.objects.create(
+            enrollment=enrollment, campus=self.campus, date=enrollment.enrollment_date, code=4321
+        )
+        self.assertEqual(self.names("4321"), ["MARÍA PÉREZ SOTO"])
+        self.assertEqual(self.names("9999"), [])
+
+
+class EnrollmentUniquenessTests(TestCase):
+    def test_database_rejects_duplicate_student_course(self):
+        campus = Campus.objects.create(name="Sede unica", active=True)
+        student = Student.objects.create(campus=campus, full_name="Alumno Unico")
+        course = Course.objects.create(
+            campus=campus, name="Curso unico", start_date=date(2026, 10, 14)
+        )
+        Enrollment.objects.create(campus=campus, student=student, course=course)
+
+        with self.assertRaises(ValidationError):
+            Enrollment(campus=campus, student=student, course=course).full_clean()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Enrollment.objects.create(campus=campus, student=student, course=course)
+
+    def test_pending_enrollments_are_not_restricted(self):
+        campus = Campus.objects.create(name="Sede pendientes", active=True)
+        student = Student.objects.create(campus=campus, full_name="Alumno Pendiente")
+        Enrollment.objects.create(campus=campus, student=student)
+        Enrollment.objects.create(campus=campus, student=student)
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentEnrollmentTests(TransactionTestCase):
+    reset_sequences = True
+
+    def test_concurrent_duplicate_enrollments_are_rejected_by_the_database(self):
+        campus = Campus.objects.create(name="Sede matrícula concurrente")
+        student = Student.objects.create(campus=campus, full_name="Alumno único concurrente")
+        course = Course.objects.create(
+            campus=campus, name="Curso único concurrente", start_date=date(2026, 10, 14)
+        )
+        barrier = threading.Barrier(2)
+        results = []
+        errors = []
+
+        def create_enrollment():
+            connections.close_all()
+            try:
+                barrier.wait(timeout=10)
+                with transaction.atomic():
+                    Enrollment.objects.create(campus=campus, student=student, course=course)
+                results.append("created")
+            except IntegrityError:
+                results.append("duplicate")
+            except Exception as error:
+                errors.append(error)
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=create_enrollment) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads), "Enrollment request hung.")
+        self.assertEqual(errors, [])
+        self.assertCountEqual(results, ["created", "duplicate"])
+        self.assertEqual(
+            Enrollment.objects.filter(student=student, course=course).count(),
+            1,
+        )

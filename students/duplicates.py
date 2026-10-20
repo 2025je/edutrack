@@ -10,7 +10,12 @@ from core.activity import record
 from core.campus import FeaturePermissionMixin, SelectedCampusRequiredMixin, get_selected_campus
 from core.models import ActivityLog
 
-from .models import Enrollment, Student
+from .models import (
+    Enrollment,
+    Student,
+    create_student_phones_from_legacy,
+    sync_legacy_student_phone,
+)
 
 
 def name_key(full_name):
@@ -32,11 +37,19 @@ def merge_students(keep, duplicate):
     """Pasa matrículas y llamadas del duplicado al estudiante principal y lo da de baja."""
     moved = Enrollment.objects.filter(student=duplicate).update(student=keep)
     CallNote.objects.filter(student=duplicate).update(student=keep)
-    if not keep.phone and duplicate.phone:
-        keep.phone = duplicate.phone
+    if keep.phone and not keep.phones.exists():
+        create_student_phones_from_legacy(keep)
+    if duplicate.phone and not duplicate.phones.exists():
+        create_student_phones_from_legacy(duplicate)
+    keep_numbers = set(keep.phones.values_list("number", flat=True))
+    for phone in duplicate.phones.exclude(number__in=keep_numbers):
+        phone.student = keep
+        phone.save(update_fields=["student"])
+    duplicate.phones.all().delete()
     if not keep.document_number and duplicate.document_number:
         keep.document_number = duplicate.document_number
     keep.save()
+    sync_legacy_student_phone(keep)
     duplicate.active = False
     duplicate.save(update_fields=["active"])
     return moved

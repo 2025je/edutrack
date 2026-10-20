@@ -13,10 +13,10 @@ from .models import (
     validate_ficha_image_size,
     PENDING_COURSE_LABEL,
     Student,
+    StudentPhone,
     Enrollment,
     Course,
     Promoter,
-    phone_validator,
 )
 from core.campus import get_selected_campus
 from .images import DEFAULT_QUALITY, QUALITY_CHOICES, to_jpeg
@@ -41,17 +41,6 @@ class CourseSelectWidget(forms.Select):
         return option
 
 
-class PhoneListWidget(forms.TextInput):
-    def value_from_datadict(self, data, files, name):
-        if hasattr(data, "getlist"):
-            raw_values = data.getlist(name)
-        else:
-            raw_value = data.get(name, "")
-            raw_values = raw_value if isinstance(raw_value, (list, tuple)) else [raw_value]
-        values = [value.strip() for value in raw_values]
-        return ", ".join(values)
-
-
 class StudentForm(forms.ModelForm):
     last_name = forms.CharField(
         label="Apellidos",
@@ -65,48 +54,17 @@ class StudentForm(forms.ModelForm):
         max_length=120,
         widget=forms.TextInput(attrs={"data-uppercase": True, "style": "text-transform:uppercase"}),
     )
-    phone_numbers = forms.CharField(
-        label="Teléfonos",
-        required=True,
-        widget=PhoneListWidget(
-            attrs={
-                "placeholder": "987654321",
-                "inputmode": "numeric",
-                "pattern": "9[0-9]{8}",
-                "maxlength": 9,
-                "required": True,
-            }
-        ),
-    )
 
     class Meta:
         model = Student
         fields = ["last_name", "first_name", "document_number", "active"]
-        # Los teléfonos son un campo declarado; se ordenan junto a los datos de contacto.
 
-    field_order = ["last_name", "first_name", "document_number", "phone_numbers", "active"]
+    field_order = ["last_name", "first_name", "document_number", "active"]
 
     def __init__(self, *args, user=None, request=None, **kwargs):
         super().__init__(*args, **kwargs)
         # La sede proviene de la sesión, nunca del formulario enviado por el navegador.
         self.selected_campus = get_selected_campus(request) if request and user else None
-        if self.instance and self.instance.phone:
-            self.initial["phone_numbers"] = self.instance.phone
-
-    def clean_phone_numbers(self):
-        phone_numbers = [
-            number.strip() for number in self.cleaned_data.get("phone_numbers", "").split(",")
-        ]
-        if not phone_numbers or any(not number for number in phone_numbers):
-            raise ValidationError("Ingrese al menos un teléfono y complete todos los campos.")
-        for phone in phone_numbers:
-            try:
-                phone_validator(phone)
-            except ValidationError:
-                raise ValidationError(
-                    f"El teléfono {phone} no es válido. Use 9 dígitos y empiece con 9."
-                )
-        return ", ".join(phone_numbers)
 
     def clean_last_name(self):
         return self.cleaned_data["last_name"].strip().upper()
@@ -143,11 +101,52 @@ class StudentForm(forms.ModelForm):
     def save(self, commit=True):
         student = super().save(commit=False)
         student.full_name = self.cleaned_data["full_name"]
-        student.phone = self.cleaned_data["phone_numbers"]
         if commit:
             student.save()
             self.save_m2m()
         return student
+
+
+class StudentPhoneForm(forms.ModelForm):
+    class Meta:
+        model = StudentPhone
+        fields = ["number"]
+        widgets = {
+            "number": forms.TextInput(
+                attrs={
+                    "placeholder": "987654321",
+                    "inputmode": "numeric",
+                    "pattern": "9[0-9]{8}",
+                    "maxlength": 9,
+                }
+            )
+        }
+
+
+class BaseStudentPhoneFormSet(forms.BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        numbers = [
+            form.cleaned_data["number"].strip()
+            for form in self.forms
+            if form.cleaned_data.get("number") and not form.cleaned_data.get("DELETE")
+        ]
+        if len(numbers) != len(set(numbers)):
+            raise ValidationError("No repita el mismo teléfono.")
+
+
+StudentPhoneFormSet = forms.inlineformset_factory(
+    Student,
+    StudentPhone,
+    form=StudentPhoneForm,
+    formset=BaseStudentPhoneFormSet,
+    extra=1,
+    can_delete=True,
+    min_num=1,
+    validate_min=True,
+)
 
 
 class EnrollmentForm(forms.ModelForm):

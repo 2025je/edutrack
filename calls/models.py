@@ -119,19 +119,55 @@ PLACEHOLDERS = {
     "{sede}": "Nombre de la sede",
     "{deuda_total}": "Deuda total del alumno (solo el número)",
     "{detalle_deuda}": "Una línea por curso con deuda: curso y monto",
+    "{fecha_promesa}": "Fecha en que el alumno prometió pagar (plantilla de promesa incumplida)",
 }
+
+DEFAULT_PROMISE_TEMPLATE = (
+    "Hola {alumno}, le saludamos de {sede}. "
+    "El {fecha_promesa} quedamos en que realizaría su pago y aún figura una deuda de "
+    "S/ {deuda_total}:\n{detalle_deuda}\n"
+    "¿Nos confirma cuándo podrá realizarlo? ¡Gracias!"
+)
+DEFAULT_WELCOME_TEMPLATE = (
+    "¡Hola {alumno}! Te damos la bienvenida a {sede}. "
+    "Quedamos atentos a cualquier consulta sobre tus clases. ¡Gracias por confiar en nosotros!"
+)
 
 
 class WhatsAppTemplate(models.Model):
-    campus = models.OneToOneField(
-        Campus, on_delete=models.CASCADE, related_name="whatsapp_template", verbose_name="Sede"
+    class Kind(models.TextChoices):
+        DEBT = "DEUDA", "Deuda vencida"
+        PROMISE = "PROMESA", "Promesa incumplida"
+        WELCOME = "BIENVENIDA", "Bienvenida"
+
+    DEFAULT_BODIES = {
+        Kind.DEBT: DEFAULT_WHATSAPP_TEMPLATE,
+        Kind.PROMISE: DEFAULT_PROMISE_TEMPLATE,
+        Kind.WELCOME: DEFAULT_WELCOME_TEMPLATE,
+    }
+
+    campus = models.ForeignKey(
+        Campus, on_delete=models.CASCADE, related_name="whatsapp_templates", verbose_name="Sede"
     )
+    kind = models.CharField("Situación", max_length=12, choices=Kind.choices, default=Kind.DEBT)
     body = models.TextField("Mensaje", default=DEFAULT_WHATSAPP_TEMPLATE, max_length=1000)
     updated_at = models.DateTimeField("Actualizado", auto_now=True)
 
     class Meta:
         verbose_name = "plantilla de WhatsApp"
         verbose_name_plural = "plantillas de WhatsApp"
+        constraints = [
+            models.UniqueConstraint(fields=["campus", "kind"], name="unique_whatsapp_kind_campus"),
+        ]
+
+    @classmethod
+    def for_campus(cls, campus):
+        """Plantillas de la sede por situación; las que no existen usan el texto por defecto."""
+        found = {t.kind: t for t in cls.objects.filter(campus=campus)}
+        return {
+            kind: found.get(kind) or cls(campus=campus, kind=kind, body=cls.DEFAULT_BODIES[kind])
+            for kind in cls.Kind.values
+        }
 
     def render(self, **values):
         text = self.body

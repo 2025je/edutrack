@@ -310,22 +310,43 @@ class RoleGroupMatrixTests(TestCase):
         with open(finders.find("js/sidebar.js"), encoding="utf-8") as script:
             self.assertIn("Navegación parcial", script.read())
 
-    def test_search_requires_permission_and_hides_unusable_actions(self):
-        self.user_in("Gestor de llamadas")
-        self.assertEqual(self.client.get(reverse("global-search")).status_code, 403)
-        page = self.client.get(reverse("dashboard"))
-        self.assertNotContains(page, f'href="{reverse("global-search")}"')
-        self.assertNotContains(page, 'name="q"')
-
-    def test_search_results_only_offer_permitted_actions(self):
+    def test_search_finds_sections_without_searching_records(self):
         from students.models import Student
 
-        self.user_in("Supervisor de campus")
+        self.user_in("Caja")
         Student.objects.create(campus=Campus.objects.get(name="Sede"), full_name="Ana Prueba")
-        page = self.client.get(reverse("global-search"), {"q": "Ana"})
-        self.assertContains(page, "ANA PRUEBA")
-        self.assertContains(page, "Matrículas")
-        self.assertNotContains(page, "/editar/")
+        page = self.client.get(reverse("global-search"), {"q": "ana"})
+        self.assertNotContains(page, "ANA PRUEBA")
+        page = self.client.get(reverse("global-search"), {"q": "recibos"})
+        self.assertContains(page, f'href="{reverse("payment-list")}"')
+
+    def test_search_only_lists_sections_the_user_can_open(self):
+        self.user_in("Gestor de llamadas")
+        self.assertEqual(self.client.get(reverse("global-search")).status_code, 200)
+        page = self.client.get(reverse("global-search"), {"q": "usuarios"})
+        self.assertNotContains(page, f'href="{reverse("user-list")}"')
+        page = self.client.get(reverse("global-search"), {"q": "segui"})
+        self.assertContains(page, f'href="{reverse("calls-students")}"')
+
+    def test_search_finds_subsections_and_quick_filters_and_returns_json(self):
+        self.user_in("Administrador general")
+        response = self.client.get(reverse("global-search"), {"q": "llamar hoy", "json": "1"})
+        urls = [r["url"] for r in response.json()["results"]]
+        self.assertIn(reverse("calls-students") + "?promesa=hoy", urls)
+        self.user_in("Gestor de llamadas")
+        response = self.client.get(reverse("global-search"), {"q": "plantilla promesa"})
+        self.assertContains(response, "?tipo=PROMESA")
+
+    def test_search_matches_without_accents_and_limits_json_results(self):
+        self.user_in("Administrador general")
+        response = self.client.get(reverse("global-search"), {"q": "matricula", "json": "1"})
+        names = [r["name"] for r in response.json()["results"]]
+        self.assertIn("Matrículas", names)
+        self.assertLessEqual(len(names), 12)
+        self.assertEqual(
+            self.client.get(reverse("global-search"), {"q": "", "json": "1"}).json(),
+            {"results": []},
+        )
 
     def test_enrollment_staff_cannot_void_payments_or_manage_users(self):
         self.user_in("Matrículas")
@@ -473,3 +494,17 @@ class RecordHistoryTests(TestCase):
         self.assertEqual(
             self.client.get(reverse("record-history", args=["otro", 1])).status_code, 404
         )
+
+
+class AvailableCampusesTests(TestCase):
+    def test_superuser_sees_inactive_campuses_but_regular_user_does_not(self):
+        from core.campus import available_campuses
+
+        active = Campus.objects.create(name="Sede activa", active=True)
+        inactive = Campus.objects.create(name="Sede inactiva", active=False)
+        admin = User.objects.create_superuser(username="root", password="x" * 12)
+        user = create_user(username="regular", password="x" * 12)
+        user.campuses.add(active, inactive)
+
+        self.assertCountEqual(available_campuses(admin), [active, inactive])
+        self.assertCountEqual(available_campuses(user), [active])

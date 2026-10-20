@@ -5,7 +5,6 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import Permission
 from django.contrib.auth.views import PasswordChangeView
-from django.core.exceptions import PermissionDenied
 from django.db.models import F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import render, redirect
@@ -205,49 +204,21 @@ class DashboardView(LoginRequiredMixin, TemplateView):
 
 
 class GlobalSearchView(LoginRequiredMixin, TemplateView):
-    template_name = "core/search.html"
-    limit = 15
+    """Busca secciones de la app (no estudiantes ni cursos) permitidas para el usuario."""
 
-    def dispatch(self, request, *args, **kwargs):
-        user = request.user
-        if user.is_authenticated and not (
-            user.has_perm("students.view_student") or user.has_perm("payments.view_payment")
-        ):
-            raise PermissionDenied("No tienes permiso para usar la búsqueda.")
-        if user.is_authenticated and get_selected_campus(request) is None:
-            return redirect("select-campus")
-        return super().dispatch(request, *args, **kwargs)
+    template_name = "core/search.html"
 
     def get_context_data(self, **kwargs):
-        from students.models import Ficha
+        from .sections import search_sections
 
         context = super().get_context_data(**kwargs)
-        user = self.request.user
-        campus = get_selected_campus(self.request)
         q = self.request.GET.get("q", "").strip()[:80]
-        can_students = user.has_perm("students.view_student")
-        can_payments = user.has_perm("payments.view_payment")
-        context.update(q=q, can_students=can_students, can_payments=can_payments)
-        students = fichas = payments = []
-        if q:
-            if can_students:
-                students = list(
-                    Student.objects.filter(campus=campus)
-                    .filter(Q(full_name__unaccent__icontains=q) | Q(document_number__icontains=q))
-                    .order_by("full_name")[: self.limit]
-                )
-                if q.isdigit() and user.has_perm("students.view_enrollment"):
-                    fichas = list(
-                        Ficha.objects.filter(campus=campus, code=int(q))
-                        .select_related("enrollment__student", "enrollment__course")
-                        .order_by("-date")[: self.limit]
-                    )
-            if can_payments:
-                payments = list(
-                    Payment.objects.filter(campus=campus, receipt_number__icontains=q)
-                    .select_related("enrollment__student")
-                    .order_by("-created_at")[: self.limit]
-                )
-        context.update(students=students, fichas=fichas, payments=payments)
-        context["total"] = len(students) + len(fichas) + len(payments)
+        context.update(q=q, sections=search_sections(self.request.user, q) if q else [])
         return context
+
+    def render_to_response(self, context, **response_kwargs):
+        if self.request.GET.get("json"):
+            from django.http import JsonResponse
+
+            return JsonResponse({"results": context["sections"][:12]})
+        return super().render_to_response(context, **response_kwargs)

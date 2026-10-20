@@ -83,6 +83,7 @@ class FeatureAccess(models.Model):
             ("view_pending_balances", "Consultar cuotas y saldos pendientes"),
             ("view_academic_reports", "Consultar reportes académicos"),
             ("view_call_reports", "Consultar reportes de llamadas"),
+            ("close_cash", "Cerrar la caja del día"),
             ("export_reports", "Exportar reportes autorizados a Excel"),
             ("manage_user_access", "Administrar usuarios, grupos y permisos"),
         ]

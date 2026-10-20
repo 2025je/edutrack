@@ -88,3 +88,19 @@ jobs:
 
       - name: Run tests
         run: uv run --locked python manage.py test
+
+  audit:
+    name: Auditoría de dependencias
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Export locked dependencies
+        run: uv export --locked --no-dev --no-hashes --no-emit-project -o requirements-audit.txt
+
+      - name: Audit with pip-audit
+        run: uvx pip-audit --requirement requirements-audit.txt --no-deps --disable-pip --progress-spinner off

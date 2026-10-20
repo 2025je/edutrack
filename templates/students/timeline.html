@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Historial de {{ student.full_name }} · EduTrack{% endblock %}
+{% block content %}
+<div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div><h5 style="margin:0">{{ student.full_name }}</h5><div class="muted">Teléfonos: {{ student.phone|default:"—" }}{% if student.document_number %} · DNI {{ student.document_number }}{% endif %}</div></div>
+  <a class="btn-flat" href="{% url 'student-list' %}"><i class="material-icons left">arrow_back</i>Volver</a>
+</div>
+<div class="card table-wrap">
+  <table class="highlight">
+    <thead><tr><th>Fecha y hora</th><th>Tipo</th><th>Detalle</th><th>Usuario</th></tr></thead>
+    <tbody>
+    {% for e in events %}<tr>
+      <td style="white-space:nowrap">{{ e.when|date:"d/m/Y H:i" }}</td>
+      <td style="white-space:nowrap"><i class="material-icons" style="font-size:18px;vertical-align:middle" aria-hidden="true">{{ e.icon }}</i> {{ e.kind }}</td>
+      <td>{{ e.text }}</td><td>{{ e.who|default:"—" }}</td>
+    </tr>{% empty %}<tr><td colspan="4" class="center-align muted">Este estudiante aún no tiene actividad registrada.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if truncated %}<p class="muted">Se muestran los {{ events|length }} eventos más recientes.</p>{% endif %}
+{% endblock %}

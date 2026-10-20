@@ -3,11 +3,10 @@ from .models import Campus
 
 
 def available_campuses(user):
-    """Sedes activas que el usuario está autorizado a utilizar."""
-    qs = Campus.objects.filter(active=True)
+    """Sedes que el usuario puede usar: todas para el superusuario; solo las activas asignadas para el resto."""
     if user.is_superuser:
-        return qs
-    return qs.filter(users=user)
+        return Campus.objects.all()
+    return Campus.objects.filter(active=True, users=user)
 
 
 def get_selected_campus(request):

@@ -17,6 +17,7 @@ NOUNS = {
     "students.enrollment": ("matrícula", "matrículas"),
     "students.ficha": ("ficha", "fichas"),
     "payments.payment": ("pago", "pagos"),
+    "payments.cashclosing": ("cierre de caja", "cierres de caja"),
     "payments.installment": ("cuota", "cuotas"),
     "payments.paymentallocation": ("aplicación de pago", "aplicaciones de pago"),
     "calls.callnote": ("llamada", "llamadas"),
@@ -117,6 +118,10 @@ SPECIAL = {
     "core.view_call_reports": (
         "Ver reportes de llamadas",
         "Consultar el reporte de llamadas por usuario y resultado.",
+    ),
+    "core.close_cash": (
+        "Cerrar la caja del día",
+        "Firmar el cierre de caja de una fecha; después nadie puede editar ni anular sus pagos.",
     ),
     "core.export_reports": (
         "Exportar a Excel",

@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import quote, urlencode
 
@@ -31,7 +32,7 @@ from .models import EMOJIS, PLACEHOLDERS, CallAssignment, CallNote, WhatsAppTemp
 ZERO = Decimal("0.00")
 
 
-def whatsapp_message(template, campus, student, courses, total):
+def whatsapp_message(template, campus, student, courses, total, promise_date=None):
     detail = "\n".join(
         f"- {c['course_label']}: S/ {c['debt']:.2f}" for c in courses if c["debt"] > 0
     )
@@ -40,11 +41,12 @@ def whatsapp_message(template, campus, student, courses, total):
         sede=campus.name,
         deuda_total=f"{total:.2f}",
         detalle_deuda=detail or "Sin deuda pendiente",
+        fecha_promesa=promise_date.strftime("%d/%m/%Y") if promise_date else "",
     )
 
 
-def build_phone_links(template, campus, student, courses, total):
-    message = whatsapp_message(template, campus, student, courses, total)
+def build_phone_links(template, campus, student, courses, total, promise_date=None):
+    message = whatsapp_message(template, campus, student, courses, total, promise_date)
     message = quote(message.replace("\r\n", "\n"), safe="")
     phones = [p.strip() for p in student.phone.split(",") if p.strip()]
     return [
@@ -260,9 +262,16 @@ class WhatsAppTemplateView(FeaturePermissionMixin, SelectedCampusRequiredMixin, 
     required_permission = "calls.add_callnote"
     template_name = "calls/template_form.html"
 
+    @property
+    def kind(self):
+        value = self.request.GET.get("tipo") or self.request.POST.get("tipo") or ""
+        return value if value in WhatsAppTemplate.Kind.values else WhatsAppTemplate.Kind.DEBT
+
     def get_template(self):
         template, _ = WhatsAppTemplate.objects.get_or_create(
-            campus=get_selected_campus(self.request)
+            campus=get_selected_campus(self.request),
+            kind=self.kind,
+            defaults={"body": WhatsAppTemplate.DEFAULT_BODIES[self.kind]},
         )
         return template
 
@@ -272,11 +281,14 @@ class WhatsAppTemplateView(FeaturePermissionMixin, SelectedCampusRequiredMixin, 
         context["form"] = form or WhatsAppTemplateForm(instance=template)
         context["placeholders"] = PLACEHOLDERS.items()
         context["emojis"] = EMOJIS
+        context["kind"] = self.kind
+        context["kinds"] = WhatsAppTemplate.Kind.choices
         sample = {
             "alumno": "María Pérez",
             "sede": get_selected_campus(self.request).name,
             "deuda_total": "150.00",
             "detalle_deuda": "- Inglés: S/ 100.00\n- Computación: S/ 50.00",
+            "fecha_promesa": "15/10/2026",
         }
         context["sample"] = sample
         context["preview"] = template.render(**sample)
@@ -287,7 +299,7 @@ class WhatsAppTemplateView(FeaturePermissionMixin, SelectedCampusRequiredMixin, 
         if form.is_valid():
             form.save()
             messages.success(request, "Plantilla de WhatsApp guardada.")
-            return redirect("calls-template")
+            return redirect(f"{reverse('calls-template')}?tipo={self.kind}")
         return self.render_to_response(self.get_context_data(form=form))
 
 
@@ -327,9 +339,16 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
         value = self.request.GET.get("contacto", "")
         return value if value in self.CONTACTS else ""
 
+    PROMISES = {
+        "": "Promesas: todas",
+        "vencida": "Promesas incumplidas",
+        "hoy": "Llamar hoy (vencen hoy o mañana)",
+    }
+
     @property
     def promise_filter(self):
-        return "vencida" if self.request.GET.get("promesa") == "vencida" else ""
+        value = self.request.GET.get("promesa", "")
+        return value if value in ("vencida", "hoy") else ""
 
     def get_queryset(self):
         campus = get_selected_campus(self.request)
@@ -380,7 +399,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
                     "receipts": receipts[enrollment.pk],
                 }
             )
-        template, _ = WhatsAppTemplate.objects.get_or_create(campus=campus)
+        templates = WhatsAppTemplate.for_campus(campus)
         notes_count = dict(
             CallNote.objects.filter(campus=campus, student__in=students)
             .values_list("student")
@@ -429,12 +448,23 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
             days_since_call = (today - timezone.localtime(last).date()).days if last else None
             promise = promises.get(student.pk)
             promise_broken = bool(promise and promise.promise_date < today and total > 0)
+            promise_due_soon = bool(
+                promise and today <= promise.promise_date <= today + timedelta(days=1) and total > 0
+            )
             if self.promise_filter == "vencida" and not promise_broken:
+                continue
+            if self.promise_filter == "hoy" and not promise_due_soon:
                 continue
             if contact == "nunca" and last:
                 continue
             if contact.isdigit() and last and days_since_call < int(contact):
                 continue
+            if promise_broken:
+                kind = WhatsAppTemplate.Kind.PROMISE
+            elif total > 0:
+                kind = WhatsAppTemplate.Kind.DEBT
+            else:
+                kind = WhatsAppTemplate.Kind.WELCOME
             due = oldest_due.get(student.pk)
             rows.append(
                 {
@@ -442,11 +472,20 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
                     "courses": courses,
                     "total_debt": total,
                     "notes_count": notes_count.get(student.pk, 0),
-                    "phones": build_phone_links(template, campus, student, courses, total),
+                    "phones": build_phone_links(
+                        templates[kind],
+                        campus,
+                        student,
+                        courses,
+                        total,
+                        promise.promise_date if promise else None,
+                    ),
+                    "message_kind": WhatsAppTemplate.Kind(kind).label,
                     "last_call": last,
                     "days_since_call": days_since_call,
                     "promise": promise,
                     "promise_broken": promise_broken,
+                    "promise_due_soon": promise_due_soon,
                     "overdue_days": (today - due).days if due and total > 0 else 0,
                     "pay_enrollment_id": max(courses, key=lambda c: c["debt"])["enrollment_id"]
                     if total > 0
@@ -489,6 +528,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
         context["promise_filter"] = self.promise_filter
         context["orders"] = self.ORDERS.items()
         context["contacts"] = self.CONTACTS.items()
+        context["promises"] = self.PROMISES.items()
         context["response_choices"] = CallNote.Response.choices
         context["pagination_query"] = urlencode(params)
         return context

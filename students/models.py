@@ -13,6 +13,11 @@ phone_validator = RegexValidator(
     "Ingrese uno o más celulares peruanos de 9 dígitos, separados por comas.",
 )
 
+single_phone_validator = RegexValidator(
+    r"^\s*9\d{8}\s*$",
+    "Ingrese un celular peruano de 9 dígitos que empiece con 9.",
+)
+
 record_code_validator = RegexValidator(
     r"^\d*$",
     "Ingrese solo números en el código de ficha.",
@@ -50,7 +55,7 @@ class Student(models.Model):
     last_name = models.CharField("Apellidos", max_length=120, blank=True)
     first_name = models.CharField("Nombres", max_length=120, blank=True)
     document_number = models.CharField("DNI", max_length=20, blank=True)
-    phone = models.CharField("Teléfonos", max_length=120, validators=[phone_validator])
+    phone = models.CharField("Teléfonos", max_length=1000, validators=[phone_validator])
     active = models.BooleanField("Activo", default=True)
     created_at = models.DateTimeField("Registrado el", auto_now_add=True)
 
@@ -73,6 +78,41 @@ class Student(models.Model):
 
     def __str__(self):
         return self.full_name
+
+
+class StudentPhone(models.Model):
+    student = models.ForeignKey(
+        Student, on_delete=models.CASCADE, related_name="phones", verbose_name="Estudiante"
+    )
+    number = models.CharField("Teléfono", max_length=20, validators=[single_phone_validator])
+
+    class Meta:
+        ordering = ["id"]
+        verbose_name = "teléfono de estudiante"
+        verbose_name_plural = "teléfonos de estudiantes"
+        constraints = [
+            models.UniqueConstraint(fields=["student", "number"], name="unique_student_phone")
+        ]
+
+    def __str__(self):
+        return self.number
+
+
+def create_student_phones_from_legacy(student):
+    numbers = dict.fromkeys(
+        number.strip() for number in (student.phone or "").split(",") if number.strip()
+    )
+    StudentPhone.objects.bulk_create(
+        [StudentPhone(student=student, number=number) for number in numbers],
+        ignore_conflicts=True,
+    )
+    student.phone = ", ".join(numbers)
+    student.save(update_fields=["phone"])
+
+
+def sync_legacy_student_phone(student):
+    student.phone = ", ".join(student.phones.values_list("number", flat=True))
+    student.save(update_fields=["phone"])
 
 
 class Course(models.Model):
@@ -262,6 +302,11 @@ class Enrollment(models.Model):
             models.CheckConstraint(
                 condition=models.Q(student__isnull=False) | models.Q(course__isnull=False),
                 name="enrollment_requires_student_or_course",
+            ),
+            models.UniqueConstraint(
+                fields=["student", "course"],
+                condition=models.Q(student__isnull=False, course__isnull=False),
+                name="unique_enrollment_student_course",
             ),
         ]
 
