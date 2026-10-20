@@ -11,6 +11,7 @@ MODULES = {
 # Sustantivos por modelo: (singular, plural).
 NOUNS = {
     "students.student": ("estudiante", "estudiantes"),
+    "students.studentphone": ("teléfono de estudiante", "teléfonos de estudiantes"),
     "students.course": ("curso", "cursos"),
     "students.schedule": ("horario", "horarios"),
     "students.promoter": ("promotor", "promotores"),
