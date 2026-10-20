@@ -7,6 +7,8 @@ from django.db.models import (
     Count,
     DecimalField,
     F,
+    Max,
+    Min,
     OuterRef,
     Prefetch,
     Q,
@@ -989,6 +991,12 @@ def course_students_queryset(request):
                 filter=Q(enrollments__active=True)
                 & (Q(enrollments__student__isnull=True) | Q(enrollments__student__active=True)),
             ),
+            first_enrollment_date=Min(
+                "enrollments__enrollment_date", filter=Q(enrollments__active=True)
+            ),
+            last_enrollment_date=Max(
+                "enrollments__enrollment_date", filter=Q(enrollments__active=True)
+            ),
         )
         .prefetch_related(Prefetch("enrollments", queryset=enrollments))
         .order_by("name", "schedule", "group")
@@ -1001,6 +1009,26 @@ def course_students_queryset(request):
             | Q(group__unaccent__icontains=query)
         )
     return qs
+
+
+def course_seat_summary(courses):
+    summary = []
+    for course in courses:
+        capacity = course.capacity
+        occupied = course.enrollment_count
+        summary.append(
+            {
+                "course": course,
+                "occupied": occupied,
+                "reserved": occupied - course.student_count,
+                "available": max(capacity - occupied, 0) if capacity else None,
+                "over": bool(capacity) and occupied > capacity,
+                "occupancy_percent": occupied * 100 / capacity if capacity else None,
+                "first_enrollment_date": course.first_enrollment_date,
+                "last_enrollment_date": course.last_enrollment_date,
+            }
+        )
+    return summary
 
 
 class CourseStudentTablesView(CampusScopedMixin, ListView):
@@ -1021,19 +1049,7 @@ class CourseStudentTablesView(CampusScopedMixin, ListView):
         params = self.request.GET.copy()
         params.pop("page", None)
         context["pagination_query"] = params.urlencode()
-        summary = []
-        for course in course_students_queryset(self.request):
-            capacity = course.capacity
-            summary.append(
-                {
-                    "course": course,
-                    "occupied": course.enrollment_count,
-                    "reserved": course.enrollment_count - course.student_count,
-                    "available": max(capacity - course.enrollment_count, 0) if capacity else None,
-                    "over": bool(capacity) and course.enrollment_count > capacity,
-                }
-            )
-        context["seat_summary"] = summary
+        context["seat_summary"] = course_seat_summary(course_students_queryset(self.request))
         context["total_students"] = (
             Enrollment.objects.filter(
                 campus=get_selected_campus(self.request), active=True, student__active=True
@@ -1050,7 +1066,9 @@ class CourseStudentExportView(CampusScopedMixin, View):
 
     def get(self, request, *args, **kwargs):
         workbook = Workbook()
-        courses = list(course_students_queryset(request).filter(enrollment_count__gt=0))
+        all_courses = list(course_students_queryset(request))
+        courses = [course for course in all_courses if course.enrollment_count > 0]
+        seat_summary = course_seat_summary(all_courses)
         grouped_courses = [
             (name, list(course_group))
             for name, course_group in groupby(courses, key=lambda course: course.name)
@@ -1058,7 +1076,50 @@ class CourseStudentExportView(CampusScopedMixin, View):
         workbook.remove(workbook.active)
         campus_name = get_selected_campus(request).name
         export_date = timezone.localdate()
-        used_titles = set()
+        used_titles = {"ocupación"}
+
+        occupancy_sheet = workbook.create_sheet("Ocupación")
+        occupancy_sheet.sheet_view.showGridLines = False
+        occupancy_sheet.merge_cells("A1:H1")
+        occupancy_sheet["A1"] = "Ocupación y vacantes por curso"
+        occupancy_sheet["A1"].font = Font(bold=True, color="FFFFFF", size=16)
+        occupancy_sheet["A1"].fill = PatternFill("solid", fgColor="173A72")
+        occupancy_sheet.merge_cells("A2:H2")
+        occupancy_sheet["A2"] = f"Sede: {campus_name} · Exportado: {export_date:%d/%m/%Y}"
+        occupancy_headers = [
+            "Curso",
+            "Grupo",
+            "Horario",
+            "Capacidad",
+            "Ocupadas",
+            "Ocupación",
+            "Primera matrícula",
+            "Última matrícula",
+        ]
+        for column, header in enumerate(occupancy_headers, start=1):
+            cell = occupancy_sheet.cell(row=4, column=column, value=header)
+            cell.font = Font(bold=True, color="173A72")
+            cell.fill = PatternFill("solid", fgColor="EAF1FF")
+        for row_number, item in enumerate(seat_summary, start=5):
+            course = item["course"]
+            row = [
+                course.name,
+                course.group or EMPTY_VALUE,
+                course.schedule,
+                course.capacity or EMPTY_VALUE,
+                item["occupied"],
+                item["occupancy_percent"] / 100 if item["occupancy_percent"] is not None else None,
+                item["first_enrollment_date"],
+                item["last_enrollment_date"],
+            ]
+            for column, value in enumerate(row, start=1):
+                occupancy_sheet.cell(row=row_number, column=column, value=value)
+            occupancy_sheet.cell(row=row_number, column=6).number_format = "0%"
+            for column in (7, 8):
+                occupancy_sheet.cell(row=row_number, column=column).number_format = "DD/MM/YYYY"
+        occupancy_sheet.freeze_panes = "A5"
+        for column, width in enumerate((32, 16, 24, 14, 14, 14, 22, 22), start=1):
+            occupancy_sheet.column_dimensions[get_column_letter(column)].width = width
 
         if not grouped_courses:
             worksheet = workbook.create_sheet("Sin cursos")

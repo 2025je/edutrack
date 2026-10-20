@@ -52,7 +52,7 @@
   {% if perms.students.add_enrollment %}<a class="btn-flat blue-text" href="{% url 'enrollment-create' %}">Registrar matrícula</a>{% endif %}
   {% if perms.students.view_student %}<a class="btn-flat blue-text" href="{% url 'student-list' %}">Consultar estudiantes</a>{% endif %}
   {% if perms.students.view_enrollment %}<a class="btn-flat blue-text" href="{% url 'enrollment-list' %}">Consultar matrículas</a>{% endif %}
-  {% if perms.core.view_academic_reports %}<a class="btn-flat blue-text" href="{% url 'course-student-tables' %}">Alumnos por curso</a>{% endif %}
+  {% if perms.core.view_academic_reports %}<a class="btn-flat blue-text" href="{% url 'course-student-tables' %}">Ocupación por curso</a>{% endif %}
   {% if perms.payments.add_payment %}<a class="btn-flat blue-text" href="{% url 'payment-create' %}">Registrar pago</a>{% endif %}
   {% if perms.payments.view_payment %}<a class="btn-flat blue-text" href="{% url 'payment-list' %}">Consultar recibos</a>{% endif %}
   {% if perms.core.view_pending_balances %}

@@ -165,13 +165,18 @@ SECTIONS = [
         "mensaje texto",
         "?tipo=BIENVENIDA",
     ),
-    entry("Informes", "Alumnos por curso", "course-student-tables", ACADEMIC, "listas asistencia"),
+    entry(
+        "Informes",
+        "Ocupación por curso",
+        "course-student-tables",
+        ACADEMIC,
+        "listas asistencia vacantes cupos",
+    ),
     entry(
         "Informes", "Pendientes de curso", "report-pending-course", ACADEMIC, "matricula sin curso"
     ),
     entry("Informes", "Matrículas por mes", "report-enrollments-by-month", ACADEMIC),
     entry("Informes", "Matrículas por promotor", "report-enrollments-by-promoter", ACADEMIC),
-    entry("Informes", "Ocupación por curso", "report-course-occupancy", ACADEMIC, "vacantes cupos"),
     entry("Informes", "Morosidad por curso", "report-debt-by-course", DEBTS, "deuda"),
     entry(
         "Informes",

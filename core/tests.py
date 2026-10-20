@@ -184,6 +184,21 @@ class RoleGroupMatrixTests(TestCase):
         self.assertTrue(user.has_perm("payments.add_payment"))
         self.assertFalse(user.has_perm("calls.add_callnote"))
 
+    def test_data_entry_roles_can_access_related_reports(self):
+        enrollment_user = self.user_in("Matrículas")
+        self.assertTrue(enrollment_user.has_perm("core.view_academic_reports"))
+        response = self.client.get(reverse("course-student-tables"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ocupación por curso")
+
+        cashier = self.user_in("Caja")
+        self.assertTrue(cashier.has_perm("core.view_financial_reports"))
+        self.assertEqual(self.client.get(reverse("report-income-by-month")).status_code, 200)
+
+        caller = self.user_in("Gestor de llamadas")
+        self.assertTrue(caller.has_perm("core.view_call_reports"))
+        self.assertEqual(self.client.get(reverse("calls-report")).status_code, 200)
+
     def test_views_enforce_group_permissions(self):
         self.user_in("Caja")
         self.assertEqual(self.client.get(reverse("payment-list")).status_code, 200)
@@ -205,8 +220,10 @@ class RoleGroupMatrixTests(TestCase):
         self.assertEqual(self.client.get(reverse("pending-debts")).status_code, 403)
 
     def test_call_report_requires_permission(self):
-        self.user_in("Gestor de llamadas")
+        self.user_in("Caja")
         self.assertEqual(self.client.get(reverse("calls-report")).status_code, 403)
+        self.user_in("Gestor de llamadas")
+        self.assertEqual(self.client.get(reverse("calls-report")).status_code, 200)
         self.user_in("Administrador general")
         response = self.client.get(reverse("calls-report"))
         self.assertEqual(response.status_code, 200)

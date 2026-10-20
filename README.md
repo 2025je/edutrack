@@ -22,9 +22,9 @@ Las migraciones crean estos seis grupos. La tabla muestra los permisos que cada 
 
 | Grupo | Permisos asignados |
 |---|---|
-| **Matrículas** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.add_student`, `students.change_student`, `students.add_enrollment`, `students.change_enrollment` |
-| **Caja** | `students.view_course`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances` |
-| **Gestor de llamadas** | `calls.view_callnote`, `calls.add_callnote` |
+| **Matrículas** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.add_student`, `students.change_student`, `students.add_enrollment`, `students.change_enrollment`, `core.view_academic_reports` |
+| **Caja** | `students.view_course`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances`, `core.view_financial_reports` |
+| **Gestor de llamadas** | `calls.view_callnote`, `calls.add_callnote`, `core.view_call_reports` |
 | **Asignador de llamadas** | `calls.view_callnote`, `core.assign_calls` |
 | **Supervisor de campus** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports` |
 | **Administrador general** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports`, `core.view_call_reports`, `core.view_financial_reports`, `core.export_reports`, `core.view_user`, `core.manage_user_access`, `core.view_campus`, `core.add_campus`, `core.change_campus`, `auth.view_group`, `auth.add_group`, `auth.change_group`, `auth.view_permission` |
@@ -54,10 +54,10 @@ Por ejemplo, `students.add_course` permite registrar cursos y `payments.change_p
 | `core.edit_call_notes` | Editar notas de llamadas existentes. | Ninguno |
 | `core.assign_calls` | Asignar llamadas a gestores. | Asignador de llamadas |
 | `core.view_all_calls` | Consultar las llamadas de todos los gestores del campus. | Supervisor de campus, Administrador general |
-| `core.view_financial_reports` | Consultar reportes financieros. | Administrador general |
+| `core.view_financial_reports` | Consultar reportes financieros. | Caja, Administrador general |
 | `core.view_pending_balances` | Consultar cuotas y saldos pendientes. | Caja, Administrador general |
-| `core.view_academic_reports` | Consultar reportes académicos. | Supervisor de campus, Administrador general |
-| `core.view_call_reports` | Consultar reportes de llamadas. | Administrador general |
+| `core.view_academic_reports` | Consultar reportes académicos. | Matrículas, Supervisor de campus, Administrador general |
+| `core.view_call_reports` | Consultar reportes de llamadas propias; supervisores con `core.view_all_calls` consultan las de todo el campus. | Gestor de llamadas, Administrador general |
 | `core.close_cash` | Cerrar la caja de una fecha. | Ninguno |
 | `core.export_reports` | Exportar reportes a Excel. | Administrador general |
 | `core.manage_user_access` | Administrar usuarios, grupos y sedes asignadas. | Administrador general |
@@ -173,6 +173,33 @@ También puedes ejecutar pruebas en el contenedor con PostgreSQL:
 ```
 
 El script acepta etiquetas de pruebas, por ejemplo `.\scripts\test-postgres.ps1 payments`.
+
+### Datos completos de demostración
+
+Para reemplazar los datos actuales con un conjunto ficticio que cubre los flujos de estudiantes,
+matrículas, cuotas, pagos, recibos anulados, llamadas, permisos y sedes, ejecuta desde PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\seed-test-data.ps1
+```
+
+El comando es **destructivo**: pide escribir `BORRAR Y CREAR DATOS`, luego solicita una contraseña
+común para las cuentas `demo_admin`, `demo_matriculas`, `demo_caja`, `demo_gestor`,
+`demo_asignador`, `demo_supervisor` y `demo_administrador`. Borra también los archivos multimedia
+subidos; conserva los grupos, permisos y el historial de migraciones del sistema. Haz un respaldo
+antes de confirmar y úsalo únicamente en una base de datos de desarrollo o pruebas.
+
+Puedes elegir qué crear. Sin opciones muestra un menú (Enter = todo); también:
+
+```powershell
+.\scripts\seed-test-data.ps1 --list                              # elementos y dependencias
+.\scripts\seed-test-data.ps1 --only students,payments            # solo lo elegido
+.\scripts\seed-test-data.ps1 --all
+```
+
+Las dependencias se añaden solas: por ejemplo `payments` incluye `installments`,
+`enrollments`, `students`, `courses`, `users` y `campuses`. El superusuario `demo_admin`
+se crea siempre.
 
 ## Operación y seguridad
 

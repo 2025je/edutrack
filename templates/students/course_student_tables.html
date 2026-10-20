@@ -1,12 +1,130 @@
 {% extends "base.html" %}
-{% block title %}Alumnos por curso · EduTrack{% endblock %}
+{% block title %}Ocupación por curso · EduTrack{% endblock %}
 {% block content %}
-<div class="flex wrap between items-center gap mb"><div><h1>Alumnos por curso</h1><div class="muted">Una tabla por cada curso activo de la sede seleccionada.</div></div><div class="flex gap no-print">{% if perms.core.export_reports %}<a class="btn green" data-live-export="{% url 'course-student-export' %}" href="{% url 'course-student-export' %}{% if search_query %}?q={{ search_query|urlencode }}{% endif %}"><i class="material-icons">file_download</i>Exportar Excel</a>{% endif %}<button class="btn-flat grey-text text-darken-2" onclick="window.print()">Imprimir reporte</button></div></div>
-<div data-live-region="stats" class="row"><div class="col s12 m4"><div class="card card-pad"><div class="small muted">Alumnos matriculados (sin repetir)</div><div class="stat-md">{{ total_students }}</div></div></div><div class="col s12 m4"><div class="card card-pad"><div class="small muted">Cursos mostrados</div><div class="stat-md">{{ courses|length }}</div></div></div></div>
-<form method="get" data-live-filter class="row no-print"><div class="col s12 m6"><input type="search" name="q" value="{{ search_query }}" placeholder="Buscar curso, horario o grupo" autocomplete="off"></div><div class="col s12 m6"><button class="btn">Buscar</button> <a class="btn-flat grey-text text-darken-2" href="{% url 'course-student-tables' %}">Limpiar</a></div></form>
+<div class="flex wrap between items-center gap mb">
+  <div>
+    <h1>Ocupación por curso</h1>
+    <div class="muted">Alumnos matriculados, ocupación, vacantes y fechas por curso activo.</div>
+  </div>
+  <div class="flex gap no-print">
+    {% if perms.core.export_reports %}
+      <a class="btn green" data-live-export="{% url 'course-student-export' %}" href="{% url 'course-student-export' %}{% if search_query %}?q={{ search_query|urlencode }}{% endif %}">
+        <i class="material-icons">file_download</i>Exportar Excel
+      </a>
+    {% endif %}
+    <button class="btn-flat grey-text text-darken-2" onclick="window.print()">Imprimir reporte</button>
+  </div>
+</div>
+
+<div data-live-region="stats" class="row">
+  <div class="col s12 m4">
+    <div class="card card-pad">
+      <div class="small muted">Alumnos matriculados (sin repetir)</div>
+      <div class="stat-md">{{ total_students }}</div>
+    </div>
+  </div>
+  <div class="col s12 m4">
+    <div class="card card-pad">
+      <div class="small muted">Cursos mostrados</div>
+      <div class="stat-md">{{ courses|length }}</div>
+    </div>
+  </div>
+</div>
+
+<form method="get" data-live-filter class="row no-print">
+  <div class="col s12 m6">
+    <input type="search" name="q" value="{{ search_query }}" placeholder="Buscar curso, horario o grupo" autocomplete="off">
+  </div>
+  <div class="col s12 m6">
+    <button class="btn">Buscar</button>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'course-student-tables' %}">Limpiar</a>
+  </div>
+</form>
+
 <div data-live-region="results">
-{% if seat_summary %}<section class="card mb" style="overflow:hidden"><div class="card-head" style="padding:1rem"><h2 class="mb-0">Resumen de vacantes</h2><div class="small muted">Las vacantes reservadas sin estudiante cuentan como ocupadas.</div></div><div class="table-wrap"><table class="highlight"><thead><tr><th>Curso</th><th>Grupo</th><th>Horario</th><th class="right-align">Capacidad</th><th class="right-align">Ocupadas</th><th class="right-align">Reservadas</th><th class="right-align">Vacantes disponibles</th></tr></thead><tbody>{% for row in seat_summary %}<tr><td>{{ row.course.name }}</td><td>{{ row.course.group }}</td><td>{{ row.course.schedule }}</td><td class="right-align">{{ row.course.capacity_display }}</td><td class="right-align">{{ row.occupied }}</td><td class="right-align">{{ row.reserved }}</td><td class="right-align strong">{% if row.available is None %}—{% elif row.over %}<span class="danger">Sin vacantes (excedido)</span>{% elif row.available == 0 %}<span class="danger">0</span>{% else %}{{ row.available }}{% endif %}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
-{% for course in courses %}<section class="card" style="overflow:hidden"><div class="flex wrap between gap card-head" style="padding:1rem"><div><h2 class="mb-0">{{ course.name }}</h2><div class="small muted">{% if course.group %}Grupo: {{ course.group }}{% endif %}{% if course.schedule %}{% if course.group %} · {% endif %}Horario: {{ course.schedule }}{% endif %} · Capacidad: {{ course.capacity_display }} · Inicio: {{ course.start_date_display }}</div></div><div class="strong">{{ course.enrollment_count }} matrícula(s) · {{ course.student_count }} alumno(s)</div></div><div class="table-wrap"><table class="highlight"><thead><tr><th>#</th><th>Apellidos y nombres</th><th>DNI</th><th>Teléfonos</th><th>Fecha de matrícula</th></tr></thead><tbody>{% for enrollment in course.enrollments.all %}<tr>{% if enrollment.student_id %}<td>{{ forloop.counter }}</td><td>{{ enrollment.student.full_name }}</td><td>{{ enrollment.student.document_number|default:"—" }}</td><td>{{ enrollment.student.phone|default:"—" }}</td>{% else %}<td>{{ forloop.counter }}</td><td><span class="badge-pending">Vacante reservada · Sin estudiante</span></td><td>—</td><td>—</td>{% endif %}<td>{{ enrollment.enrollment_date|date:"d/m/Y" }}</td></tr>{% empty %}<tr><td colspan="5" class="center-align muted">Todavía no hay alumnos matriculados en este curso.</td></tr>{% endfor %}</tbody></table></div></section>{% empty %}<div class="note note-info">No hay cursos activos que coincidan con la búsqueda.</div>{% endfor %}
-<div class="mt">{% include "shared/pagination.html" %}</div>
+  {% if seat_summary %}
+    <section class="card mb" style="overflow:hidden">
+      <div class="card-head" style="padding:1rem">
+        <h2 class="mb-0">Ocupación y vacantes por curso</h2>
+        <div class="small muted">Las vacantes reservadas sin estudiante cuentan como ocupadas.</div>
+      </div>
+      <div class="table-wrap">
+        <table class="highlight">
+          <thead>
+            <tr>
+              <th>Curso</th><th>Grupo</th><th>Horario</th>
+              <th class="right-align">Capacidad</th>
+              <th class="right-align">Ocupadas</th>
+              <th class="right-align">Ocupación</th>
+              <th class="right-align">Reservadas</th>
+              <th class="right-align">Vacantes disponibles</th>
+              <th>Primera matrícula</th>
+              <th>Última matrícula</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in seat_summary %}
+              <tr>
+                <td>{{ row.course.name }}</td>
+                <td>{{ row.course.group }}</td>
+                <td>{{ row.course.schedule }}</td>
+                <td class="right-align">{{ row.course.capacity_display }}</td>
+                <td class="right-align">{{ row.occupied }}</td>
+                <td class="right-align">{% if row.occupancy_percent is None %}—{% else %}{{ row.occupancy_percent|floatformat:0 }}%{% endif %}</td>
+                <td class="right-align">{{ row.reserved }}</td>
+                <td class="right-align strong">
+                  {% if row.available is None %}—{% elif row.over %}<span class="danger">Sin vacantes (excedido)</span>{% elif row.available == 0 %}<span class="danger">0</span>{% else %}{{ row.available }}{% endif %}
+                </td>
+                <td>{% if row.first_enrollment_date %}{{ row.first_enrollment_date|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+                <td>{% if row.last_enrollment_date %}{{ row.last_enrollment_date|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+  {% for course in courses %}
+    <section class="card" style="overflow:hidden">
+      <div class="flex wrap between gap card-head" style="padding:1rem">
+        <div>
+          <h2 class="mb-0">{{ course.name }}</h2>
+          <div class="small muted">
+            {% if course.group %}Grupo: {{ course.group }}{% endif %}
+            {% if course.schedule %}{% if course.group %} · {% endif %}Horario: {{ course.schedule }}{% endif %}
+            · Capacidad: {{ course.capacity_display }} · Inicio: {{ course.start_date_display }}
+          </div>
+        </div>
+        <div class="strong">{{ course.enrollment_count }} matrícula(s) · {{ course.student_count }} alumno(s)</div>
+      </div>
+      <div class="table-wrap">
+        <table class="highlight">
+          <thead><tr><th>#</th><th>Apellidos y nombres</th><th>DNI</th><th>Teléfonos</th><th>Fecha de matrícula</th></tr></thead>
+          <tbody>
+            {% for enrollment in course.enrollments.all %}
+              <tr>
+                <td>{{ forloop.counter }}</td>
+                {% if enrollment.student_id %}
+                  <td>{{ enrollment.student.full_name }}</td>
+                  <td>{{ enrollment.student.document_number|default:"—" }}</td>
+                  <td>{{ enrollment.student.phone|default:"—" }}</td>
+                {% else %}
+                  <td><span class="badge-pending">Vacante reservada · Sin estudiante</span></td>
+                  <td>—</td><td>—</td>
+                {% endif %}
+                <td>{{ enrollment.enrollment_date|date:"d/m/Y" }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="5" class="center-align muted">Todavía no hay alumnos matriculados en este curso.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% empty %}
+    <div class="note note-info">No hay cursos activos que coincidan con la búsqueda.</div>
+  {% endfor %}
+  <div class="mt">{% include "shared/pagination.html" %}</div>
 </div>
 {% endblock %}

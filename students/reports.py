@@ -3,13 +3,15 @@ from decimal import Decimal
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
-from django.views.generic import TemplateView
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.views.generic import TemplateView, View
 
 from core.campus import get_selected_campus
 from core.excel import xlsx_response
 from payments.models import Payment
 
-from .models import EMPTY_VALUE, Course, Enrollment, Promoter
+from .models import EMPTY_VALUE, Enrollment, Promoter
 from .views import CampusScopedMixin
 
 
@@ -226,56 +228,17 @@ class DebtByCourseReportView(SimpleReportView):
         ]
 
 
-class CourseOccupancyReportView(SimpleReportView):
+class CourseOccupancyReportView(CampusScopedMixin, View):
+    """Mantiene la URL anterior y lleva al informe unificado de cursos."""
+
     required_permission = "core.view_academic_reports"
-    title = "Ocupación de cupos por curso"
-    description = (
-        "Porcentaje de ocupación de cada curso activo y fechas de la primera y la última matrícula."
-    )
-    columns = (
-        "Curso",
-        "Grupo",
-        "Horario",
-        "Capacidad",
-        "Ocupadas",
-        "Ocupación",
-        "Primera matrícula",
-        "Última matrícula",
-    )
-    numeric_columns = (3, 4, 5)
-    empty_message = "No hay cursos activos."
 
-    def build(self, campus):
-        from django.db.models import Max, Min
-
-        courses = (
-            Course.objects.filter(campus=campus, active=True)
-            .annotate(
-                occupied=Count(
-                    "enrollments",
-                    filter=Q(enrollments__active=True)
-                    & (Q(enrollments__student__isnull=True) | Q(enrollments__student__active=True)),
-                ),
-                first_date=Min("enrollments__enrollment_date", filter=Q(enrollments__active=True)),
-                last_date=Max("enrollments__enrollment_date", filter=Q(enrollments__active=True)),
-            )
-            .order_by("name", "schedule", "group")
-        )
-
-        def day(value):
-            return value.strftime("%d/%m/%Y") if value else EMPTY_VALUE
-
-        rows = [
-            [
-                c.name,
-                c.group or EMPTY_VALUE,
-                c.schedule,
-                c.capacity or EMPTY_VALUE,
-                c.occupied,
-                f"{c.occupied * 100 / c.capacity:.0f}%" if c.capacity else EMPTY_VALUE,
-                day(c.first_date),
-                day(c.last_date),
-            ]
-            for c in courses
-        ]
-        return rows, None
+    def get(self, request, *args, **kwargs):
+        export = request.GET.get("export") == "xlsx"
+        url_name = "course-student-export" if export else "course-student-tables"
+        params = request.GET.copy()
+        params.pop("export", None)
+        url = reverse(url_name)
+        if params:
+            url = f"{url}?{params.urlencode()}"
+        return redirect(url)

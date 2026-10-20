@@ -123,7 +123,25 @@ class CourseStudentExportTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         workbook = load_workbook(BytesIO(response.content), data_only=True)
-        self.assertEqual(workbook.sheetnames, ["HISTORIA", "MATEMÁTICAS"])
+        self.assertEqual(workbook.sheetnames, ["Ocupación", "HISTORIA", "MATEMÁTICAS"])
+        occupancy = list(workbook["Ocupación"].iter_rows(values_only=True))
+        self.assertEqual(
+            occupancy[3],
+            (
+                "Curso",
+                "Grupo",
+                "Horario",
+                "Capacidad",
+                "Ocupadas",
+                "Ocupación",
+                "Primera matrícula",
+                "Última matrícula",
+            ),
+        )
+        algebra_summary = next(
+            row for row in occupancy[4:] if row[0] == "MATEMÁTICAS" and row[1] == "A"
+        )
+        self.assertEqual(algebra_summary[4:6], (2, 0.1))
         self.assertNotIn("FÍSICA", workbook.sheetnames)
         math_rows = list(workbook["MATEMÁTICAS"].iter_rows(values_only=True))
         history_rows = list(workbook["HISTORIA"].iter_rows(values_only=True))
@@ -151,7 +169,9 @@ class CourseStudentExportTests(TestCase):
 
     def test_course_student_report_shows_reserved_seats_as_distinct_rows(self):
         course = Course.objects.get(campus=self.campus, name="FÍSICA")
-        Enrollment.objects.create(campus=self.campus, course=course)
+        Enrollment.objects.create(
+            campus=self.campus, course=course, enrollment_date=date(2026, 9, 10)
+        )
 
         response = self.client.get(reverse("course-student-tables"))
 
@@ -168,16 +188,23 @@ class CourseStudentExportTests(TestCase):
         course = Course.objects.get(campus=self.campus, name="FÍSICA")
         course.capacity = 3
         course.save()
-        Enrollment.objects.create(campus=self.campus, course=course)
+        Enrollment.objects.create(
+            campus=self.campus, course=course, enrollment_date=date(2026, 9, 10)
+        )
 
         response = self.client.get(reverse("course-student-tables"))
 
-        self.assertContains(response, "Resumen de vacantes")
+        self.assertContains(response, "Ocupación y vacantes por curso")
         row = next(r for r in response.context["seat_summary"] if r["course"].pk == course.pk)
         self.assertEqual(row["occupied"], 1)
         self.assertEqual(row["reserved"], 1)
         self.assertEqual(row["available"], 2)
         self.assertFalse(row["over"])
+        self.assertAlmostEqual(row["occupancy_percent"], 100 / 3)
+        self.assertEqual(row["first_enrollment_date"], date(2026, 9, 10))
+        self.assertEqual(row["last_enrollment_date"], date(2026, 9, 10))
+        self.assertContains(response, "Primera matrícula")
+        self.assertContains(response, "Ocupación")
 
     def test_course_student_export_includes_and_highlights_reserved_seats(self):
         course = Course.objects.get(campus=self.campus, name="FÍSICA")
@@ -260,8 +287,17 @@ class ExtraReportsTests(TestCase):
         self.assertEqual(response.context["totals"], ["Total", 1, "50.00"])
 
         response = self.client.get(reverse("report-course-occupancy"))
-        row = next(r for r in response.context["rows"] if r[0] == "ÁLGEBRA")
-        self.assertEqual(row[4], 2)
+        self.assertRedirects(response, reverse("course-student-tables"))
+        response = self.client.get(reverse("course-student-tables"))
+        row = next(
+            item for item in response.context["seat_summary"] if item["course"].name == "ÁLGEBRA"
+        )
+        self.assertEqual(row["occupied"], 2)
+        self.assertEqual(row["occupancy_percent"], 10)
+        self.assertRedirects(
+            self.client.get(f"{reverse('report-course-occupancy')}?export=xlsx"),
+            reverse("course-student-export"),
+        )
 
         Installment.objects.create(
             enrollment=self.with_course, concept="Cuota", amount=80, due_date=date(2026, 10, 1)

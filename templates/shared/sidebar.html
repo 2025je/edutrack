@@ -61,11 +61,11 @@
 
   {% if perms.core.view_academic_reports or perms.core.view_financial_reports or perms.core.view_pending_balances or perms.students.add_enrollment or perms.payments.add_payment %}
   <li><div class="subheader">Informes</div></li>
-  {% if perms.core.view_academic_reports %}<li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Alumnos por curso</a></li>
+  {% if perms.core.view_academic_reports %}<li><a href="{% url 'course-student-tables' %}"><i class="material-icons">groups</i>Ocupación por curso</a></li>
   <li><a href="{% url 'report-pending-course' %}"><i class="material-icons">pending_actions</i>Pendientes de curso</a></li>
   <li><a href="{% url 'report-enrollments-by-month' %}"><i class="material-icons">calendar_month</i>Matrículas por mes</a></li>
   <li><a href="{% url 'report-enrollments-by-promoter' %}"><i class="material-icons">badge</i>Matrículas por promotor</a></li>
-  <li><a href="{% url 'report-course-occupancy' %}"><i class="material-icons">event_seat</i>Ocupación por curso</a></li>{% endif %}
+  {% endif %}
   {% if perms.core.view_pending_balances %}<li><a href="{% url 'report-debt-by-course' %}"><i class="material-icons">trending_down</i>Morosidad por curso</a></li>{% endif %}
   {% if perms.core.view_financial_reports %}<li><a href="{% url 'report-income-by-month' %}"><i class="material-icons">savings</i>Ingresos por mes</a></li>
   {% if perms.payments.view_payment %}<li><a href="{% url 'cash-closing' %}"><i class="material-icons">point_of_sale</i>Cierre de caja</a></li>{% endif %}{% endif %}
