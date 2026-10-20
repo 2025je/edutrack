@@ -7,9 +7,11 @@ from django.contrib.auth.models import Permission
 from django.contrib.auth.views import PasswordChangeView
 from django.db.models import F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
+from django.http import HttpResponse
 from django.shortcuts import render, redirect
 from django.urls import reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from django.views.generic import TemplateView
 from .campus import available_campuses, get_selected_campus
 from .dashboard_cache import cached_group
@@ -52,6 +54,15 @@ class ProfileView(LoginRequiredMixin, PasswordChangeView):
             campuses=user.campuses.order_by("name"),
         )
         return context
+
+
+@login_required
+@require_POST
+def complete_onboarding(request):
+    if request.user.onboarding_completed_at is None:
+        request.user.onboarding_completed_at = timezone.now()
+        request.user.save(update_fields=["onboarding_completed_at"])
+    return HttpResponse(status=204)
 
 
 @login_required

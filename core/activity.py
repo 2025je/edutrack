@@ -9,6 +9,7 @@ SKIPPED_URL_NAMES = {
     "logout",
     "student-duplicates",
     "student-import",
+    "onboarding-complete",
 }  # se registran a mano
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 

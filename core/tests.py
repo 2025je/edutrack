@@ -33,6 +33,89 @@ class BaseTemplateTests(TestCase):
         )
 
 
+class OnboardingGuideTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede guía", active=True)
+
+    def _login(self, user):
+        user.campuses.add(self.campus)
+        self.client.force_login(user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def test_guide_is_shown_until_completed(self):
+        user = create_user(username="cajero-guia", register_payments=True)
+        self._login(user)
+
+        self.assertContains(self.client.get(reverse("dashboard")), 'data-pending="1"')
+
+        response = self.client.post(reverse("onboarding-complete"))
+        self.assertEqual(response.status_code, 204)
+        user.refresh_from_db()
+        self.assertIsNotNone(user.onboarding_completed_at)
+        self.assertContains(self.client.get(reverse("dashboard")), 'data-pending="0"')
+
+    def test_guide_waits_until_a_campus_is_selected(self):
+        user = create_user(username="sin-sede-guia", register_payments=True)
+        user.campuses.add(self.campus)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("select-campus"))
+
+        self.assertContains(response, 'data-pending="0"')
+
+    def test_guide_reflects_real_permissions(self):
+        user = create_user(username="cajero-guia2", register_payments=True)
+        self._login(user)
+        guide = self.client.get(reverse("dashboard")).context["onboarding"]
+
+        can = " ".join(item["title"] for item in guide["can"]).lower()
+        cannot = " ".join(item["title"] for item in guide["cannot"]).lower()
+        self.assertIn("pago", can)
+        self.assertIn("llamadas", cannot)
+
+    def test_superuser_has_no_restrictions(self):
+        user = User.objects.create_superuser(username="root-guia", password="x")
+        self._login(user)
+        guide = self.client.get(reverse("dashboard")).context["onboarding"]
+
+        self.assertTrue(guide["is_superuser"])
+        self.assertEqual(guide["cannot"], [])
+
+    def test_tour_only_includes_views_the_user_can_open(self):
+        user = create_user(username="cajero-tour", register_payments=True)
+        self._login(user)
+        tour = self.client.get(reverse("dashboard")).context["onboarding"]["tour"]
+
+        urls = {step["url"] for step in tour}
+        self.assertIn(reverse("payment-create"), urls)
+        self.assertNotIn(reverse("user-list"), urls)
+        self.assertNotIn(reverse("calls-students"), urls)
+
+    def test_tour_filters_actions_by_permission(self):
+        user = create_user(username="cajero-tour2", register_payments=True)
+        self._login(user)
+        tour = self.client.get(reverse("dashboard")).context["onboarding"]["tour"]
+
+        for step in tour:
+            self.assertTrue(step["actions"], step["title"])
+            self.assertFalse(any("Crear un curso" in action for action in step["actions"]))
+
+    def test_superuser_tour_includes_every_view(self):
+        user = User.objects.create_superuser(username="root-tour", password="password")
+        self._login(user)
+        tour = self.client.get(reverse("dashboard")).context["onboarding"]["tour"]
+
+        self.assertIn(reverse("activity-log"), {step["url"] for step in tour})
+
+    def test_completion_requires_post_and_login(self):
+        self.assertEqual(self.client.post(reverse("onboarding-complete")).status_code, 302)
+        user = create_user(username="u-guia")
+        self._login(user)
+        self.assertEqual(self.client.get(reverse("onboarding-complete")).status_code, 405)
+
+
 class CampusLogoTests(TestCase):
     def test_selected_campus_logo_is_shown_in_navigation(self):
         campus = Campus.objects.create(

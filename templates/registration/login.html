@@ -3,30 +3,40 @@
 <style>
 .login-bg{position:fixed;inset:0;z-index:-1;overflow:hidden;background:linear-gradient(135deg,#4051b5 0%,#7b4fc9 50%,#e91e8c 100%);background-size:200% 200%;animation:login-gradient 18s ease-in-out infinite}
 html[data-theme=dark] .login-bg{background:linear-gradient(135deg,#141a3a 0%,#2a1c55 50%,#4a1238 100%);background-size:200% 200%}
-.login-bg svg{position:absolute;inset:0;width:100%;height:100%}
-.login-bg .grid{opacity:.12;animation:login-grid 30s linear infinite}
-.login-bg .float{animation:login-float 14s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-.login-bg .float.b{animation-duration:19s;animation-delay:-5s}
-.login-bg .float.c{animation-duration:23s;animation-delay:-9s;animation-direction:reverse}
-.login-bg .float.d{animation-duration:17s;animation-delay:-3s}
+.login-bg .scene{position:absolute;inset:0;perspective:900px;perspective-origin:50% 40%}
+.login-bg .floor{position:absolute;left:-50%;right:-50%;bottom:-35%;height:90%;transform-origin:50% 100%;transform:rotateX(68deg);background-image:linear-gradient(rgba(255,255,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.18) 1px,transparent 1px);background-size:70px 70px;animation:login-floor 6s linear infinite;-webkit-mask-image:linear-gradient(to top,#000 20%,transparent 95%);mask-image:linear-gradient(to top,#000 20%,transparent 95%)}
+.login-bg .spot{position:absolute;left:var(--x);top:var(--y);width:0;height:0;transform-style:preserve-3d;animation:login-drift var(--t,16s) ease-in-out var(--d,0s) infinite}
+.login-bg .shape{position:absolute;width:var(--s);height:var(--s);left:calc(var(--s)/-2);top:calc(var(--s)/-2);transform-style:preserve-3d;animation:login-spin var(--r,24s) linear infinite}
+.login-bg .shape i{position:absolute;inset:0;border:2px solid rgba(255,255,255,.55);background:rgba(255,255,255,.1);backface-visibility:visible}
+.login-bg .cube i:nth-child(1){transform:translateZ(calc(var(--s)/2))}
+.login-bg .cube i:nth-child(2){transform:rotateY(180deg) translateZ(calc(var(--s)/2))}
+.login-bg .cube i:nth-child(3){transform:rotateY(90deg) translateZ(calc(var(--s)/2))}
+.login-bg .cube i:nth-child(4){transform:rotateY(-90deg) translateZ(calc(var(--s)/2))}
+.login-bg .cube i:nth-child(5){transform:rotateX(90deg) translateZ(calc(var(--s)/2))}
+.login-bg .cube i:nth-child(6){transform:rotateX(-90deg) translateZ(calc(var(--s)/2))}
+.login-bg .pyramid i{border:0;left:0;top:0;width:100%;height:100%;background:rgba(255,255,255,.14);clip-path:polygon(50% 0,0 100%,100% 100%);transform-origin:50% 100%;box-shadow:none}
+.login-bg .pyramid i:nth-child(1){transform:rotateY(0) translateZ(calc(var(--s)/2)) rotateX(-26deg)}
+.login-bg .pyramid i:nth-child(2){transform:rotateY(90deg) translateZ(calc(var(--s)/2)) rotateX(-26deg)}
+.login-bg .pyramid i:nth-child(3){transform:rotateY(180deg) translateZ(calc(var(--s)/2)) rotateX(-26deg)}
+.login-bg .pyramid i:nth-child(4){transform:rotateY(270deg) translateZ(calc(var(--s)/2)) rotateX(-26deg)}
+.login-bg .pyramid i:nth-child(5){background:rgba(255,255,255,.08);transform:rotateX(90deg) translateZ(0);clip-path:none;transform-origin:50% 50%;top:0}
 @keyframes login-gradient{0%,100%{background-position:0 50%}50%{background-position:100% 50%}}
-@keyframes login-grid{to{transform:translate(60px,60px)}}
-@keyframes login-float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-40px) rotate(8deg)}}
-@media (prefers-reduced-motion:reduce){.login-bg,.login-bg .grid,.login-bg .float{animation:none}}
+@keyframes login-floor{to{background-position:0 70px}}
+@keyframes login-spin{from{transform:rotateX(20deg) rotateY(0) rotateZ(0)}to{transform:rotateX(380deg) rotateY(360deg) rotateZ(180deg)}}
+@keyframes login-drift{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(30px,-50px,120px)}}
+@media (prefers-reduced-motion:reduce){.login-bg,.login-bg .floor,.login-bg .spot,.login-bg .shape{animation:none}}
 </style>
 <div class="login-bg" aria-hidden="true">
-<svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-<defs><pattern id="login-grid" width="60" height="60" patternUnits="userSpaceOnUse"><path d="M60 0H0V60" fill="none" stroke="#fff" stroke-width="1"/></pattern></defs>
-<rect class="grid" x="-60" y="-60" width="1320" height="920" fill="url(#login-grid)"/>
-<g fill="#fff">
-<rect class="float" x="90" y="110" width="190" height="130" rx="18" opacity=".14"/>
-<rect class="float b" x="930" y="90" width="150" height="150" rx="75" opacity=".12"/>
-<path class="float c" d="M170 560h200a14 14 0 0 1 14 14v110a14 14 0 0 1-14 14H170a14 14 0 0 1-14-14V574a14 14 0 0 1 14-14zM190 590h160M190 620h120M190 650h140" opacity=".16" stroke="#fff" stroke-width="6" fill-rule="evenodd"/>
-<circle class="float d" cx="1010" cy="600" r="90" opacity=".13"/>
-<rect class="float b" x="560" y="640" width="120" height="120" rx="24" opacity=".1" transform="rotate(20 620 700)"/>
-<circle class="float" cx="620" cy="110" r="38" opacity=".15"/>
-</g>
-</svg>
+<div class="scene">
+<div class="floor"></div>
+<div class="spot" style="--x:12%;--y:22%;--t:15s"><div class="shape cube" style="--s:110px;--r:26s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:84%;--y:18%;--t:19s;--d:-4s"><div class="shape pyramid" style="--s:130px;--r:30s"><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:22%;--y:72%;--t:17s;--d:-7s"><div class="shape pyramid" style="--s:100px;--r:22s"><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:80%;--y:70%;--t:21s;--d:-2s"><div class="shape cube" style="--s:150px;--r:34s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:50%;--y:10%;--t:18s;--d:-9s"><div class="shape cube" style="--s:60px;--r:18s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:6%;--y:50%;--t:23s;--d:-5s"><div class="shape cube" style="--s:55px;--r:20s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="spot" style="--x:94%;--y:46%;--t:16s;--d:-11s"><div class="shape cube" style="--s:70px;--r:25s"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+</div>
 </div>
 <div class="row" style="margin-top:3rem"><div class="col s12 m8 offset-m2 l5 offset-l3 xl4 offset-xl4"><div class="card card-pad">
 <div class="center-align"><img src="{% static 'img/logo.svg' %}" alt="EduTrack" width="96" height="93"></div><h1>Iniciar sesión</h1><p class="muted">Ingresa con tu cuenta individual.</p>

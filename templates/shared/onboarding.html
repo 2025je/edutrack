@@ -1,0 +1,61 @@
+{% load static assets %}
+{% if user.is_authenticated and onboarding %}
+<link rel="stylesheet" href="{% asset 'css/onboarding.css' %}">
+<dialog id="onboarding-guide" class="guide" aria-labelledby="guide-title" data-pending="{{ onboarding.pending|yesno:'1,0' }}" data-url="{% url 'onboarding-complete' %}">
+  <form method="post" action="{% url 'onboarding-complete' %}">{% csrf_token %}</form>
+  <div class="guide-progress" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <section class="guide-step" data-step="0">
+    <div class="guide-hero"><i class="material-icons" aria-hidden="true">waving_hand</i></div>
+    <h2 id="guide-title">¡Bienvenido a EduTrack, {{ user.username }}!</h2>
+    <p class="guide-lead">En menos de un minuto verás qué puedes hacer en el sistema y qué no, según tu rol.</p>
+    <div class="guide-role"><i class="material-icons" aria-hidden="true">verified_user</i><div><span>Tu rol</span><strong>{{ onboarding.role }}</strong></div></div>
+    <ul class="guide-tips">
+      <li><i class="material-icons" aria-hidden="true">apartment</i><span><strong>Sede.</strong> Trabajas en una sede a la vez; cámbiala desde la parte superior del menú lateral.</span></li>
+      <li><i class="material-icons" aria-hidden="true">search</i><span><strong>Buscador.</strong> Escribe en la barra superior para ir directo a cualquier sección.</span></li>
+      <li><i class="material-icons" aria-hidden="true">brightness_auto</i><span><strong>Tema.</strong> Cambia entre claro y oscuro con el botón de la barra superior.</span></li>
+      <li><i class="material-icons" aria-hidden="true">account_circle</i><span><strong>Perfil.</strong> En la parte inferior del menú puedes cambiar tu contraseña y volver a ver esta guía.</span></li>
+    </ul>
+  </section>
+
+  <section class="guide-step" data-step="1" hidden>
+    <div class="guide-hero ok"><i class="material-icons" aria-hidden="true">check_circle</i></div>
+    <h2>Lo que sí puedes hacer</h2>
+    {% if onboarding.is_superuser %}<p class="guide-lead">Tu cuenta es de superusuario: tienes acceso a todo el sistema.</p>{% endif %}
+    {% if onboarding.can %}
+    <ul class="guide-list">{% for item in onboarding.can %}<li><i class="material-icons" aria-hidden="true">{{ item.icon }}</i><span><strong>{{ item.title }}</strong>{{ item.text }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="guide-lead">Aún no tienes permisos asignados. Pide a un administrador que te asigne un grupo.</p>{% endif %}
+  </section>
+
+  <section class="guide-step" data-step="2" hidden>
+    <div class="guide-hero no"><i class="material-icons" aria-hidden="true">do_not_disturb_on</i></div>
+    <h2>Lo que no puedes hacer</h2>
+    {% if onboarding.cannot %}
+    <ul class="guide-list denied">{% for item in onboarding.cannot %}<li><i class="material-icons" aria-hidden="true">{{ item.icon }}</i><span><strong>{{ item.title }}</strong>{{ item.text }}</span></li>{% endfor %}</ul>
+    <p class="guide-note">Si necesitas alguna de estas acciones, solicítala a un administrador. Las restricciones se aplican también en el servidor, no solo en el menú.</p>
+    {% else %}<p class="guide-lead">No tienes restricciones de funciones. Ten cuidado: tus acciones quedan registradas en la bitácora.</p>{% endif %}
+  </section>
+
+  <div class="guide-actions">
+    <button type="button" class="btn-flat" data-guide="skip">Omitir</button>
+    <span class="guide-spacer"></span>
+    <button type="button" class="btn-flat" data-guide="prev" hidden>Anterior</button>
+    <button type="button" class="btn" data-guide="next">Siguiente</button>
+  </div>
+</dialog>
+{{ onboarding.tour|json_script:"onboarding-tour" }}
+<div class="tour-ring" hidden></div>
+<div class="tour-card" role="dialog" aria-live="polite" aria-labelledby="tour-title" hidden>
+  <div class="tour-head"><i class="material-icons" aria-hidden="true"></i><h3 id="tour-title"></h3></div>
+  <p class="tour-summary"></p>
+  <ul class="tour-actions"></ul>
+  <div class="tour-foot">
+    <span class="tour-count"></span>
+    <span class="guide-spacer"></span>
+    <button type="button" class="btn-flat" data-tour="skip">Omitir</button>
+    <button type="button" class="btn-flat" data-tour="prev">Anterior</button>
+    <button type="button" class="btn" data-tour="next">Siguiente</button>
+  </div>
+</div>
+<script src="{% asset 'js/onboarding.js' %}"></script>
+{% endif %}

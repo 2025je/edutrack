@@ -4,7 +4,13 @@ from django.urls import path, include, re_path
 from django.views.defaults import page_not_found
 from django.conf import settings
 from core.security import ThrottledAuthenticationForm, health, protected_media
-from core.views import DashboardView, GlobalSearchView, ProfileView, select_campus
+from core.views import (
+    DashboardView,
+    GlobalSearchView,
+    ProfileView,
+    complete_onboarding,
+    select_campus,
+)
 from django.contrib.auth import views as auth_views
 
 urlpatterns = [
@@ -22,6 +28,7 @@ urlpatterns = [
     path("cuentas/salir/", auth_views.LogoutView.as_view(), name="logout"),
     path("cuentas/perfil/", ProfileView.as_view(), name="profile"),
     path("sedes/seleccionar/", select_campus, name="select-campus"),
+    path("guia/completar/", complete_onboarding, name="onboarding-complete"),
     path("", DashboardView.as_view(), name="dashboard"),
     path("buscar/", GlobalSearchView.as_view(), name="global-search"),
     path("estudiantes/", include("students.urls")),

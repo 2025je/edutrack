@@ -1,0 +1,57 @@
+.guide{border:0;border-radius:14px;padding:0;width:min(560px,94vw);max-height:90vh;overflow:hidden;color:#263238;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.guide[open]{display:flex;flex-direction:column;animation:guide-in .22s ease-out}
+.guide::backdrop{background:rgba(15,17,30,.6);backdrop-filter:blur(3px)}
+@keyframes guide-in{from{opacity:0;transform:translateY(16px) scale(.97)}to{opacity:1;transform:none}}
+.guide-progress{display:flex;gap:6px;padding:14px 24px 0}
+.guide-progress span{flex:1;height:4px;border-radius:2px;background:rgba(120,132,154,.3);transition:background .2s}
+.guide-progress span.on{background:var(--md-primary,#4051b5)}
+.guide-step{padding:12px 24px 8px;overflow-y:auto;flex:1 1 auto;animation:guide-step .2s ease-out}
+.guide-step[hidden]{display:none}
+@keyframes guide-step{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+.guide h2{font-size:1.35rem;margin:.4rem 0 .5rem;color:inherit}
+.guide-hero{width:64px;height:64px;border-radius:50%;margin:.5rem 0;display:flex;align-items:center;justify-content:center;background:#e3e7fb;color:var(--md-primary,#4051b5)}
+.guide-hero i{font-size:34px}
+.guide-hero.ok{background:#e8f5e9;color:#2e7d32}
+.guide-hero.no{background:#ffebee;color:#c62828}
+.guide-lead{color:#546e7a;margin:.25rem 0 1rem}
+.guide-role{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:10px;background:#eef0fa;margin-bottom:12px}
+.guide-role i{color:var(--md-primary,#4051b5)}
+.guide-role span{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#78849a}
+.guide-tips,.guide-list{list-style:none;margin:0;padding:0}
+.guide-tips li,.guide-list li{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(120,132,154,.2);font-size:.92rem;line-height:1.35}
+.guide-tips li:last-child,.guide-list li:last-child{border-bottom:0}
+.guide-tips i,.guide-list i{flex:none;color:#78849a;font-size:22px}
+.guide-list li i{color:#2e7d32}
+.guide-list.denied li i{color:#c62828}
+.guide-list strong{display:block}
+.guide-note{margin:.75rem 0 0;padding:10px 12px;border-radius:8px;background:#fff3e0;font-size:.85rem}
+.guide-actions{display:flex;gap:8px;align-items:center;padding:12px 24px 18px;border-top:1px solid rgba(120,132,154,.25)}
+.guide-actions [hidden]{display:none}
+.guide-spacer{flex:1}
+.guide-actions .btn-flat{border:0;color:#78849a}
+html[data-theme=dark] .guide{background:#1b1f2a;color:#e0e0e0}
+html[data-theme=dark] .guide-hero{background:#2f3a4d;color:#9fa8da}
+html[data-theme=dark] .guide-hero.ok{background:#1b3a1f;color:#a5d6a7}
+html[data-theme=dark] .guide-hero.no{background:#3d1a1a;color:#ef9a9a}
+html[data-theme=dark] .guide-lead,html[data-theme=dark] .guide-actions .btn-flat{color:#9aa5b1}
+html[data-theme=dark] .guide-role{background:#232a38}
+html[data-theme=dark] .guide-note{background:#3e2e12}
+html[data-theme=dark] .guide-list li i{color:#a5d6a7}
+html[data-theme=dark] .guide-list.denied li i{color:#ef9a9a}
+.tour-ring{position:fixed;z-index:10000;border-radius:8px;pointer-events:none;box-shadow:0 0 0 3px var(--md-primary,#4051b5),0 0 0 9999px rgba(15,17,30,.62);transition:top .25s,left .25s,width .25s,height .25s}
+.tour-card{position:fixed;z-index:10001;width:min(340px,calc(100vw - 16px));padding:16px 18px;border-radius:12px;background:#fff;color:#263238;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+.tour-ring[hidden],.tour-card[hidden]{display:none}
+.tour-head{display:flex;gap:10px;align-items:center}
+.tour-head i{color:var(--md-primary,#4051b5)}
+.tour-head h3{margin:0;font-size:1.1rem;color:inherit}
+.tour-summary{margin:.5rem 0;color:#546e7a;font-size:.9rem}
+.tour-actions{margin:0 0 .5rem;padding-left:18px;font-size:.88rem;line-height:1.35}
+.tour-actions li{list-style:disc;margin:3px 0}
+.tour-foot{display:flex;gap:4px;align-items:center;border-top:1px solid rgba(120,132,154,.25);padding-top:10px}
+.tour-count{font-size:.8rem;color:#78849a}
+.tour-foot .btn-flat{border:0;color:#78849a}
+.tour-foot [hidden]{display:none}
+html[data-theme=dark] .tour-card{background:#1b1f2a;color:#e0e0e0}
+html[data-theme=dark] .tour-summary,html[data-theme=dark] .tour-foot .btn-flat{color:#9aa5b1}
+@media (max-width:992px){.tour-ring,.tour-card{display:none!important}}
+@media (prefers-reduced-motion:reduce){.guide[open],.guide-step{animation:none}.tour-ring{transition:none}}

@@ -93,6 +93,9 @@ class User(AbstractUser):
     campuses = models.ManyToManyField(
         Campus, blank=True, related_name="users", verbose_name="Sedes asignadas"
     )
+    onboarding_completed_at = models.DateTimeField(
+        "Guía inicial vista el", null=True, blank=True, editable=False
+    )
 
     # Los usuarios se identifican solo por su nombre de usuario.
     first_name = None
