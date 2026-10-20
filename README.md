@@ -1,189 +1,144 @@
 # EduTrack
 
-Sistema web en español para administrar estudiantes, matrículas, cursos, promotores, cuotas, pagos y seguimiento de llamadas. Usa Django y PostgreSQL, con permisos nativos de Django (grupos y permisos) y acceso limitado por sede.
-
-## Contenido
-
-- [Funcionalidades](#funcionalidades)
-- [Roles y permisos](#roles-y-permisos)
-- [Requisitos](#requisitos)
-- [Inicio con Docker](#inicio-con-docker)
-- [Configuración inicial](#configuración-inicial)
-- [Desarrollo local sin Docker](#desarrollo-local-sin-docker)
-- [Pruebas y calidad](#pruebas-y-calidad)
-- [Respaldos y producción](#respaldos-y-producción)
+EduTrack es una aplicación web en español para administrar estudiantes, sedes, cursos, matrículas, cuotas, pagos y llamadas. Está construida con Django y PostgreSQL, y aplica permisos de Django junto con el acceso limitado por sede.
 
 ## Funcionalidades
 
-**Académico**
+- **Estudiantes:** registro por apellidos y nombres, DNI, teléfonos peruanos independientes, búsqueda, importación desde Excel e historial.
+- **Cursos y matrículas:** costos y fechas propios de cada matrícula, promotores, fichas, cambio de curso, bajas lógicas y restauración.
+- **Caja:** cuotas y saldos pendientes, pagos parciales, recibos, anulaciones que conservan el historial y cierres diarios.
+- **Llamadas:** asignación a gestores, notas, promesas de pago, plantillas de WhatsApp y reportes.
+- **Reportes:** consultas y exportaciones a Excel según los permisos del usuario.
+- **Sedes y usuarios:** campus, usuarios, grupos, permisos, logos y volantes por sede.
+- **Auditoría:** historial de actividades y de cada estudiante.
 
-- Estudiantes, cursos y matrículas, con edición y bajas lógicas.
-- Los teléfonos peruanos se gestionan individualmente en cada estudiante; el documento es el DNI.
-- Cada matrícula tiene fecha propia, costos editables y varios promotores. Los costos de inscripción y mensualidad se copian del curso, pero quedan guardados en la matrícula.
-- La lista de matrículas muestra pago total, pagos confirmados, deuda, recibos y estado, con filtros y orden. Los nombres de estudiantes llevan a sus matrículas, desde donde también se puede iniciar un pago.
+Los recibos son comprobantes internos; no son comprobantes electrónicos autorizados por SUNAT.
 
-**Caja**
+## Grupos y permisos
 
-- Cuotas, saldos pendientes y pagos. Los recibos se conservan: al anular un pago, el recibo queda registrado como anulado.
-- Los recibos son comprobantes internos; no son comprobantes electrónicos autorizados por SUNAT.
-- Cierre de caja diario (`/pagos/cierre-de-caja/`) por cajero, imprimible y exportable a Excel.
+Los permisos se acumulan: un usuario recibe los permisos de todos sus grupos y de los permisos asignados directamente. Las vistas comprueban autorización en el servidor; ocultar un enlace del menú no sustituye el permiso.
 
-**Llamadas**
+Las migraciones crean estos seis grupos. La tabla muestra los permisos que cada grupo recibe por defecto después de aplicar las migraciones actuales:
 
-- Asignación de llamadas a gestores, registro de resultados y notas, con registro rápido desde la lista y botón «Cobrar» por curso con deuda.
-- Promesas de pago con fecha («Prometió pago»), con filtro de promesas incumplidas; orden por deuda, días vencidos o último contacto, y filtro de «sin contacto en N días».
-- Acciones masivas: reasignar todas las llamadas de un usuario a otro y repartir las matrículas sin asignar en partes iguales.
-- Reporte de llamadas por usuario, con avance de asignadas, desglose por respuesta y filtro de fechas. Con `view_all_calls` se ve todo el campus; sin él, solo las propias.
-
-**Reportes**
-
-- Reportes por curso exportables a Excel (una hoja por curso y una tabla por grupo/horario).
-- La tabla de matrículas se exporta a Excel respetando filtros y orden.
-
-**Sistema**
-
-- Administración de sedes, usuarios, cursos y promotores desde la aplicación y desde Django Admin.
-- Logo opcional por sede, visible según la sede seleccionada.
-- Búsqueda global por nombre, DNI, código de ficha o recibo (atajo `/` o `Ctrl+K`).
-- Historial de acciones por estudiante y por matrícula (botón «Historial») y fusión de estudiantes duplicados (`/estudiantes/duplicados/`).
-
-**Interfaz**
-
-- Menú lateral único y plano: selector de sede arriba y usuario conectado al pie. Al navegar por el menú solo se recarga el contenido de la derecha.
-- Perfil de usuario (`/cuentas/perfil/`) con grupos, sedes, permisos descritos en español y cambio de contraseña.
-
-## Roles y permisos
-
-Los permisos son los nativos de Django; no hay casillas de permiso en el modelo `User`. Un usuario puede pertenecer a varios grupos y acumula sus permisos.
-
-Las migraciones crean seis grupos con los permisos básicos de la matriz de acceso:
-
-| Grupo | Función principal |
+| Grupo | Permisos asignados |
 |---|---|
-| Matrículas | Registrar y consultar estudiantes y matrículas |
-| Caja | Registrar y consultar pagos y saldos pendientes |
-| Gestor de llamadas | Consultar sus llamadas y registrar resultados y notas |
-| Asignador de llamadas | Asignar llamadas a gestores |
-| Supervisor de campus | Consulta amplia del campus |
-| Administrador general | Consulta y administración completas |
+| **Matrículas** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.add_student`, `students.change_student`, `students.add_enrollment`, `students.change_enrollment` |
+| **Caja** | `students.view_course`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances` |
+| **Gestor de llamadas** | `calls.view_callnote`, `calls.add_callnote` |
+| **Asignador de llamadas** | `calls.view_callnote`, `core.assign_calls` |
+| **Supervisor de campus** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports` |
+| **Administrador general** | `students.view_student`, `students.view_course`, `students.view_enrollment`, `students.view_promoter`, `payments.view_payment`, `payments.add_payment`, `core.view_pending_balances`, `calls.view_callnote`, `core.view_all_calls`, `core.view_academic_reports`, `core.view_call_reports`, `core.view_financial_reports`, `core.export_reports`, `core.view_user`, `core.manage_user_access`, `core.view_campus`, `core.add_campus`, `core.change_campus`, `auth.view_group`, `auth.add_group`, `auth.change_group`, `auth.view_permission` |
 
-Los permisos que requieren autorización adicional no se conceden por pertenecer al grupo: asígnalos en `/admin/`, a un usuario o a un grupo.
+**Administrador general no equivale a superusuario.** Un superusuario de Django tiene acceso global; el grupo Administrador general solo recibe los permisos indicados y sigue sujeto a la selección y al alcance de campus de la aplicación.
 
-Permisos especiales (aplicación `core`):
+### Permisos estándar de Django
 
-| Código | Acción |
-|---|---|
-| `deactivate_student` | Desactivar estudiantes |
-| `deactivate_enrollment` | Desactivar matrículas |
-| `change_enrollment_course` | Cambiar el curso de una matrícula |
-| `void_payment` | Anular pagos conservando el recibo |
-| `view_pending_balances` | Consultar cuotas y saldos pendientes (distinto de ver pagos) |
-| `view_financial_reports` | Consultar reportes financieros |
-| `view_academic_reports` | Consultar reportes académicos |
-| `view_call_reports` | Consultar el reporte de llamadas |
-| `edit_call_notes` | Modificar notas de llamadas existentes |
-| `assign_calls` | Asignar llamadas a gestores |
-| `view_all_calls` | Ver todas las llamadas del campus |
-| `export_reports` | Exportar reportes a Excel |
-| `manage_user_access` | Administrar usuarios, grupos y permisos |
+Django genera `view`, `add`, `change` y `delete` para cada modelo. Los permisos estándar de la aplicación corresponden a estos modelos:
 
-Los permisos estándar (`view_`, `add_`, `change_`, `delete_`) cubren las operaciones básicas.
+- `students`: `student`, `studentphone`, `course`, `schedule`, `promoter`, `enrollment`, `ficha`.
+- `payments`: `payment`, `installment`, `paymentallocation`, `cashclosing`.
+- `calls`: `callnote`, `callassignment`, `whatsapptemplate`.
+- `core`: `user`, `campus`, `campusflyer`, `activitylog`.
+- `auth`: `group`, `permission`.
 
-Reglas de seguridad:
+Por ejemplo, `students.add_course` permite registrar cursos y `payments.change_payment` permite editar pagos. No todos estos permisos se asignan a un grupo inicial; los que no aparecen en la matriz se asignan manualmente si son necesarios. Los modelos internos de Django también pueden tener permisos estándar.
 
-- Los menús, botones y vistas se muestran solo a quien tiene el permiso correspondiente, y cada vista lo exige también en el servidor.
-- Las plantillas comprueban permisos concretos, nunca nombres de grupo.
-- Cada usuario solo accede a las sedes que tiene asignadas y a la sede seleccionada.
-- Desactivar un estudiante o una matrícula no elimina pagos ni recibos.
+### Permisos especiales de `core`
 
-## Requisitos
+| Permiso | Acción | Grupo inicial |
+|---|---|---|
+| `core.deactivate_student` | Dar de baja un estudiante conservando sus registros. | Ninguno |
+| `core.deactivate_enrollment` | Dar de baja una matrícula conservando su historial. | Ninguno |
+| `core.change_enrollment_course` | Cambiar el curso de una matrícula. | Ninguno |
+| `core.void_payment` | Anular un pago sin borrar su recibo ni su historial. | Ninguno |
+| `core.edit_call_notes` | Editar notas de llamadas existentes. | Ninguno |
+| `core.assign_calls` | Asignar llamadas a gestores. | Asignador de llamadas |
+| `core.view_all_calls` | Consultar las llamadas de todos los gestores del campus. | Supervisor de campus, Administrador general |
+| `core.view_financial_reports` | Consultar reportes financieros. | Administrador general |
+| `core.view_pending_balances` | Consultar cuotas y saldos pendientes. | Caja, Administrador general |
+| `core.view_academic_reports` | Consultar reportes académicos. | Supervisor de campus, Administrador general |
+| `core.view_call_reports` | Consultar reportes de llamadas. | Administrador general |
+| `core.close_cash` | Cerrar la caja de una fecha. | Ninguno |
+| `core.export_reports` | Exportar reportes a Excel. | Administrador general |
+| `core.manage_user_access` | Administrar usuarios, grupos y sedes asignadas. | Administrador general |
 
-- Docker Desktop con Docker Compose (recomendado), o Python 3.12 o 3.13, uv, PostgreSQL 15 o posterior y Redis para la caché en producción.
-- Navegador moderno.
+Los permisos con grupo **Ninguno** requieren asignación explícita desde la administración de accesos. Cerrar una caja bloquea la edición y anulación de pagos de esa fecha; solo un superusuario puede reabrirla.
 
-## Inicio con Docker
+### Acceso por sede
 
-1. Crea tu archivo local de configuración:
+Asigna a cada usuario las sedes en las que puede trabajar. El usuario selecciona una sede activa al iniciar sesión; las consultas y operaciones se limitan a esa sede. Los usuarios normales solo pueden seleccionar campus activos que tienen asignados. El superusuario puede consultar y administrar todos los campus, incluidos los inactivos.
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+## Inicio con Docker Compose
 
-2. Edita `.env`. Para Docker Compose, el host de la base debe ser `db` (no `127.0.0.1`). Configura una clave secreta propia y contraseñas seguras:
+Requisitos: Docker Desktop con Docker Compose.
+
+1. Crea `.env` en la raíz del proyecto. Usa una clave secreta larga y contraseñas propias; no compartas ni subas el archivo:
 
    ```dotenv
-   DJANGO_SECRET_KEY=una-clave-larga-aleatoria
+   DJANGO_SECRET_KEY=clave-larga-aleatoria
    DJANGO_DEBUG=False
    DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
    DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
-   GRAFANA_ADMIN_PASSWORD=una-contrasena-segura
    DB_NAME=edutrack_pagos
    DB_USER=edutrack_user
-   DB_PASSWORD=una-contrasena-segura
+   DB_PASSWORD=contrasena-segura
    DB_HOST=db
    DB_PORT=5432
+   GRAFANA_ADMIN_PASSWORD=contrasena-segura
    ```
 
-   Si ya tienes un `.env`, agrega `DJANGO_CSRF_TRUSTED_ORIGINS` y `GRAFANA_ADMIN_PASSWORD`.
-
-3. Construye e inicia los servicios (la compilación usa BuildKit y guarda en caché los paquetes de uv):
+2. Construye e inicia los servicios:
 
    ```powershell
    docker compose up --build -d
    ```
 
-4. Aplica las migraciones y crea el usuario administrador:
+3. Crea el primer usuario administrador:
 
    ```powershell
-   docker compose exec web python manage.py migrate
    docker compose exec web python manage.py createsuperuser
    ```
 
-5. Abre <http://localhost:8080/>.
+4. Abre <http://localhost:8080/>.
 
-### Acceso desde otros equipos de la red
+La aplicación ejecuta migraciones al iniciar el contenedor web. Para revisar los registros:
 
-Agrega la IP LAN del servidor a `DJANGO_ALLOWED_HOSTS` y su origen a `DJANGO_CSRF_TRUSTED_ORIGINS`. Por ejemplo, para `192.168.0.107`:
-
-```dotenv
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,192.168.0.107
-DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://192.168.0.107:8080
+```powershell
+docker compose logs -f web nginx
 ```
 
-Recrea los servicios con `docker compose up -d --build` y abre <http://192.168.0.107:8080/>. Si no conecta, permite el tráfico TCP entrante por el puerto 8080 en el Firewall de Windows para redes privadas y confirma que todos los equipos estén en la misma red. La IP debe ser la actual del equipo que ejecuta Docker.
+Para detener los servicios sin borrar los datos:
 
-### Servicios incluidos
+```powershell
+docker compose down
+```
 
-- **Nginx** sirve la aplicación en el puerto 8080 y entrega los archivos estáticos y multimedia.
-- **Gunicorn** ejecuta Django; **Redis** proporciona la caché compartida y solo es accesible dentro de Compose.
-- **Grafana** está disponible solo localmente en <http://localhost:3000/> (usuario `admin` y la contraseña `GRAFANA_ADMIN_PASSWORD`), con Loki como fuente de datos. En **Explore**, consulta por ejemplo `{service="web"}`.
-- **Alloy** recoge los logs de los contenedores del proyecto y **Loki** los conserva 30 días.
+> `docker compose down -v` también elimina el volumen de PostgreSQL y todos sus datos.
 
-Para ver logs de arranque: `docker compose logs -f web nginx redis grafana loki alloy`. Para detener los servicios sin borrar datos: `docker compose down`.
+### Acceso desde la red local
 
-> `docker compose down -v` elimina también el volumen de PostgreSQL y todos sus datos. Úsalo solo cuando quieras borrar la base por completo.
-
-> `runserver_plus` incluye el depurador interactivo de Werkzeug. Es solo para desarrollo: no lo expongas a una LAN ni a Internet, ni lo uses en producción.
+Incluye la IP del servidor en `DJANGO_ALLOWED_HOSTS` y `DJANGO_CSRF_TRUSTED_ORIGINS`, recrea los servicios y permite TCP 8080 en el firewall para redes privadas. El servidor y el cliente deben estar en la misma red.
 
 ## Configuración inicial
 
-1. En `/admin/`, crea las sedes y los cursos.
-2. Crea promotores y asigna las sedes donde pueden trabajar; una matrícula admite varios promotores.
-3. Crea usuarios, asigna sus sedes y añádelos a uno o varios grupos. Asigna los permisos especiales que correspondan.
-4. Inicia sesión con cada usuario y selecciona la sede activa.
+1. En `/admin/`, crea los campus y cursos.
+2. Crea los promotores y asígnalos a sus campus.
+3. Crea usuarios, asígnales campus y agrégalos a los grupos adecuados.
+4. Asigna por separado los permisos especiales que requiera cada función.
+5. Inicia sesión y selecciona el campus activo.
 
-La sede de la matrícula se determina en el servidor a partir de la sede seleccionada por el usuario. Al crear una matrícula se generan las cuotas iniciales de inscripción y mensualidad si sus importes son mayores que cero. El primer pago debe cubrir como mínimo la inscripción y no puede exceder la deuda pendiente.
+La sede se determina en el servidor mediante el campus seleccionado; no se confía en un campus enviado por el formulario. Las cuotas iniciales se generan a partir de los costos de la matrícula. El primer pago debe cubrir al menos el costo de inscripción y no puede exceder la deuda pendiente.
 
-## Desarrollo local sin Docker
+## Desarrollo local
 
-Con PostgreSQL en ejecución, instala las dependencias:
+Requisitos: Python 3.12 o 3.13, `uv` y PostgreSQL. La aplicación requiere PostgreSQL para las consultas de búsqueda con `UNACCENT` y para probar el bloqueo concurrente de pagos.
 
 ```powershell
 uv sync
 uv run pre-commit install
 ```
 
-Django lee variables de entorno y no carga `.env` automáticamente fuera de Docker: configura en PowerShell las variables de `.env.example`, con `DB_HOST=127.0.0.1`. Después ejecuta:
+Configura en PowerShell las mismas variables de entorno de `.env`, usando `DB_HOST=127.0.0.1`. Django no carga `.env` automáticamente al ejecutarse directamente desde el equipo.
 
 ```powershell
 uv run python manage.py migrate
@@ -191,69 +146,41 @@ uv run python manage.py createsuperuser
 uv run python manage.py runserver_plus 127.0.0.1:8000
 ```
 
-Con `DEBUG=True`, Django Debug Toolbar aparece en las páginas HTML. Solo está instalado en el grupo de desarrollo y no se habilita con `DEBUG=False`. Sin `REDIS_URL`, Django usa una caché local en memoria, apropiada para un solo proceso.
+El archivo `docker-compose.dev.yml` permite activar la recarga automática del servidor en el contenedor:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web
+```
+
+`runserver_plus` y `DEBUG=True` son solo para desarrollo; no expongas el depurador a Internet ni a una red compartida.
 
 ## Pruebas y calidad
 
-Con Docker y el servicio PostgreSQL activo:
+Con PostgreSQL activo y la configuración de entorno cargada:
 
 ```powershell
-docker compose run --rm web python manage.py test
-docker compose run --rm web python manage.py check
-docker compose run --rm web python manage.py makemigrations --check --dry-run
+uv run python manage.py check
+uv run python manage.py makemigrations --check --dry-run
+uv run python manage.py test
+uv run ruff check .
+uv run pyright
 ```
 
-Revisiones locales: `uv run ruff check .` y `uv run pyright`. Los hooks de pre-commit ejecutan Ruff (lint y formato) sobre los archivos preparados para el commit.
-
-Para ejecutar toda la suite en el contenedor en marcha (PostgreSQL, con `UNACCENT`): `.\scripts\test-postgres.ps1` (acepta etiquetas, p. ej. `calls`). Con SQLite fallan algunas pruebas de búsqueda por esa función.
-
-**Pruebas E2E (Playwright)**: con el sistema levantado, `pip install -r requirements-e2e.txt`, `playwright install chromium` y luego `E2E_USER=... E2E_PASSWORD=... pytest e2e` (opcional `E2E_URL`, por defecto `http://localhost:8080`). Usa un usuario de prueba con acceso a llamadas; sin credenciales solo se ejecuta la comprobación de `/salud/`.
-
-Las dependencias están en `pyproject.toml` y bloqueadas en `uv.lock`; usa `uv add paquete`, `uv remove paquete` o `uv add --dev paquete` para actualizarlas. GitHub Actions instala con uv y ejecuta Ruff, las comprobaciones y las pruebas en cada push y pull request, con PostgreSQL 15, Redis y Python 3.12 y 3.13.
-
-### Seguridad y operación
-
-- `DJANGO_SECRET_KEY` es obligatoria cuando `DJANGO_DEBUG=False`; con la clave de ejemplo la app no arranca. Genérala con `python -c "import secrets;print(secrets.token_urlsafe(50))"`.
-- Los archivos de `/media/` (comprobantes y fichas) requieren sesión y pertenecer a la sede; nginx los entrega tras la autorización de Django.
-- Tras `LOGIN_MAX_ATTEMPTS` intentos fallidos, el par IP + usuario se bloquea `LOGIN_LOCKOUT_SECONDS` segundos.
-- Con HTTPS delante de nginx, define `DJANGO_HTTPS=True` (y opcionalmente `DJANGO_HSTS_SECONDS`).
-- `/salud/` devuelve el estado de la app y la base de datos; `web` y `nginx` tienen healthcheck y `web` ejecuta `migrate` al iniciar.
-- Respaldos externos: define `BACKUP_OFFSITE_PATH` (carpeta del host) o `BACKUP_RCLONE_REMOTE` con las variables `RCLONE_CONFIG_*`.
-- Las alertas de Grafana (errores 5xx, fallos de respaldo, restauración sin verificar) se cargan solas; falta configurar un *contact point* en Grafana > Alerting.
-- El CI ya prueba contra PostgreSQL 15. En local con SQLite fallan algunas pruebas por la función `UNACCENT`; no son regresiones.
-- En desarrollo sin Docker usa `DJANGO_DEBUG=True` o define `DJANGO_SECRET_KEY`.
-
-## Respaldos y producción
-
-El servicio `backup` respalda cada día la base de datos (`pg_dump`) y los archivos subidos en `./backups/`. Tras cada respaldo restaura el volcado en una base temporal y compara tablas y filas; el resultado queda en `backups/STATUS`. Se conservan los últimos `BACKUP_KEEP` respaldos. Guarda además una copia de `backups/` fuera del servidor.
-
-Variables opcionales: `BACKUP_KEEP` (14), `BACKUP_HOUR_UTC` (7 = 02:00 en Perú), `BACKUP_ON_START` (1).
-
-Respaldo manual inmediato: `docker compose restart backup`.
-
-Restauración (reemplaza los datos actuales):
+También puedes ejecutar pruebas en el contenedor con PostgreSQL:
 
 ```powershell
-docker compose stop web
-docker compose run --rm -e CONFIRM=yes --entrypoint sh backup /scripts/restore.sh /backups/db/ARCHIVO.dump /backups/media/ARCHIVO.tar.gz
-docker compose start web
+.\scripts\test-postgres.ps1
 ```
 
-El segundo archivo (media) es opcional.
+El script acepta etiquetas de pruebas, por ejemplo `.\scripts\test-postgres.ps1 payments`.
 
-Grafana y Nginx solo publican puertos en loopback; Loki, Alloy, Django y Redis no publican puertos al host. Alloy necesita acceso al socket de Docker para leer los logs: protege el host y no expongas el daemon de Docker.
+## Operación y seguridad
 
-Antes de exponer el servicio a Internet:
+- Mantén `.env`, la clave secreta y las contraseñas fuera del control de versiones.
+- Restringe `DJANGO_ALLOWED_HOSTS` y configura HTTPS en producción. Para HTTPS detrás de un proxy de confianza, usa `DJANGO_HTTPS=True`.
+- Los archivos multimedia privados requieren sesión y autorización para el campus correspondiente.
+- El servicio de respaldo conserva copias de la base de datos y de los archivos multimedia en `backups/`. Mantén también una copia fuera del servidor.
+- Antes de producción, cambia todas las contraseñas, configura el firewall y prueba la restauración de un respaldo.
+- El cierre de caja y las operaciones sensibles deben asignarse solo a usuarios autorizados.
 
-- Cambia `GRAFANA_ADMIN_PASSWORD` y usa un `DJANGO_SECRET_KEY` privado.
-- Restringe `DJANGO_ALLOWED_HOSTS` al dominio.
-- Configura HTTPS (el Nginx incluido no termina TLS), directamente o con un proxy TLS de confianza.
-- Aplica reglas de firewall y prueba el procedimiento de restauración.
-
-## Novedades recientes
-
-- **Dependencias**: Dependabot semanal y job `audit` (pip-audit) en CI.
-- **Llamadas**: filtro de promesas «hoy» (vencen hoy o mañana) y plantillas de WhatsApp por situación (deuda, promesa incumplida, bienvenida).
-- **Importar desde Excel** (`/estudiantes/importar/`): vista previa, detección de duplicados y matrícula opcional por curso.
-- **Historial del estudiante** (`/estudiantes/<id>/historial/`): matrículas, pagos, llamadas y cambios en una línea de tiempo.
-- **Cierre de caja firmado**: el permiso `core.close_cash` congela los totales del día y bloquea editar, anular o crear pagos de esa fecha; solo un superusuario puede reabrirla.
+Para restaurar un respaldo se reemplazan los datos actuales; detén el servicio web y verifica los archivos y la confirmación requeridos por `scripts/restore.sh` antes de proceder.
