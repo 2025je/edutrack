@@ -2213,6 +2213,87 @@ class StudentImportAndTimelineTests(TestCase):
         }
         self.assertNotIn("Pago", kinds)
 
+    def test_profile_shows_full_record_with_payments_and_history(self):
+        from calls.models import CallNote
+        from core.models import ActivityLog
+
+        student = Student.objects.get(full_name="JUAN PÉREZ")
+        StudentPhone.objects.create(student=student, number="911111111")
+        current = Enrollment.objects.create(campus=self.campus, student=student, course=self.course)
+        old_course = Course.objects.create(
+            campus=self.campus, name="Inglés Básico", schedule="L", group="2"
+        )
+        old = Enrollment.objects.create(
+            campus=self.campus, student=student, course=old_course, active=False
+        )
+        installment = Installment.objects.create(
+            enrollment=current, concept="Cuota 1", amount=100, due_date=date(2030, 1, 1)
+        )
+        payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=current,
+            cashier=self.user,
+            receipt_number="P1",
+            amount=40,
+        )
+        PaymentAllocation.objects.create(payment=payment, installment=installment, amount=40)
+        CallNote.objects.create(
+            campus=self.campus, student=student, author=self.user, note="Llamar mañana"
+        )
+        ActivityLog.objects.create(
+            user=self.user,
+            username=self.user.username,
+            action="update",
+            description="Editó un estudiante",
+            object_type="student",
+            object_id=student.pk,
+        )
+
+        response = self.client.get(reverse("student-profile", args=[student.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([c["enrollment"] for c in response.context["current"]], [current])
+        self.assertEqual([c["enrollment"] for c in response.context["previous"]], [old])
+        card = response.context["current"][0]
+        self.assertEqual((card["total"], card["paid"], card["balance"]), (100, 40, 60))
+        self.assertContains(response, "911111111")
+        self.assertContains(response, "P1")
+        self.assertContains(response, "Llamar mañana")
+        who = {e["who"] for e in response.context["events"]}
+        self.assertIn(self.user.username, who)
+
+    def test_profile_hides_sections_without_permission(self):
+        student = Student.objects.get(full_name="JUAN PÉREZ")
+        enrollment = Enrollment.objects.create(
+            campus=self.campus, student=student, course=self.course
+        )
+        Payment.objects.create(
+            campus=self.campus,
+            enrollment=enrollment,
+            cashier=self.user,
+            receipt_number="SECRETO1",
+            amount=10,
+        )
+        revoke(self.user, "register_payments")
+
+        response = self.client.get(reverse("student-profile", args=[student.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "SECRETO1")
+        self.assertFalse(response.context["can_payments"])
+
+    def test_profile_is_scoped_to_campus_and_requires_permission(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        foreign = Student.objects.create(campus=other_campus, full_name="AJENO", phone="922222222")
+        self.assertEqual(
+            self.client.get(reverse("student-profile", args=[foreign.pk])).status_code, 404
+        )
+        student = Student.objects.get(full_name="JUAN PÉREZ")
+        revoke(self.user, "manage_students")
+        self.assertEqual(
+            self.client.get(reverse("student-profile", args=[student.pk])).status_code, 403
+        )
+
 
 class StudentImportErrorPathTests(TestCase):
     def setUp(self):

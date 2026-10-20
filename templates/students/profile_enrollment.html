@@ -1,0 +1,50 @@
+<div class="card pad">
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      <span class="strong">{{ card.enrollment.course_label }}</span>
+      {% if card.enrollment.active %}<span class="chip green darken-1 white-text">Activa</span>{% else %}<span class="chip grey">Inactiva</span>{% endif %}
+      <div class="muted">
+        Matrícula del {{ card.enrollment.enrollment_date|date:"d/m/Y" }}
+        {% if card.enrollment.promoter.all %} · Promotor: {% for p in card.enrollment.promoter.all %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
+        {% if card.enrollment.has_record %} · Ficha N.º {{ card.enrollment.record_code }}{% endif %}
+      </div>
+    </div>
+    <div class="flex gap">
+      {% if can_installments %}<a class="btn-small grey darken-1" href="{% url 'enrollment-statement' card.enrollment.pk %}"><i class="material-icons left" aria-hidden="true">description</i>Estado de cuenta</a>{% endif %}
+      {% if card.enrollment.active and can_payments and perms.payments.add_payment %}<a class="btn-small green darken-1" href="{% url 'payment-create-for' card.enrollment.pk %}"><i class="material-icons left" aria-hidden="true">payments</i>Pagar</a>{% endif %}
+    </div>
+  </div>
+
+  {% if can_installments %}
+  <h6 class="strong mt">Cuotas</h6>
+  <div class="table-wrap"><table class="highlight">
+    <thead><tr><th>Concepto</th><th>Vence</th><th class="right-align">Importe</th><th class="right-align">Pagado</th><th class="right-align">Saldo</th><th>Estado</th></tr></thead>
+    <tbody>
+    {% for row in card.installments %}<tr>
+      <td>{{ row.installment.concept }}</td><td>{{ row.installment.due_date|date:"d/m/Y" }}</td>
+      <td class="right-align">S/ {{ row.installment.amount|floatformat:2 }}</td>
+      <td class="right-align">S/ {{ row.paid|floatformat:2 }}</td>
+      <td class="right-align">S/ {{ row.balance|floatformat:2 }}</td>
+      <td><span class="chip {{ row.color }} lighten-4">{{ row.state }}</span></td>
+    </tr>{% empty %}<tr><td colspan="6" class="center-align muted">Sin cuotas.</td></tr>{% endfor %}
+    </tbody>
+    {% if card.installments %}<tfoot><tr><th colspan="2">Total</th><th class="right-align">S/ {{ card.total|floatformat:2 }}</th><th class="right-align">S/ {{ card.paid|floatformat:2 }}</th><th class="right-align">S/ {{ card.balance|floatformat:2 }}</th><th></th></tr></tfoot>{% endif %}
+  </table></div>
+  {% endif %}
+
+  {% if can_payments %}
+  <h6 class="strong mt">Pagos y recibos</h6>
+  <div class="table-wrap"><table class="highlight">
+    <thead><tr><th>Fecha</th><th>Recibo</th><th class="right-align">Importe</th><th>Estado</th><th>Cajero</th><th>Observaciones</th></tr></thead>
+    <tbody>
+    {% for p in card.payments %}<tr>
+      <td>{{ p.created_at|date:"d/m/Y H:i" }}</td>
+      <td><a href="{% url 'payment-receipt' p.pk %}">{{ p.receipt_number }}</a></td>
+      <td class="right-align">S/ {{ p.amount|floatformat:2 }}</td>
+      <td>{{ p.get_status_display }}</td><td>{{ p.cashier.username }}</td>
+      <td>{{ p.notes|default:"—" }}</td>
+    </tr>{% empty %}<tr><td colspan="6" class="center-align muted">Sin pagos.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+</div>

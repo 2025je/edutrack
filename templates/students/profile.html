@@ -1,0 +1,74 @@
+{% extends "base.html" %}{% block title %}Ficha de {{ student.full_name }} · EduTrack{% endblock %}
+{% block content %}
+<div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div>
+    <h5 style="margin:0">{{ student.full_name }}
+      {% if student.active %}<span class="chip green darken-1 white-text">Activo</span>{% else %}<span class="chip grey">Inactivo</span>{% endif %}
+    </h5>
+    <div class="muted">Ficha integral del estudiante</div>
+  </div>
+  <div class="flex gap">
+    {% if perms.students.change_student %}<a class="btn-small blue darken-2" href="{% url 'student-update' student.pk %}"><i class="material-icons left" aria-hidden="true">edit</i>Editar</a>{% endif %}
+    {% if student.active and perms.students.add_enrollment %}<a class="btn-small teal darken-1" href="{% url 'enrollment-create' %}?student={{ student.pk }}"><i class="material-icons left" aria-hidden="true">assignment_add</i>Matricular</a>{% endif %}
+    <a class="btn-flat" href="{% url 'student-list' %}"><i class="material-icons left" aria-hidden="true">arrow_back</i>Volver</a>
+  </div>
+</div>
+
+<div class="card pad">
+  <h6 class="strong">Datos personales</h6>
+  <div class="row mb-0">
+    <div class="col s12 m4"><div class="muted">Apellidos</div>{{ student.last_name|default:"—" }}</div>
+    <div class="col s12 m4"><div class="muted">Nombres</div>{{ student.first_name|default:"—" }}</div>
+    <div class="col s12 m4"><div class="muted">DNI</div>{{ student.document_number|default:"—" }}</div>
+    <div class="col s12 m4"><div class="muted">Sede</div>{{ student.campus.name }}</div>
+    <div class="col s12 m4"><div class="muted">Registrado el</div>{{ student.created_at|date:"d/m/Y H:i" }}</div>
+    <div class="col s12 m4"><div class="muted">Teléfonos</div>
+      {% for phone in phones %}<span class="chip">{{ phone.number }}</span>{% empty %}{{ student.phone|default:"—" }}{% endfor %}
+    </div>
+  </div>
+</div>
+
+<h6 class="strong">Matrículas actuales</h6>
+{% for card in current %}{% include "students/profile_enrollment.html" %}{% empty %}
+<div class="card pad muted">No tiene matrículas activas.</div>{% endfor %}
+
+<h6 class="strong">Matrículas anteriores</h6>
+{% for card in previous %}{% include "students/profile_enrollment.html" %}{% empty %}
+<div class="card pad muted">No tiene matrículas anteriores.</div>{% endfor %}
+
+<div class="card pad">
+  <h6 class="strong">Documentos</h6>
+  {% if documents %}
+  <ul class="collection" style="margin:0">
+    {% for doc in documents %}<li class="collection-item"><span class="chip">{{ doc.kind }}</span> <a href="{{ doc.url }}" target="_blank" rel="noopener">{{ doc.label }}</a> <span class="muted">· {{ doc.when|date:"d/m/Y" }}</span></li>{% endfor %}
+  </ul>
+  {% else %}<p class="muted mb-0">No hay fichas ni vouchers adjuntos.</p>{% endif %}
+</div>
+
+{% if can_notes %}
+<div class="card pad">
+  <h6 class="strong">Observaciones y llamadas</h6>
+  {% for note in notes %}
+  <div style="padding:6px 0;border-bottom:1px solid #eee">
+    <span class="muted">{{ note.created_at|date:"d/m/Y H:i" }} · {{ note.author.username|default:"—" }} · {{ note.get_response_display }}</span>
+    <div>{{ note.note }}{% if note.promise_date %} <span class="muted">· Pagará el {{ note.promise_date|date:"d/m/Y" }}</span>{% endif %}</div>
+  </div>
+  {% empty %}<p class="muted mb-0">Sin observaciones registradas.</p>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card table-wrap">
+  <div class="pad"><h6 class="strong mb-0">Historial cronológico</h6></div>
+  <table class="highlight">
+    <thead><tr><th>Fecha y hora</th><th>Tipo</th><th>Detalle</th><th>Realizado por</th></tr></thead>
+    <tbody>
+    {% for e in events %}<tr>
+      <td style="white-space:nowrap">{{ e.when|date:"d/m/Y H:i" }}</td>
+      <td style="white-space:nowrap"><i class="material-icons" style="font-size:18px;vertical-align:middle" aria-hidden="true">{{ e.icon }}</i> {{ e.kind }}</td>
+      <td>{{ e.text }}</td><td>{{ e.who|default:"—" }}</td>
+    </tr>{% empty %}<tr><td colspan="4" class="center-align muted">Este estudiante aún no tiene actividad registrada.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if truncated %}<p class="muted">Se muestran los {{ events|length }} eventos más recientes.</p>{% endif %}
+{% endblock %}
