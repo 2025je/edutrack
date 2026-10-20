@@ -5,7 +5,7 @@ description = "Sistema web para administrar estudiantes, matrículas y pagos"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "Django>=6.0,<6.1",
-    "gunicorn>=23,<24",
+    "gunicorn>=23,<27",
     "psycopg[binary]>=3.2,<4",
     "openpyxl>=3.1,<4",
     "django-extensions>=3.2.3,<5",
