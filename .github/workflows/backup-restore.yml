@@ -87,4 +87,4 @@ jobs:
           BACKUP_DIR: backups/ci_${{ github.run_id }}_${{ github.run_attempt }}
         run: |
           docker compose down --volumes --remove-orphans
-          rm -rf "$BACKUP_DIR"
+          sudo -n rm -rf -- "$BACKUP_DIR"

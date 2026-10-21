@@ -5,6 +5,8 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
+from django.utils import timezone  # noqa: E402
+
 from core.models import Campus, User  # noqa: E402
 from core.testing import grant  # noqa: E402
 from students.models import Course, Enrollment, Student  # noqa: E402
@@ -14,6 +16,8 @@ def ensure_user(username, password, *permissions):
     user, _ = User.objects.get_or_create(username=username)
     user.set_password(password)
     user.is_active = True
+    # La guía inicial es un diálogo modal que bloquearía clics y atajos de teclado.
+    user.onboarding_completed_at = user.onboarding_completed_at or timezone.now()
     user.save()
     grant(user, *permissions)
     return user

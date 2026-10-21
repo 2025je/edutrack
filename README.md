@@ -209,6 +209,7 @@ El CI prueba Python **3.12 y 3.13**, conforme a `requires-python = ">=3.12,<3.14
 
 - **Docker y Playwright** ([docker-e2e.yml](./.github/workflows/docker-e2e.yml)): levanta un stack aislado con PostgreSQL y Redis, crea datos ficticios, prueba nginx/Channels y ejecuta las pruebas de navegador. Los artefactos del navegador se guardan solo si falla.
 - **Respaldos** ([backup-restore.yml](./.github/workflows/backup-restore.yml)): semanalmente y en PR/cambios relevantes, genera un respaldo en una base efímera, verifica la restauración PostgreSQL y extrae/compara el archivo multimedia. No usa ni guarda datos reales.
+  La limpieza usa `sudo -n` solo para eliminar el directorio de respaldo de esa ejecución, cuyos archivos crea el contenedor como `root`.
 - **Auditoría de dependencias** ([dependency-audit.yml](./.github/workflows/dependency-audit.yml)): analiza dependencias de producción al cambiar `uv.lock`/`pyproject.toml` y cada semana.
 - **CodeQL** ([codeql.yml](./.github/workflows/codeql.yml)): analiza Python y JavaScript en push, PR y semanalmente.
 - **Publicación de imagen** ([publish-image.yml](./.github/workflows/publish-image.yml)): al subir una etiqueta `vMAJOR.MINOR.PATCH`, vuelve a probar el proyecto, construye la imagen, analiza vulnerabilidades críticas/altas y solo entonces promueve la imagen en GHCR.
