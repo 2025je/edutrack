@@ -50,14 +50,9 @@ def test_search_shortcut_focuses_global_search(logged_page: Page):
 
 
 @needs_login
-def test_call_list_filters_and_collapsible_courses(logged_page: Page):
+def test_call_list_filters(logged_page: Page):
     logged_page.goto(f"{BASE_URL}/llamadas/alumnos/")
     expect(logged_page.locator("select[name=orden]")).to_be_visible()
-    toggle = logged_page.locator("[data-toggle-courses]").first
-    if toggle.count():
-        expect(toggle).to_have_attribute("aria-expanded", "false")
-        toggle.click()
-        expect(toggle).to_have_attribute("aria-expanded", "true")
 
 
 @needs_login

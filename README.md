@@ -38,7 +38,7 @@ Django genera `view`, `add`, `change` y `delete` para cada modelo. Los permisos 
 
 - `students`: `student`, `studentphone`, `course`, `schedule`, `promoter`, `enrollment`, `ficha`.
 - `payments`: `payment`, `installment`, `paymentallocation`, `cashclosing`.
-- `calls`: `callnote`, `callassignment`, `whatsapptemplate`.
+- `calls`: `callnote`, `calllist`, `calllistmember`, `whatsapptemplate`.
 - `core`: `user`, `campus`, `campusflyer`, `activitylog`.
 - `auth`: `group`, `permission`.
 
@@ -53,7 +53,7 @@ Por ejemplo, `students.add_course` permite registrar cursos y `payments.change_p
 | `core.change_enrollment_course` | Cambiar el curso de una matrícula. | Ninguno |
 | `core.void_payment` | Anular un pago sin borrar su recibo ni su historial. | Ninguno |
 | `core.edit_call_notes` | Editar notas de llamadas existentes. | Ninguno |
-| `core.assign_calls` | Asignar llamadas a gestores. | Asignador de llamadas |
+| `core.assign_calls` | Crear sublistas de llamadas y asignarlas a usuarios (cada usuario solo puede estar en una). Los gestores de la sublista piden su siguiente llamada en «Pedir llamada» (`/llamadas/cola/`); el equipo ve en vivo a quién llama cada compañero y el reclamo expira a los 15 min. | Asignador de llamadas |
 | `core.view_all_calls` | Consultar las llamadas de todos los gestores del campus. | Supervisor de campus, Administrador general |
 | `core.view_financial_reports` | Consultar reportes financieros. | Caja, Administrador general |
 | `core.view_pending_balances` | Consultar cuotas y saldos pendientes. | Caja, Administrador general |

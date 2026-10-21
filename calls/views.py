@@ -5,9 +5,10 @@ from urllib.parse import quote, urlencode
 
 from django.contrib import messages
 from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
 from django.db.models.functions import Coalesce
-from django.http import QueryDict
-from django.db.models import Count, F, Max, Q, Sum
+from django.db.models import Count, F, Max, Prefetch, Q, Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -24,10 +25,27 @@ from core.campus import (
 from core.pagination import paginate_context
 from payments.forms import pending_enrollments_for_campus
 from payments.models import Installment, Payment, PaymentAllocation
-from students.models import Enrollment, Student
+from students.models import Enrollment, Student, mark_student_phone_invalid
 
+from .call_queue import (
+    active_claim,
+    claim_next,
+    close_claim,
+    pending_students,
+    team_claims,
+    user_list,
+)
 from .forms import CallNoteForm, QuickCallNoteForm, WhatsAppTemplateForm
-from .models import EMOJIS, PLACEHOLDERS, CallAssignment, CallNote, WhatsAppTemplate
+from .models import (
+    EMOJIS,
+    PLACEHOLDERS,
+    CallClaim,
+    CallList,
+    CallListMember,
+    CallNote,
+    WhatsAppSend,
+    WhatsAppTemplate,
+)
 
 ZERO = Decimal("0.00")
 
@@ -60,6 +78,74 @@ def build_phone_links(template, campus, student, courses, total, promise_date=No
     ]
 
 
+def student_message_links(request, campus, student):
+    """Enlaces de WhatsApp/SMS con el mensaje de la sede ya armado para un alumno."""
+    enrollments = list(
+        visible_enrollments(request).filter(student=student).select_related("course")
+    )
+    ids = [e.pk for e in enrollments]
+    billed = dict(
+        Installment.objects.filter(enrollment__in=ids, active=True)
+        .values_list("enrollment")
+        .annotate(total=Sum("amount"))
+    )
+    paid = dict(
+        PaymentAllocation.objects.filter(
+            installment__enrollment__in=ids,
+            installment__active=True,
+            payment__status=Payment.Status.CONFIRMED,
+        )
+        .values_list("installment__enrollment")
+        .annotate(total=Sum("amount"))
+    )
+    courses = [
+        {
+            "course_label": e.course_label,
+            "debt": max(billed.get(e.pk, ZERO) - paid.get(e.pk, ZERO), ZERO),
+        }
+        for e in enrollments
+    ]
+    total = sum((c["debt"] for c in courses), ZERO)
+    promise = (
+        CallNote.objects.filter(
+            campus=campus,
+            student=student,
+            response=CallNote.Response.PROMISED_PAYMENT,
+            promise_date__isnull=False,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if promise and promise.promise_date < timezone.localdate() and total > 0:
+        kind = WhatsAppTemplate.Kind.PROMISE
+    elif total > 0:
+        kind = WhatsAppTemplate.Kind.DEBT
+    else:
+        kind = WhatsAppTemplate.Kind.WELCOME
+    return build_phone_links(
+        WhatsAppTemplate.for_campus(campus)[kind],
+        campus,
+        student,
+        courses,
+        total,
+        promise.promise_date if promise else None,
+    )
+
+
+def apply_wrong_phone(note, form):
+    """Si el resultado es «Teléfono equivocado», inhabilita ese número del alumno (sin borrarlo)."""
+    number = form.cleaned_data.get("wrong_phone")
+    if note.response != CallNote.Response.WRONG_NUMBER or not number:
+        return
+    if mark_student_phone_invalid(note.student, number):
+        label = note.get_response_display()
+        note.note = (
+            f"{label}: {number}"
+            if not note.note or note.note == label
+            else (f"{note.note} ({number})")
+        )
+
+
 def can_view_all_calls(user):
     return user.has_perm("core.view_all_calls")
 
@@ -73,7 +159,8 @@ def visible_students(request):
     return students.filter(
         enrollments__active=True,
         enrollments__campus=campus,
-        enrollments__call_assignments__user=request.user,
+        enrollments__call_lists__members__user=request.user,
+        enrollments__call_lists__active=True,
     ).distinct()
 
 
@@ -82,7 +169,7 @@ def visible_enrollments(request):
     enrollments = Enrollment.objects.filter(active=True, campus=campus, student__isnull=False)
     if can_view_all_calls(request.user):
         return enrollments
-    return enrollments.filter(call_assignments__user=request.user)
+    return enrollments.filter(call_lists__members__user=request.user, call_lists__active=True)
 
 
 class StudentNotesMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
@@ -178,19 +265,21 @@ class CallNoteCreateView(StudentNotesMixin, TemplateView):
     def get_context_data(self, form=None, **kwargs):
         context = super().get_context_data(**kwargs)
         context["student"] = self.get_student()
-        context["form"] = form or CallNoteForm()
+        context["form"] = form or CallNoteForm(student=context["student"])
         return context
 
     def post(self, request, *args, **kwargs):
         student = self.get_student()
-        form = CallNoteForm(request.POST)
+        form = CallNoteForm(request.POST, student=student)
         if form.is_valid():
             note = form.save(commit=False)
             note.campus = get_selected_campus(request)
             note.student = student
             note.author = request.user
+            apply_wrong_phone(note, form)
             note.save()
-            messages.success(request, "Llamada registrada en el historial.")
+            if close_claim(request.user, student):
+                return redirect("calls-queue")
             return redirect("calls-notes", student_id=student.pk)
         return self.render_to_response(self.get_context_data(form=form))
 
@@ -542,14 +631,16 @@ class CallQuickNoteView(StudentNotesMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):
         student = self.get_student()
-        form = QuickCallNoteForm(request.POST)
+        form = QuickCallNoteForm(request.POST, student=student)
         if form.is_valid():
             note = form.save(commit=False)
             note.note = note.note or note.get_response_display()
             note.campus = get_selected_campus(request)
             note.student = student
             note.author = request.user
+            apply_wrong_phone(note, form)
             note.save()
+            close_claim(request.user, student)
             messages.success(request, f"Llamada a {student.full_name} registrada.")
         else:
             errors = "; ".join(e for errs in form.errors.values() for e in errs)
@@ -560,6 +651,215 @@ class CallQuickNoteView(StudentNotesMixin, TemplateView):
         ):
             target = reverse("calls-students")
         return redirect(target)
+
+
+class WhatsAppOpenView(StudentNotesMixin, TemplateView):
+    """Lleva a WhatsApp con el mensaje de la sede ya armado; no marca nada como enviado."""
+
+    required_permission = "calls.add_callnote"
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        student = self.get_student()
+        links = student_message_links(request, get_selected_campus(request), student)
+        if not links:
+            messages.error(request, f"{student.full_name} no tiene un teléfono válido.")
+            return redirect("calls-queue")
+        return redirect(links[0]["url"])
+
+
+class WhatsAppMarkView(StudentNotesMixin, TemplateView):
+    """Casilla «WhatsApp enviado» de hoy: la marca o la quita."""
+
+    required_permission = "calls.add_callnote"
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        student = self.get_student()
+        campus = get_selected_campus(request)
+        today = timezone.localdate()
+        if request.POST.get("enviado") == "1":
+            WhatsAppSend.objects.get_or_create(
+                student=student, date=today, defaults={"campus": campus, "user": request.user}
+            )
+        else:
+            WhatsAppSend.objects.filter(student=student, date=today, campus=campus).delete()
+        return JsonResponse({"ok": True})
+
+
+class CallQueueMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
+    required_permission = "calls.add_callnote"
+
+    def get_call_list(self):
+        call_list = user_list(self.request.user)
+        campus = get_selected_campus(self.request)
+        return call_list if call_list and call_list.campus_id == campus.pk else None
+
+    def get_history(self, call_list):
+        """Resumen de hoy: cada alumno de la sublista, si se llamó, se está llamando o falta."""
+        today = timezone.localdate()
+        students = list(
+            Student.objects.filter(
+                active=True,
+                campus=call_list.campus,
+                enrollments__active=True,
+                enrollments__call_lists=call_list,
+            ).distinct()
+        )
+        calling = {c.student_id: c for c in team_claims(call_list)}
+        latest = {}
+        for note in CallNote.objects.filter(created_at__date=today, student__in=students).order_by(
+            "-created_at"
+        ):
+            latest.setdefault(note.student_id, note)
+        rows = []
+        for student in students:
+            claim = calling.get(student.pk)
+            note = latest.get(student.pk)
+            if claim:
+                state, order = "Llamando", 0
+            elif note:
+                state, order = "Llamado", 2
+            else:
+                state, order = "Sin llamar", 1
+            rows.append(
+                {
+                    "student": student,
+                    "state": state,
+                    "caller": claim.user.username if claim else None,
+                    "note": note,
+                    "answered": None
+                    if not note
+                    else note.response
+                    not in (CallNote.Response.NO_ANSWER, CallNote.Response.WRONG_NUMBER),
+                    "order": order,
+                }
+            )
+        rows.sort(key=lambda r: (r["order"], r["student"].full_name))
+        return rows
+
+    def history_rows(self, call_list):
+        """Filas del resumen en formato JSON; el navegador actualiza solo las celdas que cambian."""
+        busy = active_claim(self.request.user, call_list) is not None
+        sent = set(
+            WhatsAppSend.objects.filter(
+                campus=call_list.campus, date=timezone.localdate()
+            ).values_list("student_id", flat=True)
+        )
+        rows = []
+        for r in self.get_history(call_list):
+            note = r["note"]
+            response = note.response if note else ""
+            retry = (
+                r["state"] == "Llamado"
+                and not busy
+                and bool(r["student"].phone)
+                and response in (CallNote.Response.NO_ANSWER, CallNote.Response.WRONG_NUMBER)
+            )
+            rows.append(
+                {
+                    "id": r["student"].pk,
+                    "name": r["student"].full_name,
+                    "url": reverse("calls-notes", args=[r["student"].pk]),
+                    "state": r["state"],
+                    "caller": r["caller"] or "",
+                    "answered": r["answered"],
+                    "response": response,
+                    "label": note.get_response_display() if note else "",
+                    "retry": retry,
+                    "whatsapp": r["student"].pk in sent,
+                    "can_send": bool(r["student"].phone),
+                    "open_url": reverse("calls-whatsapp-open", args=[r["student"].pk]),
+                    "mark_url": reverse("calls-whatsapp-mark", args=[r["student"].pk]),
+                }
+            )
+        return rows
+
+
+class CallQueueView(CallQueueMixin, TemplateView):
+    """El usuario pide su siguiente llamada; el equipo de su sublista ve a quién llama."""
+
+    template_name = "calls/queue.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        call_list = self.get_call_list()
+        context["call_list"] = call_list
+        if not call_list:
+            return context
+        claim = active_claim(self.request.user, call_list)
+        context["claim"] = claim
+        team = list(team_claims(call_list, self.request.user))
+        context["team"] = team
+        context["team_ids_json"] = "[" + ",".join(str(c.pk) for c in team) + "]"
+        context["pending_count"] = pending_students(call_list).count()
+        context["minutes"] = CallClaim.MINUTES
+        context["history"] = self.get_history(call_list)
+        context["history_rows"] = self.history_rows(call_list)
+        context["response_choices"] = CallNote.Response.choices
+        if claim:
+            student = claim.student
+            context["phones"] = [p.strip() for p in student.phone.split(",") if p.strip()]
+            context["enrollments"] = (
+                visible_enrollments(self.request)
+                .filter(student=student)
+                .select_related("course")
+                .order_by("course__name")
+            )
+            context["last_note"] = student.call_notes.select_related("author").first()
+        return context
+
+    def post(self, request, *args, **kwargs):
+        call_list = self.get_call_list()
+        if not call_list:
+            messages.error(request, "No perteneces a ninguna sublista activa de esta sede.")
+            return redirect("calls-queue")
+        action = request.POST.get("accion", "")
+        if action == "pedir":
+            student_id = request.POST.get("alumno", "")
+            claim, created = claim_next(
+                request.user, call_list, int(student_id) if student_id.isdigit() else None
+            )
+            if claim is None:
+                messages.info(
+                    request, "Ese alumno no está disponible o no quedan alumnos por llamar."
+                )
+            elif created:
+                messages.success(
+                    request, f"Llamarás a {claim.student.full_name}. Tu equipo ya lo sabe."
+                )
+        elif action == "liberar":
+            claim = active_claim(request.user, call_list)
+            if claim:
+                close_claim(request.user, claim.student, CallClaim.Status.RELEASED)
+                messages.info(request, f"Liberaste a {claim.student.full_name}; vuelve a la cola.")
+        return redirect("calls-queue")
+
+
+class CallQueueStatusView(CallQueueMixin, TemplateView):
+    """Estado en vivo del equipo, consultado cada pocos segundos por la página."""
+
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        call_list = self.get_call_list()
+        if not call_list:
+            return JsonResponse({"team": [], "pending": 0})
+        return JsonResponse(
+            {
+                "pending": pending_students(call_list).count(),
+                "history_rows": self.history_rows(call_list),
+                "team": [
+                    {
+                        "id": c.pk,
+                        "user": c.user.username,
+                        "student": c.student.full_name,
+                        "since": timezone.localtime(c.started_at).strftime("%H:%M"),
+                    }
+                    for c in team_claims(call_list, request.user)
+                ],
+            }
+        )
 
 
 class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
@@ -600,21 +900,22 @@ class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Templa
             for row in notes.values("author__username").annotate(**columns)
         }
         in_range = Q(
-            enrollment__student__call_notes__campus=campus,
-            enrollment__student__call_notes__author=F("user"),
-            enrollment__student__call_notes__created_at__date__gte=start,
-            enrollment__student__call_notes__created_at__date__lte=end,
+            call_list__enrollments__student__call_notes__campus=campus,
+            call_list__enrollments__student__call_notes__author=F("user"),
+            call_list__enrollments__student__call_notes__created_at__date__gte=start,
+            call_list__enrollments__student__call_notes__created_at__date__lte=end,
         )
-        progress = CallAssignment.objects.filter(
-            enrollment__campus=campus,
-            enrollment__active=True,
-            enrollment__student__active=True,
+        live = Q(
+            call_list__enrollments__campus=campus,
+            call_list__enrollments__active=True,
+            call_list__enrollments__student__active=True,
         )
+        progress = CallListMember.objects.filter(call_list__campus=campus)
         if not can_view_all_calls(self.request.user):
             progress = progress.filter(user=self.request.user)
         for item in progress.values("user__username").annotate(
-            assigned=Count("enrollment", distinct=True),
-            called=Count("enrollment", distinct=True, filter=in_range),
+            assigned=Count("call_list__enrollments", distinct=True, filter=live),
+            called=Count("call_list__enrollments", distinct=True, filter=live & in_range),
         ):
             row = rows.setdefault(
                 item["user__username"],
@@ -638,28 +939,29 @@ class CallReportView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Templa
 
 
 class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, TemplateView):
-    """Permite elegir qué matrículas ve cada usuario con acceso a llamadas."""
+    """El asignador arma sublistas de matrículas y las entrega a varios usuarios de llamadas."""
 
     required_permission = "core.assign_calls"
     template_name = "calls/assignments.html"
     per_page = 50
 
-    def get_users(self):
+    def get_users(self, only_campus=True):
         campus = get_selected_campus(self.request)
         assigners = users_with_perm("core.assign_calls").values("pk")
-        return (
-            users_with_perm("calls.add_callnote")
-            .filter(is_superuser=False, campuses=campus)
-            .exclude(pk__in=assigners)
-            .order_by("username")
-        )
+        users = users_with_perm("calls.add_callnote").filter(is_superuser=False)
+        if only_campus:
+            users = users.filter(campuses=campus)
+        return users.exclude(pk__in=assigners).distinct().order_by("username")
+
+    def get_lists(self):
+        return CallList.objects.filter(campus=get_selected_campus(self.request))
 
     def get_target(self):
-        raw = self.request.GET.get("usuario") or self.request.POST.get("usuario") or ""
-        return self.get_users().filter(pk=int(raw)).first() if raw.isdigit() else None
+        raw = self.request.GET.get("lista") or self.request.POST.get("lista") or ""
+        return self.get_lists().filter(pk=int(raw)).first() if raw.isdigit() else None
 
-    def get_filters(self):
-        params = self.request.GET
+    def get_filters(self, params=None):
+        params = self.request.GET if params is None else params
         return {
             "q": params.get("q", "").strip(),
             "curso": params.get("curso", "").strip(),
@@ -689,9 +991,8 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             active=True, campus=get_selected_campus(self.request), student__active=True
         )
 
-    def get_enrollments(self):
-        f = self.get_filters()
-        target = self.get_target()
+    def get_enrollments(self, params=None):
+        f = self.get_filters(params)
         qs = self.get_base_enrollments().select_related("student", "course")
         if f["q"]:
             qs = qs.filter(student__full_name__unaccent__icontains=f["q"])
@@ -721,33 +1022,25 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
         if f["grupo"]:
             qs = qs.filter(course__group=f["grupo"])
         if f["estado"] == "sin_asignar":
-            qs = qs.filter(call_assignments__isnull=True)
-        elif f["estado"] == "asignadas" and target:
-            qs = qs.filter(call_assignments__user=target)
-        elif f["estado"] == "no_asignadas" and target:
-            qs = qs.exclude(call_assignments__user=target)
-        elif f["estado"] == "otros" and target:
-            qs = qs.filter(call_assignments__isnull=False).exclude(call_assignments__user=target)
+            qs = qs.filter(call_lists__isnull=True)
+        elif f["estado"] == "en_alguna":
+            qs = qs.filter(call_lists__isnull=False)
         if f["deuda"]:
             qs = qs.filter(pk__in=pending_enrollments_for_campus(get_selected_campus(self.request)))
         return qs.distinct().order_by("student__full_name", "course__name", "pk")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        target = self.get_target()
         filters = self.get_filters()
         page = Paginator(self.get_enrollments(), self.per_page).get_page(
             self.request.GET.get("page")
         )
-        assigned = set()
         owners = defaultdict(list)
         page_ids = [e.pk for e in page.object_list]
-        for assignment in CallAssignment.objects.filter(enrollment__in=page_ids).select_related(
-            "user"
-        ):
-            owners[assignment.enrollment_id].append(assignment.user.username)
-            if target and assignment.user_id == target.pk:
-                assigned.add(assignment.enrollment_id)
+        for link in CallList.enrollments.through.objects.filter(
+            enrollment_id__in=page_ids, calllist__campus=get_selected_campus(self.request)
+        ).select_related("calllist"):
+            owners[link.enrollment_id].append(link.calllist.name)
         base = self.get_base_enrollments().select_related("course")
         courses = base.values_list("course__name", flat=True).distinct().order_by("course__name")
         schedules = (
@@ -757,37 +1050,46 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
         params = {k: v for k, v in filters.items() if v}
         if filters["deuda"]:
             params["deuda"] = "1"
-        if target:
-            params["usuario"] = target.pk
-        assigned_list = (
-            CallAssignment.objects.filter(
-                user=target, enrollment__campus=get_selected_campus(self.request)
+        busy = {
+            m.user_id: m.call_list
+            for m in CallListMember.objects.filter(
+                call_list__campus=get_selected_campus(self.request)
+            ).select_related("call_list")
+        }
+        in_campus = {u.pk for u in self.get_users()}
+        callers = [
+            {
+                "user": u,
+                "other": busy.get(u.pk),
+                "no_campus": u.pk not in in_campus,
+            }
+            for u in self.get_users(only_campus=False)
+        ]
+        lists = list(
+            self.get_lists()
+            .annotate(
+                enrollment_total=Count(
+                    "enrollments", distinct=True, filter=Q(enrollments__active=True)
+                ),
             )
-            .filter(enrollment__active=True)
-            .select_related("enrollment__student", "enrollment__course")
-            .order_by("enrollment__student__full_name", "enrollment_id")
-            if target
-            else []
-        )
-        loads = dict(
-            CallAssignment.objects.filter(
-                enrollment__campus=get_selected_campus(self.request), enrollment__active=True
+            .prefetch_related(
+                "members__user",
+                Prefetch(
+                    "enrollments",
+                    queryset=Enrollment.objects.filter(active=True)
+                    .select_related("student", "course")
+                    .order_by("student__full_name", "pk"),
+                    to_attr="active_enrollments",
+                ),
             )
-            .values_list("user_id")
-            .annotate(n=Count("enrollment", distinct=True))
         )
         context.update(
-            users=self.get_users(),
-            target=target,
-            assigned_list=assigned_list,
+            lists=lists,
+            callers=callers,
             page_obj=page,
             is_paginated=page.paginator.num_pages > 1,
             rows=[
-                {
-                    "enrollment": e,
-                    "assigned": e.pk in assigned,
-                    "owners": ", ".join(owners.get(e.pk, [])),
-                }
+                {"enrollment": e, "owners": ", ".join(owners.get(e.pk, []))}
                 for e in page.object_list
             ],
             filters=filters,
@@ -797,96 +1099,85 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             total_results=page.paginator.count,
             search_query=filters["q"],
             pagination_query=urlencode(params),
-            unassigned_count=self.get_base_enrollments()
-            .filter(call_assignments__isnull=True)
-            .count(),
-            source_users=[
-                (u, loads.get(u.pk, 0)) for u in self.get_users() if not target or u.pk != target.pk
-            ],
+            all_ids=",".join(str(pk) for pk in self.get_enrollments().values_list("pk", flat=True)),
         )
         return context
 
-    def bulk_move(self, request):
+    def create_list(self, request):
+        """Crea una sublista con nombre, estado, usuarios y las matrículas del filtro."""
         campus = get_selected_campus(request)
-        users = self.get_users()
-        source = (
-            users.filter(pk=int(request.POST["origen"])).first()
-            if request.POST.get("origen", "").isdigit()
-            else None
+        name = " ".join(request.POST.get("nombre", "").split())[:80]
+        if not name:
+            messages.error(request, "Escribe un nombre para la sublista.")
+            return None
+        if CallList.objects.filter(campus=campus, name__iexact=name).exists():
+            messages.error(request, f"Ya existe una sublista llamada «{name}».")
+            return None
+        allowed = {u.pk for u in self.get_users()}
+        picked = {int(i) for i in request.POST.getlist("usuarios") if i.isdigit()} & allowed
+        busy = dict(
+            CallListMember.objects.filter(user_id__in=picked).values_list(
+                "user__username", "call_list__name"
+            )
         )
-        target = self.get_target()
-        if not source or not target or source.pk == target.pk:
-            messages.error(request, "Elige un usuario de origen y otro de destino distintos.")
-            return
-        moving = CallAssignment.objects.filter(user=source, enrollment__campus=campus)
-        already = CallAssignment.objects.filter(user=target).values("enrollment_id")
-        moved = moving.exclude(enrollment_id__in=already).update(
-            user=target, assigned_by=request.user
-        )
-        moving.delete()
-        messages.success(
-            request, f"{moved} asignaciones pasaron de {source.username} a {target.username}."
-        )
-
-    def bulk_split(self, request):
-        picked = {int(i) for i in request.POST.getlist("reparto") if i.isdigit()}
-        users = list(self.get_users().filter(pk__in=picked).order_by("username"))
-        if not users:
-            messages.error(request, "Selecciona al menos un usuario para repartir.")
-            return
-        enrollments = list(
-            self.get_base_enrollments()
-            .filter(call_assignments__isnull=True)
-            .order_by("student__full_name", "pk")
-            .values_list("pk", flat=True)
-        )
-        CallAssignment.objects.bulk_create(
-            CallAssignment(user=users[i % len(users)], enrollment_id=pk, assigned_by=request.user)
-            for i, pk in enumerate(enrollments)
-        )
+        if busy:
+            detail = ", ".join(f"{user} (en «{lst}»)" for user, lst in sorted(busy.items()))
+            messages.error(
+                request,
+                f"No se creó la sublista: {detail} ya pertenece a otra sublista. "
+                "Quítalo de ella primero.",
+            )
+            return None
+        active = request.POST.get("estado_lista", "activa") != "inactiva"
+        try:
+            with transaction.atomic():
+                call_list = CallList.objects.create(
+                    campus=campus, name=name, active=active, created_by=request.user
+                )
+                CallListMember.objects.bulk_create(
+                    CallListMember(call_list=call_list, user_id=pk, assigned_by=request.user)
+                    for pk in picked
+                )
+                chosen = {int(i) for i in request.POST.getlist("enrollments") if i.isdigit()}
+                valid = (
+                    self.get_base_enrollments().filter(pk__in=chosen).values_list("pk", flat=True)
+                )
+                call_list.enrollments.add(*valid)
+        except IntegrityError:
+            messages.error(
+                request,
+                "Otro asignador cambió las sublistas o sus usuarios al mismo tiempo. "
+                "Intenta de nuevo.",
+            )
+            return None
         messages.success(
             request,
-            f"{len(enrollments)} matrículas sin asignar repartidas entre {len(users)} usuarios.",
+            f"Sublista «{call_list.name}» creada con {call_list.enrollments.count()} "
+            f"matrícula(s) y {len(picked)} usuario(s).",
         )
+        return call_list
 
     def post(self, request, *args, **kwargs):
         action = request.POST.get("accion", "")
-        if action in {"reasignar", "repartir"}:
-            (self.bulk_move if action == "reasignar" else self.bulk_split)(request)
-            return redirect(
-                request.path
-                + (
-                    f"?usuario={request.POST['usuario']}"
-                    if request.POST.get("usuario", "").isdigit()
-                    else ""
-                )
-            )
+        if action == "crear_lista":
+            self.create_list(request)
+            return redirect("calls-assignments")
         target = self.get_target()
         if not target:
-            messages.error(request, "Selecciona un usuario válido.")
+            messages.error(request, "Selecciona una sublista válida.")
             return redirect("calls-assignments")
-        campus = get_selected_campus(request)
-        shown = {int(i) for i in request.POST.getlist("shown") if i.isdigit()}
-        chosen = {int(i) for i in request.POST.getlist("enrollments") if i.isdigit()} & shown
-        valid = set(
-            Enrollment.objects.filter(pk__in=shown, campus=campus, active=True).values_list(
-                "pk", flat=True
-            )
-        )
-        chosen &= valid
-        # Solo se modifican las matrículas visibles en la página enviada.
-        CallAssignment.objects.filter(user=target, enrollment__in=valid - chosen).delete()
-        existing = set(
-            CallAssignment.objects.filter(user=target, enrollment__in=chosen).values_list(
-                "enrollment_id", flat=True
-            )
-        )
-        CallAssignment.objects.bulk_create(
-            CallAssignment(user=target, enrollment_id=pk, assigned_by=request.user)
-            for pk in chosen - existing
-        )
-        messages.success(request, f"Asignaciones de {target.username} actualizadas.")
-        keep = QueryDict(request.POST.get("volver", "")).copy()
-        keep.pop("page", None)
-        keep["usuario"] = str(target.pk)
-        return redirect(f"{request.path}?{keep.urlencode()}")
+        if action == "eliminar_lista":
+            name = target.name
+            target.delete()
+            messages.success(request, f"Sublista «{name}» eliminada; sus usuarios quedaron libres.")
+        elif action == "quitar_matricula":
+            raw = request.POST.get("matricula", "")
+            if raw.isdigit():
+                target.enrollments.remove(int(raw))
+                messages.success(request, f"Matrícula quitada de «{target.name}».")
+        elif action == "quitar_usuario":
+            raw = request.POST.get("miembro", "")
+            removed, _ = target.members.filter(pk=int(raw) if raw.isdigit() else 0).delete()
+            if removed:
+                messages.success(request, f"Usuario quitado de «{target.name}»; ya está libre.")
+        return redirect("calls-assignments")

@@ -4,6 +4,12 @@ from .models import CallNote, WhatsAppTemplate
 
 
 class CallNoteForm(forms.ModelForm):
+    wrong_phone = forms.ChoiceField(
+        label="Teléfono inválido",
+        required=False,
+        widget=forms.Select(attrs={"class": "browser-default"}),
+    )
+
     class Meta:
         model = CallNote
         fields = ["response", "note", "promise_date"]
@@ -12,11 +18,19 @@ class CallNoteForm(forms.ModelForm):
             "promise_date": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, student=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.valid_phones = (
+            [p.strip() for p in student.phone.split(",") if p.strip()] if student else []
+        )
+        self.fields["wrong_phone"].choices = [("", "Elige el teléfono")] + [
+            (p, p) for p in self.valid_phones
+        ]
         self.fields["response"].widget.attrs["onchange"] = (
-            "document.getElementById('promise-box').style.display="
-            f"this.value==='{CallNote.Response.PROMISED_PAYMENT}'?'':'none'"
+            "var p=document.getElementById('promise-box');"
+            f"if(p)p.style.display=this.value==='{CallNote.Response.PROMISED_PAYMENT}'?'':'none';"
+            "var w=document.getElementById('wrong-box');"
+            f"if(w)w.style.display=this.value==='{CallNote.Response.WRONG_NUMBER}'?'':'none'"
         )
 
     def clean(self):
@@ -26,6 +40,13 @@ class CallNoteForm(forms.ModelForm):
             self.add_error("promise_date", "Indique la fecha en que prometió pagar.")
         if not promised:
             cleaned["promise_date"] = None
+        if cleaned.get("response") == CallNote.Response.WRONG_NUMBER:
+            if not cleaned.get("wrong_phone") and len(self.valid_phones) == 1:
+                cleaned["wrong_phone"] = self.valid_phones[0]
+            elif not cleaned.get("wrong_phone") and len(self.valid_phones) > 1:
+                self.add_error("wrong_phone", "Indique cuál teléfono es inválido.")
+        else:
+            cleaned["wrong_phone"] = ""
         return cleaned
 
     def clean_note(self):

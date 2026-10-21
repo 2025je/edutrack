@@ -1,126 +1,203 @@
 {% extends "base.html" %}
-{% block title %}Asignar llamadas · EduTrack{% endblock %}
+{% block title %}Crear sublistas de llamadas · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Asignar llamadas</h1><div class="muted">Elige qué matrículas verá cada usuario en «Alumnos y deudas». Quienes asignan llamadas ven todas.</div></div>
+<div class="mb"><h1 class="mb-0">Crear sublistas de llamadas</h1><div class="muted">Define el nombre y el estado, elige a los usuarios que realizarán las llamadas y selecciona las matrículas con ayuda del filtro. Cada usuario pertenece a una sola sublista. Quienes asignan llamadas ven todas.</div></div>
 <div class="card card-pad">
-  <div class="row mb-0"><div class="col s12 m6"><label for="usuario">Usuario que realizará las llamadas</label>
-    <select id="usuario" name="usuario" form="assign-filters" class="browser-default">
-      <option value="">Selecciona un usuario</option>
-      {% for u in users %}<option value="{{ u.pk }}" {% if target and target.pk == u.pk %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
-    </select>
-    {% if not users %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endif %}
-  </div></div>
-</div>
-<details class="card card-pad mt no-print"><summary class="strong">Acciones masivas</summary>
-  <div class="row mb-0 mt">
-    <form method="post" class="col s12 m6">
-      {% csrf_token %}<input type="hidden" name="accion" value="reasignar"><input type="hidden" name="usuario" value="{{ target.pk|default:'' }}">
-      <h6 class="strong">Pasar todas las asignaciones de un usuario al seleccionado</h6>
-      <label for="origen">Usuario de origen</label>
-      <select id="origen" name="origen" class="browser-default"><option value="">Elige el usuario de origen</option>{% for u, load in source_users %}<option value="{{ u.pk }}">{{ u.username }} ({{ load }})</option>{% endfor %}</select>
-      <button class="btn mt" type="submit" {% if not target %}disabled title="Selecciona primero el usuario de destino"{% endif %}>Pasar al usuario seleccionado</button>
-    </form>
-    <form method="post" class="col s12 m6">
-      {% csrf_token %}<input type="hidden" name="accion" value="repartir"><input type="hidden" name="usuario" value="{{ target.pk|default:'' }}">
-      <h6 class="strong">Repartir las {{ unassigned_count }} matrículas sin asignar en partes iguales</h6>
-      {% for u in users %}<div><label><input type="checkbox" name="reparto" value="{{ u.pk }}"><span>{{ u.username }}</span></label></div>{% endfor %}
-      <button class="btn mt" type="submit" {% if not unassigned_count %}disabled{% endif %}>Repartir</button>
-    </form>
-  </div>
-</details>
-<div data-live-region="assigned">
-{% if target %}
-<details class="card card-pad mt"><summary class="strong">Llamadas ya asignadas a {{ target.username }} ({{ assigned_list|length }})</summary>
-  {% if assigned_list %}
-  <div class="table-wrap mt" style="max-height:320px;overflow:auto"><table class="highlight"><thead><tr><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th></tr></thead><tbody>
-  {% for a in assigned_list %}<tr><td>{{ a.enrollment.student_label }}</td><td>{{ a.enrollment.course_label }}{% if a.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.schedule }}{% endif %}</td><td>{% if a.enrollment.course_id %}{{ a.enrollment.course.group }}{% endif %}</td></tr>{% endfor %}
-  </tbody></table></div>
-  {% else %}<p class="muted mt mb-0">Este usuario aún no tiene llamadas asignadas.</p>{% endif %}
-</details>
-{% endif %}
-</div>
-<div class="card card-pad mt">
-  <form id="assign-filters" method="get" class="row mb-0" data-live-filter data-filter-collapse>
-    <h6 class="col s12 strong">Alumno y curso</h6>
-    <div class="col s12 m6 l3" data-primary><label for="q">Alumno</label><input id="q" type="search" name="q" value="{{ filters.q }}" autocomplete="off"></div>
-    <div class="col s12 m6 l3" data-primary><label for="curso">Curso</label>
-      <select id="curso" name="curso" class="browser-default"><option value="">Todos</option>{% for c in courses %}<option value="{{ c }}" {% if filters.curso == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
-    <div class="col s12 m6 l3"><label for="horario">Horario</label>
-      <select id="horario" name="horario" class="browser-default"><option value="">Todos</option>{% for s in schedules %}<option value="{{ s }}" {% if filters.horario == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
-    <div class="col s12 m6 l3"><label for="grupo">Grupo</label>
-      <select id="grupo" name="grupo" class="browser-default"><option value="">Todos</option>{% for g in groups %}<option value="{{ g }}" {% if filters.grupo == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
-    <h6 class="col s12 strong">Fechas</h6>
-    <div class="col s12 m6 l3"><label for="matricula_desde">Matrícula desde</label><input id="matricula_desde" type="date" name="matricula_desde" value="{{ filters.matricula_desde }}"></div>
-    <div class="col s12 m6 l3"><label for="matricula_hasta">Matrícula hasta</label><input id="matricula_hasta" type="date" name="matricula_hasta" value="{{ filters.matricula_hasta }}"></div>
-    <div class="col s12 m6 l3"><label for="inicio_desde">Inicio del curso desde</label><input id="inicio_desde" type="date" name="inicio_desde" value="{{ filters.inicio_desde }}"></div>
-    <div class="col s12 m6 l3"><label for="inicio_hasta">Inicio del curso hasta</label><input id="inicio_hasta" type="date" name="inicio_hasta" value="{{ filters.inicio_hasta }}"></div>
-    <div class="col s12 m6 l3"><label for="situacion">Situación del curso</label>
-      <select id="situacion" name="situacion" class="browser-default">
-        <option value="">Todas</option>
-        <option value="ya_inicio" {% if filters.situacion == "ya_inicio" %}selected{% endif %}>Ya inició</option>
-        <option value="por_iniciar" {% if filters.situacion == "por_iniciar" %}selected{% endif %}>Va a iniciar</option>
-        <option value="incorporacion" {% if filters.situacion == "incorporacion" %}selected{% endif %}>Incorporación (matrícula tras el inicio)</option>
-      </select></div>
-    <h6 class="col s12 strong">Asignación y deuda</h6>
-    <div class="col s12 m6 l3" data-primary><label for="estado">Estado de asignación</label>
-      <select id="estado" name="estado" class="browser-default">
-        <option value="">Todas</option>
-        <option value="sin_asignar" {% if filters.estado == "sin_asignar" %}selected{% endif %}>Sin asignar a nadie</option>
-        <option value="asignadas" {% if filters.estado == "asignadas" %}selected{% endif %}>Asignadas al usuario</option>
-        <option value="no_asignadas" {% if filters.estado == "no_asignadas" %}selected{% endif %}>No asignadas al usuario</option>
-        <option value="otros" {% if filters.estado == "otros" %}selected{% endif %}>Asignadas a otros usuarios</option>
-      </select></div>
-    <div class="col s12" data-actions>
-      <label><input type="checkbox" name="deuda" value="1" {% if filters.deuda %}checked{% endif %}><span>Solo con deuda pendiente</span></label>
-      <button class="btn" type="submit">Filtrar</button>
-      <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-assignments' %}{% if target %}?usuario={{ target.pk }}{% endif %}">Limpiar</a>
+  <form id="list-form" method="post">
+    {% csrf_token %}
+    <input type="hidden" name="accion" value="crear_lista">
+    <h6 class="strong">Nueva sublista</h6>
+    <div class="row mb-0">
+      <div class="col s12 m8"><label for="nombre">Nombre de la sublista</label><input id="nombre" type="text" name="nombre" maxlength="80" placeholder="Ej. Morosos de inglés" required></div>
+      <div class="col s12 m4"><label for="estado_lista">Estado</label>
+        <select id="estado_lista" name="estado_lista" class="browser-default">
+          <option value="activa" selected>Activa</option>
+          <option value="inactiva">Inactiva (sus usuarios no verán matrículas)</option>
+        </select></div>
     </div>
+    <h6 class="strong mt">Usuarios que realizan llamadas</h6>
+    <p class="muted">Marca uno o varios. Todos verán las mismas matrículas. Quien ya pertenece a otra sublista aparece bloqueado hasta quitarlo de ella (abajo, en «Sublistas existentes»).</p>
+    <div style="max-height:220px;overflow:auto">
+    {% for c in callers %}<div><label><input type="checkbox" name="usuarios" value="{{ c.user.pk }}" {% if c.other or c.no_campus %}disabled{% endif %}><span {% if c.other or c.no_campus %}style="opacity:.75"{% endif %}>{{ c.user.username }}</span></label>{% if c.no_campus %} <span class="muted">· no tiene acceso a esta sede; asígnale la sede en Usuarios para poder agregarlo.</span>{% elif c.other %} <span class="muted">· bloqueado: ya está en «{{ c.other.name }}».</span>{% endif %}</div>
+    {% empty %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endfor %}
+    </div>
+
+    <h6 class="strong mt">Matrículas de la sublista</h6>
+    <div id="filters" class="row mb-0">
+      <div class="col s12 m6 l3"><label for="q">Alumno</label><input id="q" type="search" name="q" autocomplete="off"></div>
+      <div class="col s12 m6 l3"><label for="curso">Curso</label>
+        <select id="curso" name="curso" class="browser-default"><option value="">Todos</option>{% for c in courses %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+      <div class="col s12 m6 l3"><label for="horario">Horario</label>
+        <select id="horario" name="horario" class="browser-default"><option value="">Todos</option>{% for s in schedules %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></div>
+      <div class="col s12 m6 l3"><label for="grupo">Grupo</label>
+        <select id="grupo" name="grupo" class="browser-default"><option value="">Todos</option>{% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}</select></div>
+      <div class="col s12 m6 l3"><label for="matricula_desde">Matrícula desde</label><input id="matricula_desde" type="date" name="matricula_desde"></div>
+      <div class="col s12 m6 l3"><label for="matricula_hasta">Matrícula hasta</label><input id="matricula_hasta" type="date" name="matricula_hasta"></div>
+      <div class="col s12 m6 l3"><label for="inicio_desde">Inicio del curso desde</label><input id="inicio_desde" type="date" name="inicio_desde"></div>
+      <div class="col s12 m6 l3"><label for="inicio_hasta">Inicio del curso hasta</label><input id="inicio_hasta" type="date" name="inicio_hasta"></div>
+      <div class="col s12 m6 l3"><label for="situacion">Situación del curso</label>
+        <select id="situacion" name="situacion" class="browser-default">
+          <option value="">Todas</option>
+          <option value="ya_inicio">Ya inició</option>
+          <option value="por_iniciar">Va a iniciar</option>
+          <option value="incorporacion">Incorporación (matrícula tras el inicio)</option>
+        </select></div>
+      <div class="col s12 m6 l3"><label for="estado">Pertenencia a sublistas</label>
+        <select id="estado" name="estado" class="browser-default">
+          <option value="">Todas</option>
+          <option value="sin_asignar">En ninguna sublista</option>
+          <option value="en_alguna">En alguna sublista</option>
+        </select></div>
+      <div class="col s12 m6 l3"><label>&nbsp;</label><label><input type="checkbox" name="deuda" value="1"><span>Solo con deuda pendiente</span></label></div>
+      <div class="col s12"><button type="button" class="btn-flat grey-text text-darken-2" id="clear-filters">Limpiar filtro</button></div>
+    </div>
+
+    <div id="results" data-all-ids="{{ all_ids }}">
+      <p class="muted mt"><span id="found">{{ total_results }}</span> matrícula{{ total_results|pluralize }} encontrada{{ total_results|pluralize }}.
+        <button type="button" class="btn-flat blue-text" id="select-all" {% if not total_results %}disabled{% endif %}>Seleccionar las {{ total_results }} del filtro</button>
+        <button type="button" class="btn-flat grey-text text-darken-2" id="unselect-all">Quitar las del filtro</button></p>
+      <div class="card table-wrap"><table class="highlight"><thead><tr><th class="center-align"><label title="Marcar o desmarcar las de esta página"><input type="checkbox" id="check-page"><span>Página</span></label></th><th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Ya en sublista</th></tr></thead><tbody>
+      {% for row in rows %}<tr>
+        <td class="center-align"><label><input type="checkbox" data-enrollment="{{ row.enrollment.pk }}"><span aria-label="Incluir a {{ row.enrollment.student.full_name }}"></span></label></td>
+        <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}{% if row.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
+      </tr>{% empty %}<tr><td colspan="6" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
+      </tbody></table></div>
+      <div class="mt">{% include "shared/pagination.html" %}</div>
+    </div>
+
+    <p class="mt"><strong id="selected-count">0</strong> matrícula(s) seleccionada(s) para la sublista.</p>
+    <div id="selected-inputs"></div>
+    <button class="btn" type="submit">Crear sublista</button>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver</a>
   </form>
 </div>
-<div data-live-region="results">
-<p class="muted mt">{{ total_results }} matrícula{{ total_results|pluralize }} encontrada{{ total_results|pluralize }}.</p>
-<form method="post">
-  {% csrf_token %}
-  <input type="hidden" name="usuario" value="{{ target.pk }}">
-  <input type="hidden" name="volver" value="{{ pagination_query }}">
-  <div class="card table-wrap"><table class="highlight"><thead><tr>{% if target %}<th class="center-align"><label title="Marcar o desmarcar todas las de esta página"><input type="checkbox" data-check-all><span>Todas</span></label></th>{% endif %}<th>Alumno</th><th>Curso</th><th>Horario</th><th>Grupo</th><th>Asignada a</th></tr></thead><tbody>
-  {% for row in rows %}<tr>
-    {% if target %}<td class="center-align"><input type="hidden" name="shown" value="{{ row.enrollment.pk }}"><label><input type="checkbox" name="enrollments" value="{{ row.enrollment.pk }}" {% if row.assigned %}checked{% endif %}><span aria-label="Asignar {{ row.enrollment.student.full_name }}"></span></label></td>{% endif %}
-    <td>{{ row.enrollment.student_label }}</td><td>{{ row.enrollment.course_label }}{% if row.enrollment.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.schedule }}{% endif %}</td><td>{% if row.enrollment.course_id %}{{ row.enrollment.course.group }}{% endif %}</td><td>{{ row.owners|default:"—" }}</td>
-  </tr>{% empty %}<tr><td colspan="{% if target %}6{% else %}5{% endif %}" class="center-align muted">No hay matrículas activas con estos criterios.</td></tr>{% endfor %}
-  </tbody></table></div>
-  {% if target %}<button class="btn" type="submit">Guardar asignaciones de esta página</button>{% else %}<span class="muted">Selecciona un usuario arriba para mostrar las casillas de asignación.</span>{% endif %}
-  <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver</a>
-</form>
-<div class="mt">{% include "shared/pagination.html" %}</div>
+<style>
+  .sub-item{padding:12px 0;border-top:1px solid rgba(128,128,128,.25)}
+  .sub-item:first-of-type{border-top:0}
+  .sub-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sub-head .sub-delete{margin-left:auto}
+  .sub-head .btn-flat{margin:0}
+  .sub-badge{border:1px solid currentColor;border-radius:12px;padding:0 8px;font-size:.8rem}
+  .sub-users{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+  .sub-user{display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(128,128,128,.5);border-radius:16px;padding:2px 4px 2px 12px;color:inherit}
+  .sub-user button{border:0;background:none;color:inherit;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 6px;opacity:.7}
+  .sub-user button:hover{opacity:1;color:#e53935}
+  .sub-item details summary{cursor:pointer}
+</style>
+<div class="card card-pad mt">
+  <h6 class="strong">Sublistas existentes</h6>
+  {% for l in lists %}
+  <div class="sub-item">
+    <div class="sub-head">
+      <strong>{{ l.name }}</strong>{% if not l.active %} <span class="sub-badge">Inactiva</span>{% endif %}
+      <span class="muted">· {{ l.enrollment_total }} matrícula{{ l.enrollment_total|pluralize }}</span>
+      <form method="post" class="no-print sub-delete" onsubmit="return confirm('¿Eliminar la sublista «{{ l.name|escapejs }}»? Sus usuarios quedarán libres; las matrículas y el historial no se borran.');">
+        {% csrf_token %}<input type="hidden" name="accion" value="eliminar_lista"><input type="hidden" name="lista" value="{{ l.pk }}">
+        <button class="btn-flat red-text" type="submit">Eliminar</button>
+      </form>
+    </div>
+    <div class="sub-users"><span class="muted">Usuarios:</span>
+    {% for m in l.members.all %}
+      <form method="post" class="no-print" onsubmit="return confirm('¿Quitar a {{ m.user.username|escapejs }} de «{{ l.name|escapejs }}»?');">
+        {% csrf_token %}<input type="hidden" name="accion" value="quitar_usuario"><input type="hidden" name="lista" value="{{ l.pk }}"><input type="hidden" name="miembro" value="{{ m.pk }}">
+        <span class="sub-user"><span>{{ m.user.username }}</span><button type="submit" title="Quitar a {{ m.user.username }}" aria-label="Quitar a {{ m.user.username }}">×</button></span>
+      </form>
+    {% empty %}<span class="muted">Sin usuarios asignados.</span>{% endfor %}
+    </div>
+    <details>
+      <summary class="strong">Ver las {{ l.active_enrollments|length }} matrícula{{ l.active_enrollments|length|pluralize }}</summary>
+      {% if l.active_enrollments %}
+      <div class="table-wrap mt" style="max-height:320px;overflow:auto"><table class="highlight"><thead><tr><th>Alumno</th><th>Curso</th><th>Horario</th>      <th>Grupo</th><th></th></tr></thead><tbody>
+            {% for e in l.active_enrollments %}<tr><td>{{ e.student_label }}</td><td>{{ e.course_label }}{% if e.is_incorporation %} <span class="chip orange darken-2">Incorporación</span>{% endif %}</td><td>{% if e.course_id %}{{ e.course.schedule }}{% endif %}</td><td>{% if e.course_id %}{{ e.course.group }}{% endif %}</td>
+              <td class="right-align no-print"><form method="post" onsubmit="return confirm('¿Quitar esta matrícula de «{{ l.name|escapejs }}»? La matrícula no se elimina del sistema.');">{% csrf_token %}<input type="hidden" name="accion" value="quitar_matricula"><input type="hidden" name="lista" value="{{ l.pk }}"><input type="hidden" name="matricula" value="{{ e.pk }}"><button class="btn-flat red-text" type="submit" style="margin:0">Quitar</button></form></td></tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="muted mb-0">Esta sublista no tiene matrículas activas.</p>{% endif %}
+    </details>
+  </div>
+  {% empty %}<p class="muted mb-0">Aún no hay sublistas en esta sede.</p>{% endfor %}
 </div>
 <script>
 (function () {
-  var select = document.getElementById("usuario");
-  var form = document.getElementById("assign-filters");
-  var dirty = false;
-  document.addEventListener("change", function (event) { if (event.target.matches("input[name=enrollments]")) dirty = true; });
-  if (select && form) select.addEventListener("change", function () {
-    if (dirty && !confirm("Cambiar de usuario descartará las casillas marcadas sin guardar. ¿Continuar?")) { select.value = "{{ target.pk|default_if_none:'' }}"; return; }
-    form.requestSubmit();
-  });
-  function boxes() { return document.querySelectorAll("input[name=enrollments]:not(:disabled)"); }
-  function syncAll() {
-    var all = document.querySelector("[data-check-all]");
-    if (!all) return;
-    var list = boxes(), on = 0;
-    list.forEach(function (b) { if (b.checked) on++; });
-    all.checked = list.length > 0 && on === list.length;
-    all.indeterminate = on > 0 && on < list.length;
+  var form = document.getElementById("list-form");
+  var filters = document.getElementById("filters");
+  var selected = new Set();
+  var timer = null;
+  var url = "{% url 'calls-assignments' %}";
+
+  function results() { return document.getElementById("results"); }
+  function pageIds() {
+    return Array.prototype.map.call(results().querySelectorAll("input[data-enrollment]"), function (b) { return b.value || b.dataset.enrollment; });
   }
-  document.addEventListener("change", function (event) {
-    if (event.target.matches("[data-check-all]")) {
-      boxes().forEach(function (b) { b.checked = event.target.checked; });
-    }
-    if (event.target.matches("[data-check-all], input[name=enrollments]")) syncAll();
+  function allIds() {
+    var raw = results().dataset.allIds || "";
+    return raw ? raw.split(",") : [];
+  }
+  function sync() {
+    results().querySelectorAll("input[data-enrollment]").forEach(function (b) { b.checked = selected.has(b.dataset.enrollment); });
+    var boxes = results().querySelectorAll("input[data-enrollment]");
+    var on = 0;
+    boxes.forEach(function (b) { if (b.checked) on++; });
+    var page = document.getElementById("check-page");
+    page.checked = boxes.length > 0 && on === boxes.length;
+    page.indeterminate = on > 0 && on < boxes.length;
+    document.getElementById("selected-count").textContent = selected.size;
+  }
+  function query(extra) {
+    var params = new URLSearchParams();
+    filters.querySelectorAll("input, select").forEach(function (el) {
+      if (el.type === "checkbox") { if (el.checked) params.set(el.name, el.value); }
+      else if (el.value) params.set(el.name, el.value);
+    });
+    return params.toString();
+  }
+  function load(target) {
+    fetch(target, { headers: { "X-Requested-With": "XMLHttpRequest" }, credentials: "same-origin" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.getElementById("results");
+        if (!fresh) return;
+        results().innerHTML = fresh.innerHTML;
+        results().dataset.allIds = fresh.dataset.allIds;
+        sync();
+      });
+  }
+  function refresh() { load(url + "?" + query()); }
+
+  filters.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(refresh, 300); });
+  filters.addEventListener("change", function () { clearTimeout(timer); refresh(); });
+  filters.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); refresh(); } });
+  document.getElementById("clear-filters").addEventListener("click", function () {
+    filters.querySelectorAll("input, select").forEach(function (el) { if (el.type === "checkbox") el.checked = false; else el.value = ""; });
+    refresh();
   });
-  document.addEventListener("live-filter:updated", syncAll);
-  syncAll();
+  form.addEventListener("click", function (e) {
+    var link = e.target.closest("#results a[href^='?']");
+    if (link) { e.preventDefault(); load(url + link.getAttribute("href")); return; }
+    if (e.target.closest("#select-all")) { allIds().forEach(function (id) { selected.add(id); }); sync(); }
+    if (e.target.closest("#unselect-all")) { allIds().forEach(function (id) { selected.delete(id); }); sync(); }
+  });
+  form.addEventListener("change", function (e) {
+    if (e.target.matches("input[data-enrollment]")) {
+      if (e.target.checked) selected.add(e.target.dataset.enrollment); else selected.delete(e.target.dataset.enrollment);
+      sync();
+    } else if (e.target.id === "check-page") {
+      results().querySelectorAll("input[data-enrollment]").forEach(function (b) {
+        if (e.target.checked) selected.add(b.dataset.enrollment); else selected.delete(b.dataset.enrollment);
+      });
+      sync();
+    }
+  });
+  form.addEventListener("submit", function () {
+    var box = document.getElementById("selected-inputs");
+    box.innerHTML = "";
+    selected.forEach(function (id) {
+      var input = document.createElement("input");
+      input.type = "hidden"; input.name = "enrollments"; input.value = id;
+      box.appendChild(input);
+    });
+  });
+  sync();
 })();
 </script>
 {% endblock %}

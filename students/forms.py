@@ -110,7 +110,7 @@ class StudentForm(forms.ModelForm):
 class StudentPhoneForm(forms.ModelForm):
     class Meta:
         model = StudentPhone
-        fields = ["number"]
+        fields = ["number", "invalid"]
         widgets = {
             "number": forms.TextInput(
                 attrs={

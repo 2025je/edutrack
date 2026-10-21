@@ -169,7 +169,9 @@ class StudentPhoneFormMixin:
         student.phone = ", ".join(
             phone_form.cleaned_data["number"].strip()
             for phone_form in phone_formset.forms
-            if phone_form.cleaned_data and not phone_form.cleaned_data.get("DELETE")
+            if phone_form.cleaned_data
+            and not phone_form.cleaned_data.get("DELETE")
+            and not phone_form.cleaned_data.get("invalid")
         )
         with transaction.atomic():
             student.save()

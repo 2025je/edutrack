@@ -419,27 +419,6 @@ document.addEventListener("click", function (e) {
   document.querySelectorAll("details.campus-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
 });
 
-// Llamadas a alumnos: el bot?n ?+N m?s? muestra u oculta los dem?s cursos de esa fila.
-function setCourseRows(btn, open) {
-  var id = btn.dataset.toggleCourses;
-  document.querySelectorAll('tr[data-group="' + id + '"]').forEach(function (tr) {
-    tr.classList.toggle("open", open);
-  });
-  btn.setAttribute("aria-expanded", open ? "true" : "false");
-  btn.querySelector("[data-more]").style.display = open ? "none" : "";
-  btn.querySelector("[data-less]").style.display = open ? "" : "none";
-  btn.closest("tr").querySelectorAll("[data-span]").forEach(function (td) {
-    td.rowSpan = open ? Number(td.dataset.span) : 1;
-  });
-}
-document.addEventListener("click", function (event) {
-  var btn = event.target.closest("[data-toggle-courses]");
-  if (btn) setCourseRows(btn, btn.getAttribute("aria-expanded") !== "true");
-});
-window.addEventListener("beforeprint", function () {
-  document.querySelectorAll("[data-toggle-courses]").forEach(function (b) { setCourseRows(b, true); });
-});
-
 document.addEventListener("keydown", function (e) {
   var isShortcut = e.key === "/" || (e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey));
   if (!isShortcut || e.altKey) return;

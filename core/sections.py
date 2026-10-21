@@ -141,6 +141,13 @@ SECTIONS = [
         "vencidas promesa pago",
         "?promesa=vencida",
     ),
+    entry(
+        "Llamadas",
+        "Pedir llamada",
+        "calls-queue",
+        ("calls.add_callnote",),
+        "cola siguiente call center",
+    ),
     entry("Llamadas", "Historial de llamadas", "calls-notes-all", CALLS, "notas"),
     entry(
         "Llamadas", "Reporte de llamadas", "calls-report", ("core.view_call_reports",), "informe"

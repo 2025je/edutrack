@@ -14,6 +14,13 @@
       {{ form.promise_date }}
       {% for error in form.promise_date.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     </div>
+    {% if not note %}
+    <div id="wrong-box" {% if form.response.value != 'TELEFONO_EQUIVOCADO' %}style="display:none"{% endif %}>
+      <label for="{{ form.wrong_phone.id_for_label }}">Teléfono inválido (se inhabilita, no se elimina)</label>
+      {{ form.wrong_phone }}
+      {% for error in form.wrong_phone.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+    {% endif %}
     <label for="{{ form.note.id_for_label }}">Detalle de la llamada</label>
     {{ form.note }}
     {% for error in form.note.errors %}<div class="field-error">{{ error }}</div>{% endfor %}

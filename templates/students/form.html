@@ -176,6 +176,7 @@
                                         <label for="{{ phone_form.number.id_for_label }}">Teléfono <span class="danger">*</span></label>
                                         {{ phone_form.number }}
                                         {% for error in phone_form.number.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                                        <label class="phone-invalid"><input type="checkbox" name="{{ phone_form.invalid.html_name }}" id="{{ phone_form.invalid.id_for_label }}" {% if phone_form.invalid.value %}checked{% endif %}><span>Inválido (no usar)</span></label>
                                         {% if phone_form.DELETE %}
                                             <span style="display:none">{{ phone_form.DELETE }}</span>
                                         {% endif %}
@@ -188,6 +189,7 @@
                                     {% for hidden in phone_formset.empty_form.hidden_fields %}{{ hidden }}{% endfor %}
                                     <label for="{{ phone_formset.empty_form.number.id_for_label }}">Teléfono <span class="danger">*</span></label>
                                     {{ phone_formset.empty_form.number }}
+                                    <label class="phone-invalid"><input type="checkbox" name="{{ phone_formset.empty_form.invalid.html_name }}" id="{{ phone_formset.empty_form.invalid.id_for_label }}"><span>Inválido (no usar)</span></label>
                                     <span style="display:none">{{ phone_formset.empty_form.DELETE }}</span>
                                     <button type="button" class="btn-flat red-text remove-phone" aria-label="Eliminar teléfono">−</button>
                                 </div>

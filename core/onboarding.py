@@ -78,7 +78,7 @@ CAPABILITIES = [
         "assignment_ind",
         "Asignar llamadas",
         ("core.assign_calls",),
-        "Repartir las matrículas que debe llamar cada gestor.",
+        "Armar sublistas de matrículas y asignarlas a varios gestores.",
         "No puedes asignar llamadas a otros usuarios.",
     ),
     (
@@ -266,11 +266,23 @@ TOUR = [
             ["Enviar un mensaje de WhatsApp con plantilla.", "calls.add_callnote"],
             ["Ver las llamadas de todos los gestores de la sede.", "core.view_all_calls"],
             [
-                "Repartir las matrículas entre gestores con el enlace «Asignar llamadas».",
+                "Crear sublistas con un filtro de matrículas y asignarlas a varios gestores con «Asignar llamadas».",
                 "core.assign_calls",
             ],
         ],
         any_of=("calls.view_callnote",),
+    ),
+    _view(
+        "calls-queue",
+        "phone_forwarded",
+        "Pedir llamada",
+        "Cola de llamadas de tu sublista, al estilo call center.",
+        [
+            ["Pedir el siguiente alumno por llamar.", None],
+            ["Ver a quién está llamando el resto de tu sublista.", None],
+            ["Registrar el resultado o liberar al alumno.", None],
+        ],
+        any_of=("calls.add_callnote",),
     ),
     _view(
         "calls-notes-all",

@@ -14,7 +14,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from calls.models import CallAssignment, CallNote, WhatsAppTemplate
+from calls.models import CallList, CallListMember, CallNote, WhatsAppTemplate
 from core.management.commands.reset_system import flush_database, tables_to_wipe, wipe_media
 from core.models import ActivityLog, Campus, CampusFlyer
 from payments.models import CashClosing, Installment, Payment, PaymentAllocation
@@ -300,12 +300,15 @@ def seed_call_templates(ctx):
 
 
 def seed_call_assignments(ctx):
-    for enrollment in (ctx.current, ctx.debt_enrollment):
-        CallAssignment.objects.create(
-            user=ctx.users["demo_gestor"],
-            enrollment=enrollment,
-            assigned_by=ctx.users["demo_asignador"],
-        )
+    call_list = CallList.objects.create(
+        campus=ctx.central, name="Sublista demo", created_by=ctx.users["demo_asignador"]
+    )
+    call_list.enrollments.set([ctx.current, ctx.debt_enrollment])
+    CallListMember.objects.create(
+        call_list=call_list,
+        user=ctx.users["demo_gestor"],
+        assigned_by=ctx.users["demo_asignador"],
+    )
 
 
 def seed_call_notes(ctx):
@@ -368,7 +371,7 @@ ELEMENTS = {
     "cash_closings": ("Cierre de caja", ("payments",), seed_cash_closings),
     "call_templates": ("Plantillas de WhatsApp", ("campuses",), seed_call_templates),
     "call_assignments": (
-        "Asignación de llamadas",
+        "Sublistas de llamadas",
         ("enrollments", "users"),
         seed_call_assignments,
     ),

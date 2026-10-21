@@ -1995,6 +1995,26 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(self.student.phone, "912345678")
         self.assertEqual(list(self.student.phones.values_list("number", flat=True)), ["912345678"])
 
+    def test_student_form_can_disable_a_phone_without_deleting_it(self):
+        data = self.phone_formset_data(["987654321", "912345678"])
+        data["phones-0-invalid"] = "on"
+        response = self.client.post(
+            reverse("student-update", args=[self.student.pk]),
+            {
+                "last_name": "Estudiante de",
+                "first_name": "prueba",
+                "document_number": self.student.document_number,
+                "active": "on",
+                **data,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.phone, "912345678")
+        self.assertEqual(self.student.phones.count(), 2)
+        self.assertTrue(self.student.phones.get(number="987654321").invalid)
+
     def test_legacy_comma_separated_phones_convert_to_related_rows(self):
         student = Student.objects.create(
             campus=self.campus,

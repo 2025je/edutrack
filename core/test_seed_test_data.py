@@ -8,7 +8,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TransactionTestCase, override_settings
 
-from calls.models import CallAssignment, CallNote, WhatsAppTemplate
+from calls.models import CallList, CallListMember, CallNote, WhatsAppTemplate
 from core.management.commands.seed_test_data import CONFIRMATION, ELEMENTS
 from core.models import ActivityLog, Campus, CampusFlyer, User
 from payments.models import CashClosing, Installment, Payment, PaymentAllocation
@@ -99,7 +99,8 @@ class SeedTestDataCommandTests(TransactionTestCase):
         self.assertEqual(PaymentAllocation.objects.count(), 4)
         self.assertEqual(Ficha.objects.count(), 2)
         self.assertEqual(CashClosing.objects.count(), 1)
-        self.assertEqual(CallAssignment.objects.count(), 2)
+        self.assertEqual(CallListMember.objects.count(), 1)
+        self.assertEqual(CallList.objects.get().enrollments.count(), 2)
         self.assertEqual(CallNote.objects.count(), len(CallNote.Response.choices))
         self.assertEqual(WhatsAppTemplate.objects.count(), len(WhatsAppTemplate.Kind.choices))
         self.assertEqual(CampusFlyer.objects.count(), 1)

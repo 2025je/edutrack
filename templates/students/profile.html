@@ -23,7 +23,7 @@
     <div class="col s12 m4"><div class="muted">Sede</div>{{ student.campus.name }}</div>
     <div class="col s12 m4"><div class="muted">Registrado el</div>{{ student.created_at|date:"d/m/Y H:i" }}</div>
     <div class="col s12 m4"><div class="muted">Teléfonos</div>
-      {% for phone in phones %}<span class="chip">{{ phone.number }}</span>{% empty %}{{ student.phone|default:"—" }}{% endfor %}
+      {% for phone in phones %}<span class="chip"{% if phone.invalid %} style="text-decoration:line-through" title="Teléfono inválido"{% endif %}>{{ phone.number }}</span>{% empty %}{{ student.phone|default:"—" }}{% endfor %}
     </div>
   </div>
 </div>

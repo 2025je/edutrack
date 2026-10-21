@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -8,8 +9,23 @@ from django.utils import timezone
 from core.models import Campus, User
 from core.testing import create_user, grant, revoke
 from payments.models import Installment, Payment, PaymentAllocation
-from calls.models import CallAssignment, CallNote, WhatsAppTemplate
-from students.models import Course, Enrollment, Student
+from calls.models import (
+    CallClaim,
+    CallList,
+    CallListMember,
+    CallNote,
+    WhatsAppSend,
+    WhatsAppTemplate,
+)
+from students.models import Course, Enrollment, Student, StudentPhone
+
+
+def make_list(campus, name, enrollments=(), users=()):
+    call_list = CallList.objects.create(campus=campus, name=name)
+    call_list.enrollments.set(enrollments)
+    for user in users:
+        CallListMember.objects.create(call_list=call_list, user=user)
+    return call_list
 
 
 class CallStudentListTests(TestCase):
@@ -265,7 +281,7 @@ class CallAssignmentTests(TestCase):
         self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 0)
 
     def test_caller_sees_only_assigned_enrollments_and_their_history(self):
-        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+        make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
         self._login(self.caller)
         rows = self.client.get(reverse("calls-students")).context["rows"]
         self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
@@ -274,18 +290,42 @@ class CallAssignmentTests(TestCase):
         other = self.enrollments[1].student
         self.assertEqual(self.client.get(reverse("calls-notes", args=[other.pk])).status_code, 404)
 
-    def test_assignment_page_lists_assigned_and_table_without_user(self):
-        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+    def test_assignment_page_previews_filtered_enrollments_and_existing_lists(self):
+        make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
         self._login(self.boss)
         url = reverse("calls-assignments")
         page = self.client.get(url)
         self.assertEqual(len(page.context["rows"]), 2)
-        self.assertContains(
-            page, "Selecciona un usuario arriba para mostrar las casillas de asignación"
+        self.assertContains(page, "Sublistas existentes")
+        self.assertContains(page, "Lista A")
+        self.assertContains(page, "Ver las 1 matrícula")
+        self.assertContains(page, "<details")
+        self.assertNotContains(page, 'name="enrollments" value')
+        page = self.client.get(url, {"q": "ANA"})
+        self.assertEqual(len(page.context["rows"]), 1)
+        self.assertEqual(page.context["all_ids"], str(self.enrollments[0].pk))
+
+    def test_enrollments_outside_the_campus_are_not_added_to_a_list(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        foreign_course = Course.objects.create(
+            campus=other_campus, name="X", schedule="M", group="A"
         )
-        page = self.client.get(url, {"usuario": self.caller.pk, "curso": "Ingles"})
-        self.assertContains(page, "Llamadas ya asignadas a llamador (1)")
-        self.assertEqual(len(page.context["assigned_list"]), 1)
+        foreign = Enrollment.objects.create(
+            campus=other_campus, student=self.enrollments[0].student, course=foreign_course
+        )
+        self._login(self.boss)
+        self.client.post(
+            reverse("calls-assignments"),
+            {
+                "accion": "crear_lista",
+                "nombre": "Mixta",
+                "enrollments": [self.enrollments[0].pk, foreign.pk],
+            },
+        )
+        self.assertEqual(
+            list(CallList.objects.get().enrollments.values_list("pk", flat=True)),
+            [self.enrollments[0].pk],
+        )
 
     def test_assigner_sees_everything(self):
         self._login(self.boss)
@@ -296,20 +336,178 @@ class CallAssignmentTests(TestCase):
         self._login(self.caller)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
 
-    def test_assigner_assigns_and_unassigns_shown_enrollments(self):
+    def test_assigner_creates_a_list_with_the_filtered_enrollments(self):
         self._login(self.boss)
         url = reverse("calls-assignments")
-        shown = [e.pk for e in self.enrollments]
         self.client.post(
             url,
-            {"usuario": self.caller.pk, "shown": shown, "enrollments": [shown[0]]},
+            {
+                "accion": "crear_lista",
+                "nombre": "  Morosos   inglés ",
+                "enrollments": [self.enrollments[0].pk],
+            },
+        )
+        call_list = CallList.objects.get()
+        self.assertEqual((call_list.name, call_list.created_by), ("Morosos inglés", self.boss))
+        self.assertEqual([e.student.full_name for e in call_list.enrollments.all()], ["ANA"])
+        self.client.post(url, {"accion": "crear_lista", "nombre": "morosos INGLÉS"})
+        self.assertEqual(CallList.objects.count(), 1)
+
+    def test_one_list_can_have_many_users_who_share_its_enrollments(self):
+        second = self._user("llamador2", manage_calls=True)
+        self._login(self.boss)
+        self.client.post(
+            reverse("calls-assignments"),
+            {
+                "accion": "crear_lista",
+                "nombre": "Lista A",
+                "usuarios": [self.caller.pk, second.pk],
+                "enrollments": [self.enrollments[0].pk],
+            },
+        )
+        call_list = CallList.objects.get()
+        self.assertEqual(call_list.members.count(), 2)
+        for user in (self.caller, second):
+            self._login(user)
+            rows = self.client.get(reverse("calls-students")).context["rows"]
+            self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+
+    def test_user_already_in_another_list_cannot_be_assigned(self):
+        first = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        response = self.client.post(
+            url,
+            {"accion": "crear_lista", "nombre": "Lista B", "usuarios": [self.caller.pk]},
+            follow=True,
+        )
+        self.assertContains(response, "ya pertenece a otra sublista")
+        self.assertFalse(CallList.objects.filter(name="Lista B").exists())
+        self.assertEqual(self.caller.call_membership.call_list, first)
+        self.assertContains(self.client.get(url), "bloqueado: ya está en «Lista A»")
+
+    def test_user_can_move_after_being_removed_from_the_previous_list(self):
+        first = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        member = first.members.get()
+        self.client.post(url, {"accion": "quitar_usuario", "lista": first.pk, "miembro": member.pk})
+        self.assertFalse(first.members.exists())
+        self.client.post(
+            url, {"accion": "crear_lista", "nombre": "Lista B", "usuarios": [self.caller.pk]}
+        )
+        self.assertEqual(CallListMember.objects.get(user=self.caller).call_list.name, "Lista B")
+
+    def test_enrollment_can_be_removed_from_a_list_without_deleting_it(self):
+        call_list = make_list(self.campus, "Lista A", self.enrollments)
+        self._login(self.boss)
+        self.client.post(
+            reverse("calls-assignments"),
+            {
+                "accion": "quitar_matricula",
+                "lista": call_list.pk,
+                "matricula": self.enrollments[0].pk,
+            },
         )
         self.assertEqual(
-            list(self.caller.call_assignments.values_list("enrollment_id", flat=True)), [shown[0]]
+            list(call_list.enrollments.values_list("pk", flat=True)), [self.enrollments[1].pk]
         )
-        self.client.post(url, {"usuario": self.caller.pk, "shown": shown})
-        self.assertFalse(self.caller.call_assignments.exists())
-        self.assertContains(self.client.get(url, {"usuario": self.caller.pk}), "ANA")
+        self.assertEqual(Enrollment.objects.count(), 2)
+
+    def test_list_names_are_unique_per_campus_ignoring_case(self):
+        make_list(self.campus, "Lista A", [])
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CallList.objects.create(campus=self.campus, name="LISTA a")
+        self._login(self.boss)
+        response = self.client.post(
+            reverse("calls-assignments"),
+            {"accion": "crear_lista", "nombre": " lista   a "},
+            follow=True,
+        )
+        self.assertContains(response, "Ya existe una sublista llamada")
+        self.assertEqual(CallList.objects.count(), 1)
+
+    def test_database_rejects_a_user_in_two_lists(self):
+        make_list(self.campus, "Lista A", [], [self.caller])
+        other = CallList.objects.create(campus=self.campus, name="Lista B")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CallListMember.objects.create(call_list=other, user=self.caller)
+
+    def test_deleting_a_list_frees_its_users(self):
+        call_list = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
+        self._login(self.boss)
+        self.client.post(
+            reverse("calls-assignments"), {"accion": "eliminar_lista", "lista": call_list.pk}
+        )
+        self.assertFalse(CallList.objects.exists())
+        self.assertFalse(CallListMember.objects.exists())
+        self.assertEqual(Enrollment.objects.count(), 2)
+
+    def test_lists_of_other_campuses_are_not_reachable(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        foreign = make_list(other_campus, "Ajena", [], [self.caller])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        self.client.post(
+            url,
+            {
+                "accion": "quitar_usuario",
+                "lista": foreign.pk,
+                "miembro": foreign.members.get().pk,
+            },
+        )
+        self.client.post(url, {"accion": "eliminar_lista", "lista": foreign.pk})
+        self.assertTrue(foreign.members.exists())
+        self.assertTrue(CallList.objects.filter(pk=foreign.pk).exists())
+
+    def test_creating_a_list_with_users_state_and_filter_in_one_form(self):
+        second = self._user("llamador2", manage_calls=True)
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        self.client.post(
+            url,
+            {
+                "accion": "crear_lista",
+                "nombre": "Todo junto",
+                "estado_lista": "inactiva",
+                "usuarios": [self.caller.pk, second.pk],
+                "enrollments": [self.enrollments[0].pk],
+            },
+        )
+        call_list = CallList.objects.get(name="Todo junto")
+        self.assertFalse(call_list.active)
+        self.assertEqual(call_list.members.count(), 2)
+        self.assertEqual([e.student.full_name for e in call_list.enrollments.all()], ["ANA"])
+        self._login(self.caller)
+        self.assertEqual(self.client.get(reverse("calls-students")).context["rows"], [])
+        call_list.active = True
+        call_list.save()
+        rows = self.client.get(reverse("calls-students")).context["rows"]
+        self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+
+    def test_create_with_a_busy_user_is_rejected_without_creating_the_list(self):
+        make_list(self.campus, "Lista A", [], [self.caller])
+        self._login(self.boss)
+        self.client.post(
+            reverse("calls-assignments"),
+            {"accion": "crear_lista", "nombre": "Nueva", "usuarios": [self.caller.pk]},
+        )
+        self.assertFalse(CallList.objects.filter(name="Nueva").exists())
+
+    def test_assignment_form_lists_callers_without_selecting_a_list(self):
+        outsider = self._user("sinsede", manage_calls=True)
+        outsider.campuses.clear()
+        self._login(self.boss)
+        response = self.client.get(reverse("calls-assignments"))
+        self.assertContains(response, "sinsede")
+        self.assertContains(response, "no tiene acceso a esta sede")
+        self.client.post(
+            reverse("calls-assignments"),
+            {"accion": "crear_lista", "nombre": "X", "usuarios": [outsider.pk]},
+        )
+        self.assertFalse(CallListMember.objects.filter(user=outsider).exists())
+        self.assertContains(response, 'name="usuarios"')
+        self.assertContains(response, 'name="estado_lista"')
 
     def test_assignment_filters(self):
         other_course = Course.objects.create(
@@ -318,12 +516,12 @@ class CallAssignmentTests(TestCase):
         extra = Enrollment.objects.create(
             campus=self.campus, student=self.enrollments[0].student, course=other_course
         )
-        CallAssignment.objects.create(user=self.caller, enrollment=self.enrollments[0])
+        target = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
         self._login(self.boss)
         url = reverse("calls-assignments")
 
         def ids(**params):
-            response = self.client.get(url, {"usuario": self.caller.pk, **params})
+            response = self.client.get(url, {"lista": target.pk, **params})
             return {r["enrollment"].pk for r in response.context["rows"]}
 
         self.assertEqual(
@@ -332,9 +530,8 @@ class CallAssignmentTests(TestCase):
         )
         self.assertEqual(ids(horario="M"), {extra.pk})
         self.assertEqual(ids(grupo="B"), {extra.pk})
-        self.assertEqual(ids(estado="asignadas"), {self.enrollments[0].pk})
+        self.assertEqual(ids(estado="en_alguna"), {self.enrollments[0].pk})
         self.assertNotIn(self.enrollments[0].pk, ids(estado="sin_asignar"))
-        self.assertEqual(ids(estado="otros"), set())
         Enrollment.objects.filter(pk=extra.pk).update(enrollment_date="2026-01-10")
         Course.objects.exclude(pk=other_course.pk).update(start_date="2026-02-01")
         Course.objects.filter(pk=other_course.pk).update(start_date="2026-03-01")
@@ -358,9 +555,293 @@ class CallAssignmentTests(TestCase):
         Enrollment.objects.filter(pk=extra.pk).update(enrollment_date=today)
         self.assertTrue(Enrollment.objects.get(pk=extra.pk).is_incorporation)
         self.assertContains(
-            self.client.get(url, {"usuario": self.caller.pk, "situacion": "incorporacion"}),
+            self.client.get(url, {"situacion": "incorporacion"}),
             "chip orange darken-2",
         )
+
+
+class CallQueueTests(TestCase):
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Cola", active=True)
+        course = Course.objects.create(campus=self.campus, name="Ingles", schedule="L", group="A")
+        self.enrollments = []
+        for name in ("Ana", "Beto", "Carla"):
+            student = Student.objects.create(campus=self.campus, full_name=name, phone="987654321")
+            self.enrollments.append(
+                Enrollment.objects.create(campus=self.campus, student=student, course=course)
+            )
+        self.u1 = self._user("uno")
+        self.u2 = self._user("dos")
+        self.outsider = self._user("fuera")
+        self.call_list = make_list(self.campus, "Cola", self.enrollments, [self.u1, self.u2])
+
+    def _user(self, username):
+        user = create_user(username=username, password="x" * 12, manage_calls=True)
+        user.campuses.add(self.campus)
+        return user
+
+    def _login(self, user):
+        self.client.force_login(user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def _ask(self, user):
+        self._login(user)
+        return self.client.post(reverse("calls-queue"), {"accion": "pedir"})
+
+    def test_user_without_list_cannot_ask(self):
+        self._ask(self.outsider)
+        self.assertEqual(CallClaim.objects.count(), 0)
+
+    def test_two_users_get_different_students(self):
+        self._ask(self.u1)
+        self._ask(self.u2)
+        students = set(CallClaim.objects.values_list("student_id", flat=True))
+        self.assertEqual(len(students), 2)
+
+    def test_asking_twice_keeps_same_claim(self):
+        self._ask(self.u1)
+        self._ask(self.u1)
+        self.assertEqual(CallClaim.objects.filter(user=self.u1).count(), 1)
+
+    def test_teammate_sees_claim_in_status(self):
+        self._ask(self.u1)
+        self._login(self.u2)
+        data = self.client.get(reverse("calls-queue-status")).json()
+        self.assertEqual([c["user"] for c in data["team"]], ["uno"])
+
+    def test_claim_expires(self):
+        self._ask(self.u1)
+        CallClaim.objects.update(started_at=timezone.now() - timedelta(minutes=30))
+        self._login(self.u2)
+        self.assertEqual(self.client.get(reverse("calls-queue-status")).json()["team"], [])
+        self.assertEqual(CallClaim.objects.get().status, CallClaim.Status.EXPIRED)
+
+    def test_release_returns_student_to_queue(self):
+        self._ask(self.u1)
+        self.client.post(reverse("calls-queue"), {"accion": "liberar"})
+        self.assertEqual(CallClaim.objects.get().status, CallClaim.Status.RELEASED)
+
+    def test_saving_note_finishes_claim(self):
+        self._ask(self.u1)
+        claim = CallClaim.objects.get()
+        response = self.client.post(
+            reverse("calls-quick-note", args=[claim.student_id]),
+            {"response": "NO_CONTESTO", "note": "", "next": reverse("calls-queue")},
+        )
+        self.assertEqual(response.status_code, 302)
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, CallClaim.Status.DONE)
+
+    def test_contacted_students_are_not_offered_again(self):
+        for _ in range(3):
+            self._ask(self.u1)
+            claim = CallClaim.objects.get(user=self.u1, status=CallClaim.Status.ACTIVE)
+            self.client.post(
+                reverse("calls-quick-note", args=[claim.student_id]),
+                {"response": "ASISTIRA", "note": ""},
+            )
+        self._ask(self.u1)
+        self.assertFalse(CallClaim.objects.filter(status=CallClaim.Status.ACTIVE).exists())
+
+    def test_no_answer_students_can_be_requested_again(self):
+        for _ in range(3):
+            self._ask(self.u1)
+            claim = CallClaim.objects.get(user=self.u1, status=CallClaim.Status.ACTIVE)
+            self.client.post(
+                reverse("calls-quick-note", args=[claim.student_id]),
+                {"response": "NO_CONTESTO", "note": ""},
+            )
+        self._ask(self.u1)
+        self.assertTrue(CallClaim.objects.filter(status=CallClaim.Status.ACTIVE).exists())
+
+    def test_summary_table_shows_called_calling_and_not_called(self):
+        self._ask(self.u1)
+        first = CallClaim.objects.get().student
+        self.client.post(
+            reverse("calls-quick-note", args=[first.pk]),
+            {"response": "ASISTIRA", "note": ""},
+        )
+        self._ask(self.u2)
+        second = CallClaim.objects.get(status=CallClaim.Status.ACTIVE).student
+        rows = {
+            r["student"].pk: r for r in self.client.get(reverse("calls-queue")).context["history"]
+        }
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[first.pk]["state"], "Llamado")
+        self.assertTrue(rows[first.pk]["answered"])
+        self.assertEqual(rows[second.pk]["state"], "Llamando")
+        self.assertEqual(rows[second.pk]["caller"], "dos")
+        others = [r for pk, r in rows.items() if pk not in (first.pk, second.pk)]
+        self.assertEqual(others[0]["state"], "Sin llamar")
+        self.assertIsNone(others[0]["answered"])
+
+    def test_summary_leaves_result_empty_when_not_answered(self):
+        self._ask(self.u1)
+        student = CallClaim.objects.get().student
+        self.client.post(
+            reverse("calls-quick-note", args=[student.pk]),
+            {"response": "NO_CONTESTO", "note": ""},
+        )
+        rows = {
+            r["student"].pk: r for r in self.client.get(reverse("calls-queue")).context["history"]
+        }
+        self.assertFalse(rows[student.pk]["answered"])
+        rows = self.client.get(reverse("calls-queue-status")).json()["history_rows"]
+        row = next(r for r in rows if r["id"] == student.pk)
+        self.assertIs(row["answered"], False)
+        self.assertEqual(row["response"], "NO_CONTESTO")
+
+    def test_wrong_number_is_saved_and_shown_as_not_answered(self):
+        self._ask(self.u1)
+        student = CallClaim.objects.get().student
+        self.client.post(
+            reverse("calls-quick-note", args=[student.pk]),
+            {"response": "TELEFONO_EQUIVOCADO", "note": ""},
+        )
+        note = CallNote.objects.get()
+        self.assertEqual(note.get_response_display(), "Teléfono equivocado")
+        rows = {
+            r["student"].pk: r for r in self.client.get(reverse("calls-queue")).context["history"]
+        }
+        self.assertFalse(rows[student.pk]["answered"])
+        rows = self.client.get(reverse("calls-queue-status")).json()["history_rows"]
+        row = next(r for r in rows if r["id"] == student.pk)
+        self.assertEqual(row["label"], "Teléfono equivocado")
+        self.assertFalse(row["retry"])
+
+    def test_wrong_number_disables_only_the_selected_phone(self):
+        self._ask(self.u1)
+        student = CallClaim.objects.get().student
+        student.phone = "987654321, 912345678"
+        student.save()
+        StudentPhone.objects.create(student=student, number="987654321")
+        StudentPhone.objects.create(student=student, number="912345678")
+        url = reverse("calls-quick-note", args=[student.pk])
+        self.client.post(url, {"response": "TELEFONO_EQUIVOCADO", "note": ""})
+        self.assertFalse(CallNote.objects.exists())
+        self.client.post(
+            url, {"response": "TELEFONO_EQUIVOCADO", "note": "", "wrong_phone": "912345678"}
+        )
+        student.refresh_from_db()
+        self.assertEqual(student.phone, "987654321")
+        self.assertEqual(student.phones.count(), 2)
+        self.assertTrue(student.phones.get(number="912345678").invalid)
+        self.assertFalse(student.phones.get(number="987654321").invalid)
+        self.assertEqual(CallNote.objects.get().note, "Teléfono equivocado: 912345678")
+
+    def test_student_without_valid_phone_is_not_offered(self):
+        for student in Student.objects.filter(campus=self.campus):
+            student.phone = ""
+            student.save()
+        self._ask(self.u1)
+        self.assertFalse(CallClaim.objects.exists())
+
+    def test_wrong_number_with_a_single_phone_disables_it_without_choosing(self):
+        self._ask(self.u1)
+        student = CallClaim.objects.get().student
+        self.client.post(
+            reverse("calls-quick-note", args=[student.pk]),
+            {"response": "TELEFONO_EQUIVOCADO", "note": ""},
+        )
+        student.refresh_from_db()
+        self.assertEqual(student.phone, "")
+        self.assertTrue(student.phones.get().invalid)
+
+    def test_wrong_number_with_another_valid_phone_can_be_requested_again(self):
+        self._ask(self.u1)
+        student = CallClaim.objects.get().student
+        student.phone = "987654321, 912345678"
+        student.save()
+        StudentPhone.objects.create(student=student, number="987654321")
+        StudentPhone.objects.create(student=student, number="912345678")
+        self.client.post(
+            reverse("calls-quick-note", args=[student.pk]),
+            {"response": "TELEFONO_EQUIVOCADO", "note": "", "wrong_phone": "912345678"},
+        )
+        rows = self.client.get(reverse("calls-queue-status")).json()["history_rows"]
+        self.assertTrue(next(r for r in rows if r["id"] == student.pk)["retry"])
+        self.client.post(reverse("calls-queue"), {"accion": "pedir", "alumno": student.pk})
+        self.assertTrue(
+            CallClaim.objects.filter(student=student, status=CallClaim.Status.ACTIVE).exists()
+        )
+
+    def test_can_call_again_a_specific_student_who_did_not_answer(self):
+        self._ask(self.u1)
+        student_id = CallClaim.objects.get().student_id
+        self.client.post(
+            reverse("calls-quick-note", args=[student_id]),
+            {"response": "NO_CONTESTO", "note": ""},
+        )
+        page = self.client.get(reverse("calls-queue"))
+        self.assertContains(page, "Volver a llamar")
+        self.client.post(reverse("calls-queue"), {"accion": "pedir", "alumno": student_id})
+        self.assertTrue(
+            CallClaim.objects.filter(
+                user=self.u1, student_id=student_id, status=CallClaim.Status.ACTIVE
+            ).exists()
+        )
+
+    def test_status_includes_updated_history_table(self):
+        self._ask(self.u1)
+        student_id = CallClaim.objects.get().student_id
+        self.client.post(
+            reverse("calls-quick-note", args=[student_id]),
+            {"response": "NO_CONTESTO", "note": ""},
+        )
+        self._login(self.u2)
+        rows = self.client.get(reverse("calls-queue-status")).json()["history_rows"]
+        row = next(r for r in rows if r["id"] == student_id)
+        self.assertIs(row["answered"], False)
+        self.assertTrue(row["retry"])
+        self.assertEqual(row["url"], reverse("calls-notes", args=[student_id]))
+
+    def test_whatsapp_checkbox_is_saved_and_shown_to_the_team(self):
+        self._ask(self.u1)
+        student_id = CallClaim.objects.get().student_id
+        url = reverse("calls-whatsapp-mark", args=[student_id])
+        self.assertEqual(self.client.post(url, {"enviado": "1"}).status_code, 200)
+        self.client.post(url, {"enviado": "1"})
+        self.assertEqual(WhatsAppSend.objects.filter(student_id=student_id).count(), 1)
+        self._login(self.u2)
+        rows = self.client.get(reverse("calls-queue-status")).json()["history_rows"]
+        row = next(r for r in rows if r["id"] == student_id)
+        self.assertTrue(row["whatsapp"])
+        self.assertTrue(row["can_send"])
+        self.assertEqual(row["open_url"], reverse("calls-whatsapp-open", args=[student_id]))
+        self.assertFalse(next(r for r in rows if r["id"] != student_id)["whatsapp"])
+        self.client.post(url, {"enviado": "0"})
+        self.assertFalse(WhatsAppSend.objects.exists())
+
+    def test_whatsapp_send_button_redirects_without_marking_as_sent(self):
+        self._ask(self.u1)
+        student_id = CallClaim.objects.get().student_id
+        response = self.client.get(reverse("calls-whatsapp-open", args=[student_id]))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("https://api.whatsapp.com/send?phone=51"))
+        self.assertFalse(WhatsAppSend.objects.exists())
+
+    def test_whatsapp_endpoints_require_call_permission(self):
+        user = create_user(username="sinperm2", password="x" * 12)
+        user.campuses.add(self.campus)
+        self._login(user)
+        student = Student.objects.filter(campus=self.campus).first()
+        self.assertEqual(
+            self.client.post(
+                reverse("calls-whatsapp-mark", args=[student.pk]), {"enviado": "1"}
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.get(reverse("calls-whatsapp-open", args=[student.pk])).status_code, 403
+        )
+
+    def test_requires_permission(self):
+        user = create_user(username="sinperm", password="x" * 12)
+        user.campuses.add(self.campus)
+        self._login(user)
+        self.assertEqual(self.client.get(reverse("calls-queue")).status_code, 403)
 
 
 class CallWorkflowTests(TestCase):
@@ -445,32 +926,8 @@ class CallWorkflowTests(TestCase):
         page = self.client.get(reverse("calls-students"))
         self.assertContains(page, reverse("payment-create-for", args=[self.ana.pk]))
 
-    def test_bulk_move_passes_every_assignment_to_another_user(self):
-        other = self._user("otro", manage_calls=True)
-        CallAssignment.objects.create(user=self.caller, enrollment=self.ana)
-        CallAssignment.objects.create(user=self.caller, enrollment=self.beto)
-        CallAssignment.objects.create(user=other, enrollment=self.beto)
-        self.client.post(
-            reverse("calls-assignments"),
-            {"accion": "reasignar", "origen": self.caller.pk, "usuario": other.pk},
-        )
-        self.assertFalse(CallAssignment.objects.filter(user=self.caller).exists())
-        self.assertEqual(CallAssignment.objects.filter(user=other).count(), 2)
-
-    def test_bulk_split_shares_unassigned_enrollments_evenly(self):
-        other = self._user("otro", manage_calls=True)
-        extra = self._enroll("Carla", due=date(2999, 1, 1))
-        CallAssignment.objects.create(user=self.caller, enrollment=extra)
-        self.client.post(
-            reverse("calls-assignments"),
-            {"accion": "repartir", "reparto": [self.caller.pk, other.pk]},
-        )
-        self.assertEqual(CallAssignment.objects.filter(user=self.caller).count(), 2)
-        self.assertEqual(CallAssignment.objects.filter(user=other).count(), 1)
-
     def test_report_shows_assignment_progress_per_user(self):
-        CallAssignment.objects.create(user=self.caller, enrollment=self.ana)
-        CallAssignment.objects.create(user=self.caller, enrollment=self.beto)
+        make_list(self.campus, "Lista", [self.ana, self.beto], [self.caller])
         CallNote.objects.create(
             campus=self.campus, student=self.ana.student, author=self.caller, note="x"
         )

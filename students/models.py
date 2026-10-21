@@ -85,6 +85,11 @@ class StudentPhone(models.Model):
         Student, on_delete=models.CASCADE, related_name="phones", verbose_name="Estudiante"
     )
     number = models.CharField("Teléfono", max_length=20, validators=[single_phone_validator])
+    invalid = models.BooleanField(
+        "Inválido",
+        default=False,
+        help_text="Teléfono equivocado o inexistente; se conserva pero no se usa para llamar.",
+    )
 
     class Meta:
         ordering = ["id"]
@@ -111,8 +116,19 @@ def create_student_phones_from_legacy(student):
 
 
 def sync_legacy_student_phone(student):
-    student.phone = ", ".join(student.phones.values_list("number", flat=True))
+    """`Student.phone` guarda solo los teléfonos válidos; los inválidos quedan en StudentPhone."""
+    student.phone = ", ".join(student.phones.filter(invalid=False).values_list("number", flat=True))
     student.save(update_fields=["phone"])
+
+
+def mark_student_phone_invalid(student, number):
+    """Inhabilita un teléfono sin eliminarlo; devuelve True si existía y estaba habilitado."""
+    if student.phone and not student.phones.exists():
+        create_student_phones_from_legacy(student)
+    changed = student.phones.filter(number=number, invalid=False).update(invalid=True)
+    if changed:
+        sync_legacy_student_phone(student)
+    return bool(changed)
 
 
 class Course(models.Model):
