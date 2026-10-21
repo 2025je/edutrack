@@ -59,7 +59,7 @@ jobs:
         env:
           E2E_PASSWORD: ci-only-e2e-password
         run: |
-          docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python e2e/seed_ci.py
+          docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python -m e2e.seed_ci
           docker compose exec -T web sh -c 'printf "restore-check\n" > /app/media/ci-restore-check.txt'
 
       - name: Create and restore-test a one-time backup

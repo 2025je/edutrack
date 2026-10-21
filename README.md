@@ -215,6 +215,7 @@ El CI prueba Python **3.12 y 3.13**, conforme a `requires-python = ">=3.12,<3.14
 - **Despliegue** ([deploy.yml](./.github/workflows/deploy.yml)): manual desde GitHub Actions, con el entorno `production` para aprobación y rollback del contenedor si falla la verificación.
 
 El workflow de Docker crea `.env` temporal con credenciales ficticias y elimina los volúmenes al terminar. Los usuarios y la contraseña E2E se crean solo en esa base de datos efímera.
+La carga se ejecuta desde la raíz del proyecto con `python -m e2e.seed_ci`, para que Python pueda importar `config` y las aplicaciones Django.
 
 #### Preparar el despliegue manual
 

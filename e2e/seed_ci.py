@@ -32,7 +32,7 @@ def main():
 
     course, _ = Course.objects.get_or_create(
         campus=campus,
-        name="Curso E2E",
+        name="CURSO E2E",
         schedule="LUNES",
         group="1",
     )

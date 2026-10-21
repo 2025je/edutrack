@@ -91,7 +91,7 @@ jobs:
         run: docker compose up --build --wait --wait-timeout 300 web ws nginx
 
       - name: Seed fictitious browser-test data
-        run: docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python e2e/seed_ci.py
+        run: docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python -m e2e.seed_ci
 
       - name: Test Redis, nginx, static files, and WebSocket rejection
         run: uv run --no-sync -- python scripts/test_channels.py
