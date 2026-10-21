@@ -2604,8 +2604,6 @@ class EnrollmentUniquenessTests(TestCase):
 
 @skipUnlessDBFeature("has_select_for_update")
 class ConcurrentEnrollmentTests(TransactionTestCase):
-    reset_sequences = True
-
     def test_concurrent_duplicate_enrollments_are_rejected_by_the_database(self):
         campus = Campus.objects.create(name="Sede matrícula concurrente")
         student = Student.objects.create(campus=campus, full_name="Alumno único concurrente")

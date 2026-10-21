@@ -783,7 +783,6 @@ class PaymentAllocationIntegrityTests(TestCase):
 
 @skipUnlessDBFeature("has_select_for_update")
 class ConcurrentPaymentRegistrationTests(TransactionTestCase):
-    reset_sequences = True
     serialized_rollback = True
 
     def test_two_cashiers_cannot_collect_more_than_the_remaining_balance(self):
