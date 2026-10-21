@@ -2,6 +2,8 @@
 name = "edutrack"
 version = "0.1.0"
 description = "Sistema web para administrar estudiantes, matrículas y pagos"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "Django>=6.0,<6.1",
