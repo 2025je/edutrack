@@ -75,16 +75,15 @@ def filter_pending_enrollments(qs, get):
     query = param("q")
     if query:
         qs = qs.filter(
-            Q(student__full_name__unaccent__icontains=query)
-            | Q(course__name__unaccent__icontains=query)
+            Q(student__full_name__unaccent__wild=query) | Q(course__name__unaccent__wild=query)
         )
     if param("dni"):
-        qs = qs.filter(student__document_number__icontains=param("dni"))
+        qs = qs.filter(student__document_number__wild=param("dni"))
     if param("course"):
         course_id = number("course")
         qs = qs.filter(course_id=course_id) if course_id else qs.none()
     if param("schedule"):
-        qs = qs.filter(course__schedule__icontains=param("schedule"))
+        qs = qs.filter(course__schedule__wild=param("schedule"))
     if param("group"):
         qs = qs.filter(course__group__iexact=param("group"))
     if param("promoter"):

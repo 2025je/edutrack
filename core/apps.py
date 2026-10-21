@@ -6,7 +6,7 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self):
-        from . import activity  # noqa: F401  (conecta las señales de auditoría)
+        from . import activity, lookups  # noqa: F401  (señales de auditoría y lookup __wild)
         from .dashboard_cache import connect_signals
 
         connect_signals()

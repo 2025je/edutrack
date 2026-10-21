@@ -23,6 +23,7 @@ NOUNS = {
     "payments.paymentallocation": ("aplicación de pago", "aplicaciones de pago"),
     "calls.callnote": ("llamada", "llamadas"),
     "calls.callclaim": ("llamada en curso", "llamadas en curso"),
+    "calls.whatsappsend": ("marca de WhatsApp", "marcas de WhatsApp"),
     "calls.calllist": ("sublista de llamadas", "sublistas de llamadas"),
     "calls.calllistmember": ("usuario de sublista", "usuarios de sublistas"),
     "calls.whatsapptemplate": ("plantilla de WhatsApp", "plantillas de WhatsApp"),

@@ -490,7 +490,9 @@ class RoleGroupMatrixTests(TestCase):
         page = self.client.get(reverse("global-search"), {"q": "usuarios"})
         self.assertNotContains(page, f'href="{reverse("user-list")}"')
         page = self.client.get(reverse("global-search"), {"q": "segui"})
-        self.assertContains(page, f'href="{reverse("calls-students")}"')
+        self.assertNotContains(page, f'href="{reverse("calls-students")}"')
+        page = self.client.get(reverse("global-search"), {"q": "pedir"})
+        self.assertContains(page, f'href="{reverse("calls-queue")}"')
 
     def test_search_finds_subsections_and_quick_filters_and_returns_json(self):
         self.user_in("Administrador general")
@@ -519,11 +521,13 @@ class RoleGroupMatrixTests(TestCase):
         self.assertEqual(self.client.get(reverse("user-create")).status_code, 403)
         self.assertEqual(self.client.get(reverse("campus-list")).status_code, 403)
 
-    def test_call_manager_sees_calls_but_not_assignments(self):
+    def test_call_manager_sees_queue_but_not_follow_up_or_assignments(self):
         self.user_in("Gestor de llamadas")
-        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("calls-queue")).status_code, 200)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
         self.user_in("Asignador de llamadas")
+        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 200)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 200)
 
     def test_administrator_manages_users_and_campuses_without_superuser(self):

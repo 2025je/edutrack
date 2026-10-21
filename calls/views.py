@@ -195,9 +195,9 @@ class CallNoteAllListView(StudentNotesMixin, ListView):
         q = self.request.GET.get("q", "").strip()
         if q:
             qs = qs.filter(
-                Q(student__full_name__unaccent__icontains=q)
-                | Q(note__unaccent__icontains=q)
-                | Q(author__username__icontains=q)
+                Q(student__full_name__unaccent__wild=q)
+                | Q(note__unaccent__wild=q)
+                | Q(author__username__wild=q)
                 | Q(response__icontains=q.replace(" ", "_"))
             )
         return qs
@@ -208,6 +208,45 @@ class CallNoteAllListView(StudentNotesMixin, ListView):
         context["search_query"] = q
         context["pagination_query"] = urlencode({"q": q}) if q else ""
         return context
+
+
+def course_debts(request, student, all_courses=False):
+    """Cursos matriculados del alumno con lo facturado, pagado y adeudado en cada uno."""
+    if all_courses:
+        enrollments = Enrollment.objects.filter(
+            active=True, campus=get_selected_campus(request), student=student
+        )
+    else:
+        enrollments = visible_enrollments(request).filter(student=student)
+    enrollments = list(enrollments.select_related("course").order_by("course__name"))
+    ids = [e.pk for e in enrollments]
+    billed = dict(
+        Installment.objects.filter(enrollment__in=ids, active=True)
+        .values_list("enrollment")
+        .annotate(total=Sum("amount"))
+    )
+    paid = dict(
+        PaymentAllocation.objects.filter(
+            installment__enrollment__in=ids,
+            installment__active=True,
+            payment__status=Payment.Status.CONFIRMED,
+        )
+        .values_list("installment__enrollment")
+        .annotate(total=Sum("amount"))
+    )
+    return [
+        {
+            "enrollment_id": e.pk,
+            "course": e.course,
+            "course_label": e.course_label,
+            "enrollment_fee": e.enrollment_fee,
+            "monthly_fee": e.monthly_fee,
+            "total": billed.get(e.pk, ZERO),
+            "paid": paid.get(e.pk, ZERO),
+            "debt": max(billed.get(e.pk, ZERO) - paid.get(e.pk, ZERO), ZERO),
+        }
+        for e in enrollments
+    ]
 
 
 class CallNoteListView(StudentNotesMixin, TemplateView):
@@ -221,39 +260,7 @@ class CallNoteListView(StudentNotesMixin, TemplateView):
         notes = CallNote.objects.filter(student=student, campus=campus).select_related("author")
         context.update(paginate_context(self.request, notes, 25))
         context["notes"] = context["page_obj"]
-        enrollments = list(
-            visible_enrollments(self.request)
-            .filter(student=student)
-            .select_related("course")
-            .order_by("course__name")
-        )
-        ids = [e.pk for e in enrollments]
-        billed = dict(
-            Installment.objects.filter(enrollment__in=ids, active=True)
-            .values_list("enrollment")
-            .annotate(total=Sum("amount"))
-        )
-        paid = dict(
-            PaymentAllocation.objects.filter(
-                installment__enrollment__in=ids,
-                installment__active=True,
-                payment__status=Payment.Status.CONFIRMED,
-            )
-            .values_list("installment__enrollment")
-            .annotate(total=Sum("amount"))
-        )
-        context["courses"] = [
-            {
-                "course": e.course,
-                "course_label": e.course_label,
-                "enrollment_fee": e.enrollment_fee,
-                "monthly_fee": e.monthly_fee,
-                "total": billed.get(e.pk, ZERO),
-                "paid": paid.get(e.pk, ZERO),
-                "debt": max(billed.get(e.pk, ZERO) - paid.get(e.pk, ZERO), ZERO),
-            }
-            for e in enrollments
-        ]
+        context["courses"] = course_debts(self.request, student)
         context["total_debt"] = sum((c["debt"] for c in context["courses"]), ZERO)
         return context
 
@@ -400,6 +407,12 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
     context_object_name = "rows"
     paginate_by = 50
 
+    def get_required_permissions(self, request):
+        # El gestor trabaja desde la cola; el seguimiento es para quien supervisa o asigna.
+        if request.user.has_perm("core.assign_calls"):
+            return ("calls.view_callnote", "core.assign_calls")
+        return ("calls.view_callnote", "core.view_all_calls")
+
     ORDERS = {
         "": "Nombre",
         "deuda": "Mayor deuda",
@@ -447,7 +460,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
         ).distinct()
         q = self.request.GET.get("q", "").strip()
         if q:
-            students = students.filter(Q(full_name__unaccent__icontains=q) | Q(phone__icontains=q))
+            students = students.filter(Q(full_name__unaccent__wild=q) | Q(phone__wild=q))
         students = list(students.order_by("full_name"))
 
         enrollments = list(
@@ -649,7 +662,12 @@ class CallQuickNoteView(StudentNotesMixin, TemplateView):
         if not url_has_allowed_host_and_scheme(
             target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
         ):
-            target = reverse("calls-students")
+            target = reverse(
+                "calls-students"
+                if request.user.has_perm("core.view_all_calls")
+                or request.user.has_perm("core.assign_calls")
+                else "calls-queue"
+            )
         return redirect(target)
 
 
@@ -800,12 +818,8 @@ class CallQueueView(CallQueueMixin, TemplateView):
         if claim:
             student = claim.student
             context["phones"] = [p.strip() for p in student.phone.split(",") if p.strip()]
-            context["enrollments"] = (
-                visible_enrollments(self.request)
-                .filter(student=student)
-                .select_related("course")
-                .order_by("course__name")
-            )
+            context["courses"] = course_debts(self.request, student, all_courses=True)
+            context["total_debt"] = sum((c["debt"] for c in context["courses"]), ZERO)
             context["last_note"] = student.call_notes.select_related("author").first()
         return context
 
@@ -995,7 +1009,7 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
         f = self.get_filters(params)
         qs = self.get_base_enrollments().select_related("student", "course")
         if f["q"]:
-            qs = qs.filter(student__full_name__unaccent__icontains=f["q"])
+            qs = qs.filter(student__full_name__unaccent__wild=f["q"])
         for key, lookup in (
             ("matricula_desde", "enrollment_date__gte"),
             ("matricula_hasta", "enrollment_date__lte"),

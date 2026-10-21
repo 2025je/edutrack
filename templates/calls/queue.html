@@ -9,6 +9,10 @@
   .queue-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px;align-items:start}
   @media (max-width:992px){.queue-grid{grid-template-columns:1fr}}
   .queue-phone{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(128,128,128,.5);border-radius:20px;padding:6px 14px;margin:0 8px 8px 0;font-size:1.1rem;color:inherit}
+  .queue-debt{margin:4px 0 12px}
+  .queue-course{padding:8px 0;border-bottom:1px solid rgba(128,128,128,.25);line-height:1.4}
+  .queue-total{padding-top:8px}
+  .queue-debt .material-icons.tiny{vertical-align:middle}
   .queue-team li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(128,128,128,.25)}
   .queue-team li:first-child{border-top:0}
   .queue-toast{position:fixed;right:16px;bottom:16px;z-index:1000;max-width:320px;background:#1565c0;color:#fff;padding:12px 16px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3)}
@@ -20,7 +24,16 @@
     <h5 class="strong mt">{{ claim.student.full_name }}</h5>
     <p class="muted">Reservado a las {{ claim.started_at|time:"H:i" }}; se libera solo tras {{ minutes }} minutos sin registrar la llamada.</p>
     <div>{% for p in phones %}<a class="queue-phone" href="tel:+51{{ p }}"><i class="material-icons" aria-hidden="true">call</i>{{ p }}</a>{% empty %}<span class="muted">Sin teléfonos registrados.</span>{% endfor %}</div>
-    {% if enrollments %}<ul>{% for e in enrollments %}<li>{{ e.course_label }}</li>{% endfor %}</ul>{% endif %}
+    {% if courses %}
+    <div class="queue-debt">
+      {% for c in courses %}<div class="queue-course">
+        <div class="strong"><i class="material-icons tiny">school</i> {{ c.course.name }}</div>
+        <div class="small muted"><i class="material-icons tiny">schedule</i> {{ c.course.schedule }} · Grupo {{ c.course.group }}{% if c.course.start_date %} · <i class="material-icons tiny">event</i> Inicio: {{ c.course.start_date|date:"d/m/Y" }}{% endif %}</div>
+        <div class="small"><i class="material-icons tiny">sell</i> Costo: S/ {{ c.total|floatformat:2 }} · <span class="{% if c.debt > 0 %}danger strong{% endif %}">{% if c.debt > 0 %}<i class="material-icons tiny red-text text-lighten-1" title="Con deuda">error</i>{% else %}<i class="material-icons tiny green-text text-lighten-1" title="Al día">check_circle</i>{% endif %} Deuda: S/ {{ c.debt|floatformat:2 }}</span></div>
+      </div>{% endfor %}
+      <div class="queue-total strong{% if total_debt > 0 %} danger{% endif %}"><i class="material-icons tiny">account_balance_wallet</i> Deuda total: S/ {{ total_debt|floatformat:2 }}</div>
+    </div>
+    {% endif %}
     {% if last_note %}<p class="muted">Última llamada: {{ last_note.created_at|date:"d/m/Y" }} · {{ last_note.get_response_display }}{% if last_note.note %} · {{ last_note.note|truncatechars:80 }}{% endif %}</p>{% endif %}
     <form method="post" action="{% url 'calls-quick-note' claim.student.pk %}" class="mt">
       {% csrf_token %}<input type="hidden" name="next" value="{% url 'calls-queue' %}">
@@ -57,6 +70,9 @@
     #history .wa-cell{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
     #history .wa-send{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:1px solid #25d366;color:#4cd98a!important;font-weight:500;font-size:13px;text-decoration:none;transition:background .15s}
     #history .wa-send:hover{background:rgba(37,211,102,.16)}
+    #history .redial{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:16px;border:1px solid #42a5f5;background:transparent;color:#64b5f6;font-weight:500;font-size:13px;text-transform:none;letter-spacing:0;cursor:pointer;transition:background .15s}
+    #history .redial:hover{background:rgba(66,165,245,.16)}
+    #history .redial .material-icons{font-size:18px;line-height:1;margin:0;float:none;height:auto}
     #history .wa-send .material-icons,#history .wa-none .material-icons{font-size:18px}
     #history .wa-none{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:1px dashed rgba(128,128,128,.5);color:#9e9e9e;font-size:13px}
     #history .wa-check{position:relative;margin:0;cursor:pointer}
@@ -117,7 +133,7 @@
         : "<span class=\"wa-none\" title=\"El alumno no tiene un teléfono válido\"><i class=\"material-icons\" aria-hidden=\"true\">phone_disabled</i>Sin teléfono</span>")
       + "<label class=\"wa-check\" title=\"Marca cuando hayas enviado el WhatsApp\"><input type=\"checkbox\" data-wa-mark=\"" + esc(r.mark_url) + "\"" + (r.whatsapp ? " checked" : "") + "><b class=\"wa-chip\"><i class=\"material-icons off\" aria-hidden=\"true\">radio_button_unchecked</i><i class=\"material-icons on\" aria-hidden=\"true\">check_circle</i>Enviado</b></label></div>";
     var retry = r.retry
-      ? "<form method=\"post\" action=\"" + queueUrl + "\" class=\"mb-0\"><input type=\"hidden\" name=\"csrfmiddlewaretoken\" value=\"" + csrf + "\"><input type=\"hidden\" name=\"accion\" value=\"pedir\"><input type=\"hidden\" name=\"alumno\" value=\"" + r.id + "\"><button class=\"btn-flat blue-text\" type=\"submit\"><i class=\"material-icons left\" aria-hidden=\"true\">phone_forwarded</i>Volver a llamar</button></form>"
+      ? "<form method=\"post\" action=\"" + queueUrl + "\" class=\"mb-0\"><input type=\"hidden\" name=\"csrfmiddlewaretoken\" value=\"" + csrf + "\"><input type=\"hidden\" name=\"accion\" value=\"pedir\"><input type=\"hidden\" name=\"alumno\" value=\"" + r.id + "\"><button class=\"redial\" type=\"submit\" title=\"Volver a llamar a este alumno\"><i class=\"material-icons\" aria-hidden=\"true\">phone_forwarded</i>Volver a llamar</button></form>"
       : "";
     return [
       "<a class=\"student-link\" href=\"" + esc(r.url) + "\" title=\"Ver historial de llamadas\">" + esc(r.name) + "</a>",

@@ -1210,6 +1210,47 @@ class StudentEnrollmentCrudTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("student", response.context["form"].errors)
 
+    def test_text_filters_support_wildcards_and_treat_percent_literally(self):
+        Student.objects.create(
+            campus=self.campus,
+            full_name="PEREZ GOMEZ ANA",
+            last_name="Perez Gomez",
+            first_name="Ana",
+        )
+        Student.objects.create(
+            campus=self.campus, full_name="PEREZ LUIS", last_name="Perez", first_name="Luis"
+        )
+        url = reverse("enrollment-create")
+        page = self.client.get(url, {"apellidos": "pe*z", "nombres": "an?"})
+        self.assertContains(page, "PEREZ GOMEZ ANA")
+        self.assertNotContains(page, "PEREZ LUIS")
+        self.assertContains(self.client.get(url, {"q": "pe*luis"}), "PEREZ LUIS")
+        self.assertNotContains(self.client.get(url, {"apellidos": "pe%"}), "PEREZ LUIS")
+        self.assertNotContains(self.client.get(url, {"apellidos": "p_rez"}), "PEREZ LUIS")
+        self.assertContains(self.client.get(url, {"apellidos": "p?rez"}), "PEREZ LUIS")
+
+    def test_enrollment_selection_filters_by_last_and_first_name_and_prefills_new_student(self):
+        Student.objects.create(
+            campus=self.campus,
+            full_name="PEREZ GOMEZ ANA",
+            last_name="Perez Gomez",
+            first_name="Ana",
+        )
+        Student.objects.create(
+            campus=self.campus, full_name="PEREZ LUIS", last_name="Perez", first_name="Luis"
+        )
+        page = self.client.get(
+            reverse("enrollment-create"), {"apellidos": "perez", "nombres": "ana"}
+        )
+        self.assertContains(page, "PEREZ GOMEZ ANA")
+        self.assertNotContains(page, "PEREZ LUIS")
+        self.assertContains(page, "last_name=perez&amp;first_name=ana")
+        form = self.client.get(
+            reverse("student-create"), {"last_name": "peña", "first_name": "ana"}
+        )
+        self.assertEqual(form.context["form"].initial["last_name"], "PEÑA")
+        self.assertEqual(form.context["form"].initial["first_name"], "ANA")
+
     def test_enrollment_creation_saves_user_selected_date(self):
         new_student = Student.objects.create(
             campus=self.campus,
@@ -1218,10 +1259,14 @@ class StudentEnrollmentCrudTests(TestCase):
         response = self.client.get(reverse("enrollment-create"))
         self.assertContains(response, "selecciona un estudiante")
         self.assertContains(response, new_student.full_name)
-        self.assertContains(response, 'id="student-search"')
+        self.assertContains(response, 'name="apellidos"')
+        self.assertContains(response, 'name="nombres"')
         filtered = self.client.get(reverse("enrollment-create"), {"q": "fecha elegida"})
         self.assertContains(filtered, new_student.full_name)
         self.assertNotContains(filtered, self.student.full_name)
+        by_name = self.client.get(reverse("enrollment-create"), {"nombres": "fecha"})
+        self.assertContains(by_name, new_student.full_name)
+        self.assertNotContains(by_name, self.student.full_name)
         response = self.client.get(reverse("enrollment-create"), {"student": new_student.pk})
         self.assertContains(response, 'type="date"')
         self.assertContains(response, f'value="{timezone.localdate():%Y-%m-%d}"')

@@ -270,7 +270,7 @@ TOUR = [
                 "core.assign_calls",
             ],
         ],
-        any_of=("calls.view_callnote",),
+        any_of=("core.view_all_calls", "core.assign_calls"),
     ),
     _view(
         "calls-queue",

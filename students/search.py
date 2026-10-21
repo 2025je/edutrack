@@ -7,9 +7,7 @@ def filter_students(queryset, query, with_fichas=False):
 
     for word in query.split()[:6]:
         condition = (
-            Q(full_name__unaccent__icontains=word)
-            | Q(document_number__icontains=word)
-            | Q(phone__icontains=word)
+            Q(full_name__unaccent__wild=word) | Q(document_number__wild=word) | Q(phone__wild=word)
         )
         if with_fichas and word.isdigit() and len(word) <= 9:
             condition |= Q(

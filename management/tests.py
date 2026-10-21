@@ -4,6 +4,7 @@ import tempfile
 
 from core.models import Campus, User
 from core.testing import create_user, feature_group
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -492,6 +493,15 @@ class UserUpdateTests(TestCase):
         response = self.client.get(reverse("user-list"), {"q": "caj"})
         self.assertContains(response, "cajero")
         self.assertNotContains(self.client.get(reverse("user-list"), {"q": "zzz"}), "cajero")
+
+    def test_list_marks_the_groups_each_user_belongs_to(self):
+        group = Group.objects.create(name="Grupo marcado")
+        Group.objects.create(name="Grupo vacío")
+        self.target.groups.add(group)
+        response = self.client.get(reverse("user-list"), {"q": "caj"})
+        self.assertContains(response, "Grupo vacío")
+        self.assertContains(response, "Pertenece a Grupo marcado")
+        self.assertNotContains(response, "Pertenece a Grupo vacío")
 
     def test_edit_updates_username_permissions_and_campuses_keeping_password(self):
         response = self.client.post(self.url, self.payload(username="cajero2"))

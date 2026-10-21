@@ -8,13 +8,18 @@
   <div class="field-row-end"><div style="flex:1;min-width:220px"><label for="q">Buscar usuario</label><input id="q" type="search" name="q" value="{{ q }}"></div><button class="btn" type="submit">Buscar</button></div>
 </form>
 <div data-live-region="results">
-<div class="card table-wrap"><table class="highlight"><thead><tr><th>Usuario</th><th>Sedes</th><th>Estado</th><th class="no-print">Acciones</th></tr></thead><tbody>
+<style>
+  .user-matrix .group-col{min-width:84px;max-width:110px;font-size:12px;line-height:1.2;white-space:normal;vertical-align:bottom}
+  .user-matrix td .material-icons{font-size:22px;vertical-align:middle}
+</style>
+<div class="card table-wrap"><table class="highlight user-matrix"><thead><tr><th>Usuario</th><th>Sedes</th>{% for g in groups %}<th class="center-align group-col" title="{{ g.name }}"><span>{{ g.name }}</span></th>{% endfor %}<th>Estado</th><th class="no-print">Acciones</th></tr></thead><tbody>
 {% for u in users %}<tr>
-  <td class="strong">{{ u.username }}</td>
+  <td class="strong">{{ u.username }}{% if u.is_superuser %} <span class="muted small">(superusuario)</span>{% endif %}</td>
   <td>{% for campus in u.campuses.all %}{{ campus.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">Sin sedes</span>{% endfor %}</td>
+  {% for g in groups %}<td class="center-align">{% if g.pk in u.group_ids %}<i class="material-icons green-text text-lighten-1" title="Pertenece a {{ g.name }}" aria-label="Pertenece a {{ g.name }}">check_circle</i>{% else %}<span class="muted" aria-hidden="true">·</span>{% endif %}</td>{% endfor %}
   <td>{% if u.is_active %}Activo{% else %}<span class="muted">Inactivo</span>{% endif %}</td>
   <td class="no-print">{% if perms.core.manage_user_access %}<a class="blue-text" href="{% url 'user-update' u.pk %}" title="Editar"><i class="material-icons tiny">edit</i></a>{% endif %}</td>
-</tr>{% empty %}<tr><td colspan="4" class="center-align muted">No hay usuarios con estos criterios.</td></tr>{% endfor %}
+</tr>{% empty %}<tr><td colspan="{{ groups|length|add:4 }}" class="center-align muted">No hay usuarios con estos criterios.</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="mt">{% include "shared/pagination.html" %}</div>
 </div>

@@ -191,6 +191,15 @@ class StudentCreateView(StudentPhoneFormMixin, CampusScopedMixin, CreateView):
     success_url = reverse_lazy("student-list")
     success_message = "Estudiante registrado correctamente."
 
+    def get_initial(self):
+        initial = super().get_initial()
+        # Viene de «+ Nuevo estudiante» en la selección de matrícula.
+        for field in ("last_name", "first_name"):
+            value = self.request.GET.get(field, "").strip()[:120]
+            if value:
+                initial[field] = value.upper()
+        return initial
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
@@ -337,10 +346,10 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             )
         )
         filters = {
-            "student__full_name__unaccent__icontains": self.request.GET.get("student", "").strip(),
-            "course__name__unaccent__icontains": self.request.GET.get("course", "").strip(),
+            "student__full_name__unaccent__wild": self.request.GET.get("student", "").strip(),
+            "course__name__unaccent__wild": self.request.GET.get("course", "").strip(),
             "ficha__code__icontains": self.request.GET.get("record_code", "").strip(),
-            "promoter__name__unaccent__icontains": self.request.GET.get("promoter", "").strip(),
+            "promoter__name__unaccent__wild": self.request.GET.get("promoter", "").strip(),
         }
         for field, value in filters.items():
             if value:
@@ -375,10 +384,10 @@ class EnrollmentListView(CampusScopedMixin, ListView):
             qs = qs.filter(total_debt=0)
         document = self.request.GET.get("document", "").strip()
         if document:
-            qs = qs.filter(student__document_number__icontains=document)
+            qs = qs.filter(student__document_number__wild=document)
         schedule = self.request.GET.get("schedule", "").strip()
         if schedule:
-            qs = qs.filter(course__schedule__unaccent__icontains=schedule)
+            qs = qs.filter(course__schedule__unaccent__wild=schedule)
         group = self.request.GET.get("group", "").strip()
         if group:
             qs = qs.filter(course__group__iexact=group)
@@ -778,6 +787,15 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
         q = self.request.GET.get("q", "").strip()
         if q:
             students = filter_students(students, q)
+        last_name = self.request.GET.get("apellidos", "").strip()
+        first_name = self.request.GET.get("nombres", "").strip()
+        for field, text in (("last_name", last_name), ("first_name", first_name)):
+            for word in text.split()[:6]:
+                # Los alumnos antiguos sin apellidos/nombres separados se buscan en el nombre completo.
+                students = students.filter(
+                    Q(**{f"{field}__unaccent__wild": word})
+                    | Q(**{field: "", "full_name__unaccent__wild": word})
+                )
         paginator = Paginator(students, self.students_per_page)
         page_obj = paginator.get_page(self.request.GET.get("page"))
         pagination_query = self.request.GET.copy()
@@ -791,6 +809,8 @@ class EnrollmentCreateView(CampusScopedMixin, CreateView):
                 "is_paginated": page_obj.has_other_pages(),
                 "pagination_query": pagination_query.urlencode(),
                 "q": q,
+                "last_name": last_name,
+                "first_name": first_name,
             },
         )
 
@@ -1006,9 +1026,9 @@ def course_students_queryset(request):
     query = request.GET.get("q", "").strip()
     if query:
         qs = qs.filter(
-            Q(name__unaccent__icontains=query)
-            | Q(schedule__unaccent__icontains=query)
-            | Q(group__unaccent__icontains=query)
+            Q(name__unaccent__wild=query)
+            | Q(schedule__unaccent__wild=query)
+            | Q(group__unaccent__wild=query)
         )
     return qs
 

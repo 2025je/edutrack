@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from io import StringIO
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -275,16 +276,15 @@ class CallAssignmentTests(TestCase):
         session["selected_campus_id"] = self.campus.pk
         session.save()
 
-    def test_caller_without_assignments_sees_nothing(self):
+    def test_caller_cannot_open_follow_up_and_sees_nothing_without_assignments(self):
         self._login(self.caller)
-        self.assertEqual(self.client.get(reverse("calls-students")).context["rows"], [])
+        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
         self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 0)
 
     def test_caller_sees_only_assigned_enrollments_and_their_history(self):
         make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
         self._login(self.caller)
-        rows = self.client.get(reverse("calls-students")).context["rows"]
-        self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
         notes = self.client.get(reverse("calls-notes-all")).context["notes"]
         self.assertEqual([n.student.full_name for n in notes], ["ANA"])
         other = self.enrollments[1].student
@@ -369,8 +369,8 @@ class CallAssignmentTests(TestCase):
         self.assertEqual(call_list.members.count(), 2)
         for user in (self.caller, second):
             self._login(user)
-            rows = self.client.get(reverse("calls-students")).context["rows"]
-            self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+            notes = self.client.get(reverse("calls-notes-all")).context["notes"]
+            self.assertEqual([n.student.full_name for n in notes], ["ANA"])
 
     def test_user_already_in_another_list_cannot_be_assigned(self):
         first = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
@@ -479,11 +479,11 @@ class CallAssignmentTests(TestCase):
         self.assertEqual(call_list.members.count(), 2)
         self.assertEqual([e.student.full_name for e in call_list.enrollments.all()], ["ANA"])
         self._login(self.caller)
-        self.assertEqual(self.client.get(reverse("calls-students")).context["rows"], [])
+        self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 0)
         call_list.active = True
         call_list.save()
-        rows = self.client.get(reverse("calls-students")).context["rows"]
-        self.assertEqual([r["student"].full_name for r in rows], ["ANA"])
+        notes = self.client.get(reverse("calls-notes-all")).context["notes"]
+        self.assertEqual([n.student.full_name for n in notes], ["ANA"])
 
     def test_create_with_a_busy_user_is_rejected_without_creating_the_list(self):
         make_list(self.campus, "Lista A", [], [self.caller])
@@ -599,6 +599,26 @@ class CallQueueTests(TestCase):
         self._ask(self.u2)
         students = set(CallClaim.objects.values_list("student_id", flat=True))
         self.assertEqual(len(students), 2)
+
+    def test_claim_card_lists_every_course_with_debt_and_total(self):
+        student = self.enrollments[0].student
+        other = Course.objects.create(campus=self.campus, name="Redes", schedule="M", group="B")
+        second = Enrollment.objects.create(campus=self.campus, student=student, course=other)
+        for enrollment, amount in ((self.enrollments[0], "100"), (second, "50")):
+            Installment.objects.create(
+                enrollment=enrollment,
+                concept="Cuota",
+                amount=Decimal(amount),
+                due_date=date.today(),
+            )
+        CallClaim.objects.create(
+            campus=self.campus, user=self.u1, call_list=self.call_list, student=student
+        )
+        self._login(self.u1)
+        page = self.client.get(reverse("calls-queue"))
+        self.assertContains(page, "INGLES")
+        self.assertContains(page, "REDES")
+        self.assertContains(page, "Deuda total: S/ 150,00")
 
     def test_asking_twice_keeps_same_claim(self):
         self._ask(self.u1)
@@ -796,6 +816,22 @@ class CallQueueTests(TestCase):
         self.assertIs(row["answered"], False)
         self.assertTrue(row["retry"])
         self.assertEqual(row["url"], reverse("calls-notes", args=[student_id]))
+
+    def test_clear_calls_command_deletes_activity_but_keeps_lists(self):
+        from django.core.management import call_command
+
+        student = self.enrollments[0].student
+        CallNote.objects.create(campus=self.campus, student=student, author=self.u1, note="x")
+        CallClaim.objects.create(
+            campus=self.campus, user=self.u1, call_list=self.call_list, student=student
+        )
+        WhatsAppSend.objects.create(campus=self.campus, student=student, user=self.u1)
+        call_command("clear_calls", "--yes", stdout=StringIO())
+        self.assertEqual(CallNote.objects.count(), 0)
+        self.assertEqual(CallClaim.objects.count(), 0)
+        self.assertEqual(WhatsAppSend.objects.count(), 0)
+        self.assertEqual(CallList.objects.count(), 1)
+        self.assertEqual(Student.objects.count(), 3)
 
     def test_whatsapp_checkbox_is_saved_and_shown_to_the_team(self):
         self._ask(self.u1)

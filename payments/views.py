@@ -84,9 +84,9 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
         receipt = self.request.GET.get("receipt", "").strip()
         student = self.request.GET.get("student", "").strip()
         if receipt:
-            qs = qs.filter(receipt_number__icontains=receipt)
+            qs = qs.filter(receipt_number__wild=receipt)
         if student:
-            qs = qs.filter(enrollment__student__full_name__unaccent__icontains=student)
+            qs = qs.filter(enrollment__student__full_name__unaccent__wild=student)
         for parameter, lookup in (
             ("date_from", "created_at__date__gte"),
             ("date_to", "created_at__date__lte"),
@@ -100,13 +100,13 @@ class PaymentListView(SelectedCampusViewMixin, ListView):
             qs = qs.filter(status=status)
         course = self.request.GET.get("course", "").strip()
         if course:
-            qs = qs.filter(enrollment__course__name__unaccent__icontains=course)
+            qs = qs.filter(enrollment__course__name__unaccent__wild=course)
         cashier = self.request.GET.get("cashier", "").strip()
         if cashier:
-            qs = qs.filter(cashier__username__icontains=cashier)
+            qs = qs.filter(cashier__username__wild=cashier)
         reference = self.request.GET.get("reference", "").strip()
         if reference:
-            qs = qs.filter(reference__icontains=reference)
+            qs = qs.filter(reference__wild=reference)
         for parameter, lookup in (("amount_min", "amount__gte"), ("amount_max", "amount__lte")):
             value = self.request.GET.get(parameter, "").strip()
             if value:
@@ -574,9 +574,9 @@ class PendingDebtsView(SelectedCampusViewMixin, ListView):
         q = self.request.GET.get("q", "").strip()
         if q:
             qs = qs.filter(
-                Q(enrollment__student__full_name__unaccent__icontains=q)
-                | Q(enrollment__course__name__unaccent__icontains=q)
-                | Q(concept__unaccent__icontains=q)
+                Q(enrollment__student__full_name__unaccent__wild=q)
+                | Q(enrollment__course__name__unaccent__wild=q)
+                | Q(concept__unaccent__wild=q)
             )
         return qs
 

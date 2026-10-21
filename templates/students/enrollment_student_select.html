@@ -1,7 +1,22 @@
 {% extends "base.html" %}{% block title %}Nueva matrícula · EduTrack{% endblock %}
 {% block content %}
 <div class="flex between items-center wrap gap mb"><h1 class="mb-0">Nueva matrícula: selecciona un estudiante</h1><a class="btn-flat grey-text text-darken-2" href="{% url 'enrollment-list' %}">Cancelar</a></div>
-<form data-live-filter class="row" method="get"><div class="col s12 m6"><input id="student-search" name="q" value="{{ q }}" placeholder="Buscar nombre, DNI o teléfono" autocomplete="off" autofocus></div><div class="col s12 m6"><button class="btn-flat grey-text text-darken-2">Buscar</button> {% if perms.students.add_student %}<a class="btn-flat blue-text" href="{% url 'student-create' %}">+ Nuevo estudiante</a> {% endif %}<a class="btn-flat blue-text" href="{% url 'enrollment-create' %}?sin_estudiante=1">Matrícula sin estudiante</a></div></form>
+<form data-live-filter class="row" method="get"><div class="col s12 m4"><label for="student-last-name">Apellidos</label><input id="student-last-name" name="apellidos" value="{{ last_name }}" placeholder="Apellidos" autocomplete="off" autofocus></div><div class="col s12 m4"><label for="student-first-name">Nombres</label><input id="student-first-name" name="nombres" value="{{ first_name }}" placeholder="Nombres" autocomplete="off"></div><div class="col s12 m4"><button class="btn-flat grey-text text-darken-2">Buscar</button> {% if perms.students.add_student %}<a id="new-student-link" class="btn-flat blue-text" data-base="{% url 'student-create' %}" href="{% url 'student-create' %}?last_name={{ last_name|urlencode }}&amp;first_name={{ first_name|urlencode }}">+ Nuevo estudiante</a> {% endif %}<a class="btn-flat blue-text" href="{% url 'enrollment-create' %}?sin_estudiante=1">Matrícula sin estudiante</a></div></form>
+<p class="muted small">Comodines: <strong>*</strong> reemplaza varias letras (pe*z) y <strong>?</strong> una sola (p?rez).</p>
+<script>
+(function () {
+  var link = document.getElementById("new-student-link");
+  var last = document.getElementById("student-last-name");
+  var first = document.getElementById("student-first-name");
+  if (!link || !last || !first) return;
+  function sync() {
+    var params = new URLSearchParams({last_name: last.value.trim(), first_name: first.value.trim()});
+    link.href = link.dataset.base + "?" + params.toString();
+  }
+  last.addEventListener("input", sync);
+  first.addEventListener("input", sync);
+})();
+</script>
 <div data-live-region="results">
 <div class="card table-wrap"><table class="highlight"><thead><tr><th>Nombre</th><th>DNI</th><th>Celular</th><th class="right-align">Acciones</th></tr></thead><tbody>
 {% for s in students %}<tr><td>{{ s.full_name }}</td><td>{{ s.document_number|default:"—" }}</td><td>{{ s.phone|default:"—" }}</td><td class="right-align"><a class="btn-small blue darken-2" href="{% url 'enrollment-create' %}?student={{ s.pk }}">Matricular</a> <form method="post" action="{% url 'enrollment-create' %}?student={{ s.pk }}" style="display:inline">{% csrf_token %}<input type="hidden" name="student" value="{{ s.pk }}"><input type="hidden" name="pending_course" value="1"><button class="btn-small grey darken-1" type="submit">Matrícula sin curso</button></form></td></tr>{% empty %}<tr><td colspan="4" class="center-align muted">No hay estudiantes activos que coincidan.</td></tr>{% endfor %}

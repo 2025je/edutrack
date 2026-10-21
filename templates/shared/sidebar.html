@@ -53,7 +53,7 @@
   {% if perms.calls.view_callnote or perms.core.view_call_reports %}
   <li><div class="subheader">Llamadas</div></li>
   {% if perms.calls.view_callnote %}
-  <li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Seguimiento</a></li>
+  {% if perms.core.view_all_calls or perms.core.assign_calls %}<li><a href="{% url 'calls-students' %}"><i class="material-icons">phone_in_talk</i>Seguimiento</a></li>{% endif %}
   {% if perms.calls.add_callnote %}<li><a href="{% url 'calls-queue' %}"><i class="material-icons">phone_forwarded</i>Pedir llamada</a></li>{% endif %}
   <li><a href="{% url 'calls-notes-all' %}"><i class="material-icons">forum</i>Historial</a></li>
     {% if perms.calls.add_callnote %}<li><a href="{% url 'calls-template' %}"><i class="material-icons">chat</i>Plantilla de WhatsApp</a></li>{% endif %}

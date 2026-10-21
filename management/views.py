@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.contrib.auth.models import Group
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
 from django.db.models import Count, Q
@@ -148,15 +149,18 @@ class UserListView(UserManagementMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        users = manageable_users(self.request.user).prefetch_related("campuses")
+        users = manageable_users(self.request.user).prefetch_related("campuses", "groups")
         q = self.request.GET.get("q", "").strip()
         if q:
-            users = users.filter(username__icontains=q)
+            users = users.filter(username__wild=q)
         return users.order_by("username")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["q"] = self.request.GET.get("q", "").strip()
+        context["groups"] = Group.objects.order_by("name")
+        for user in context["users"]:
+            user.group_ids = {g.pk for g in user.groups.all()}
         return context
 
 
@@ -329,7 +333,7 @@ class ActivityLogView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             logs = logs.filter(campus_id=int(get["campus"]))
         text = get.get("q", "").strip()
         if text:
-            logs = logs.filter(Q(description__icontains=text) | Q(path__icontains=text))
+            logs = logs.filter(Q(description__wild=text) | Q(path__wild=text))
         date_from = parse_date(get.get("date_from", ""))
         date_to = parse_date(get.get("date_to", ""))
         if date_from:
