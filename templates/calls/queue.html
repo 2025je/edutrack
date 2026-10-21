@@ -9,10 +9,30 @@
   .queue-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px;align-items:start}
   @media (max-width:992px){.queue-grid{grid-template-columns:1fr}}
   .queue-phone{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(128,128,128,.5);border-radius:20px;padding:6px 14px;margin:0 8px 8px 0;font-size:1.1rem;color:inherit}
-  .queue-debt{margin:4px 0 12px}
-  .queue-course{padding:8px 0;border-bottom:1px solid rgba(128,128,128,.25);line-height:1.4}
-  .queue-total{padding-top:8px}
-  .queue-debt .material-icons.tiny{vertical-align:middle}
+  .debt-panel{border:1px solid var(--md-border);border-radius:8px;margin:14px 0;overflow:hidden}
+  .debt-summary{display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px;padding:14px 16px;border-left:5px solid #c62828;background:rgba(198,40,40,.07)}
+  .debt-summary.clear{border-left-color:#2e7d32;background:rgba(46,125,50,.08)}
+  .debt-label{display:block;font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--md-muted)}
+  .debt-amount{font-size:2rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+  .debt-stat{display:block;font-size:1.1rem;font-weight:600;font-variant-numeric:tabular-nums}
+  .debt-note{display:block}
+  .debt-ok{color:#2e7d32}
+  html[data-theme=dark] .debt-ok{color:#a5d6a7}
+  .debt-course{padding:12px 16px;border-top:1px solid var(--md-border)}
+  .debt-course-head{display:flex;justify-content:space-between;align-items:baseline;gap:4px 12px;flex-wrap:wrap}
+  .debt-course .material-icons.tiny,.debt-hint .material-icons.tiny{vertical-align:middle;font-size:1rem}
+  .debt-hint{margin:0;padding:6px 16px}
+  .debt-items{margin:10px 0 0;padding:0;list-style:none}
+  .debt-items li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:4px 12px;align-items:center;padding:6px 0;border-top:1px dashed var(--md-border);font-size:.92rem}
+  .debt-items .amount{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  .debt-tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap;background:rgba(128,128,128,.18)}
+  .debt-tag.late{background:rgba(198,40,40,.15);color:#c62828}
+  .debt-tag.today{background:rgba(239,108,0,.18);color:#e65100}
+  .debt-tag.paid{background:rgba(46,125,50,.15);color:#2e7d32}
+  html[data-theme=dark] .debt-tag.paid{color:#a5d6a7}
+  html[data-theme=dark] .debt-tag.late{color:#ef9a9a}
+  html[data-theme=dark] .debt-tag.today{color:#ffcc80}
+  @media (max-width:600px){.debt-items li{grid-template-columns:minmax(0,1fr) auto}.debt-items .debt-tag{grid-column:1/-1;justify-self:start}}
   .queue-team li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(128,128,128,.25)}
   .queue-team li:first-child{border-top:0}
   .queue-toast{position:fixed;right:16px;bottom:16px;z-index:1000;max-width:320px;background:#1565c0;color:#fff;padding:12px 16px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3)}
@@ -25,14 +45,40 @@
     <p class="muted">Reservado a las {{ claim.started_at|time:"H:i" }}; se libera solo tras {{ minutes }} minutos sin registrar la llamada.</p>
     <div>{% for p in phones %}<a class="queue-phone" href="tel:+51{{ p }}"><i class="material-icons" aria-hidden="true">call</i>{{ p }}</a>{% empty %}<span class="muted">Sin teléfonos registrados.</span>{% endfor %}</div>
     {% if courses %}
-    <div class="queue-debt">
-      {% for c in courses %}<div class="queue-course">
-        <div class="strong"><i class="material-icons tiny">school</i> {{ c.course.name }}</div>
-        <div class="small muted"><i class="material-icons tiny">schedule</i> {{ c.course.schedule }} · Grupo {{ c.course.group }}{% if c.course.start_date %} · <i class="material-icons tiny">event</i> Inicio: {{ c.course.start_date|date:"d/m/Y" }}{% endif %}</div>
-        <div class="small"><i class="material-icons tiny">sell</i> Costo: S/ {{ c.total|floatformat:2 }} · <span class="{% if c.debt > 0 %}danger strong{% endif %}">{% if c.debt > 0 %}<i class="material-icons tiny red-text text-lighten-1" title="Con deuda">error</i>{% else %}<i class="material-icons tiny green-text text-lighten-1" title="Al día">check_circle</i>{% endif %} Deuda: S/ {{ c.debt|floatformat:2 }}</span></div>
-      </div>{% endfor %}
-      <div class="queue-total strong{% if total_debt > 0 %} danger{% endif %}"><i class="material-icons tiny">account_balance_wallet</i> Deuda total: S/ {{ total_debt|floatformat:2 }}</div>
-    </div>
+    <section class="debt-panel" aria-label="Deuda por matrículas" data-total-debt="{{ total_debt|stringformat:'.2f' }}">
+      <div class="debt-summary{% if total_debt <= 0 %} clear{% endif %}">
+        <div><span class="debt-label">Deuda total</span><span class="debt-amount{% if total_debt > 0 %} danger{% else %} debt-ok{% endif %}">S/ {{ total_debt|floatformat:2 }}</span>{% if debt_summary.oldest_overdue_days %}<span class="debt-note small muted">{{ debt_summary.oldest_overdue_days }} día{{ debt_summary.oldest_overdue_days|pluralize }} de atraso</span>{% endif %}</div>
+        {% if total_debt > 0 %}
+        <div><span class="debt-label">Matrícula</span><span class="debt-stat{% if debt_summary.fee > 0 %} danger{% else %} debt-ok{% endif %}">{% if debt_summary.fee > 0 %}S/ {{ debt_summary.fee|floatformat:2 }}{% else %}Pagada{% endif %}</span></div>
+        <div><span class="debt-label">Mensualidad</span><span class="debt-stat{% if debt_summary.monthly > 0 %} danger{% else %} debt-ok{% endif %}">{% if debt_summary.monthly > 0 %}S/ {{ debt_summary.monthly|floatformat:2 }}{% else %}Pagada{% endif %}</span></div>
+        {% if debt_summary.other > 0 %}<div><span class="debt-label">Otros cobros</span><span class="debt-stat danger">S/ {{ debt_summary.other|floatformat:2 }}</span></div>{% endif %}
+        {% else %}
+        <div class="debt-ok strong"><i class="material-icons tiny" aria-hidden="true">check_circle</i> Al día en todos sus cursos</div>
+        {% endif %}
+      </div>
+      <p class="debt-hint small muted"><i class="material-icons tiny" aria-hidden="true">info</i> Solo se cobra la matrícula y 1 mensualidad por curso.</p>
+      {% for c in courses %}
+      <div class="debt-course">
+        <div class="debt-course-head">
+          <div class="strong"><i class="material-icons tiny" aria-hidden="true">school</i> {% if c.course %}{{ c.course.name }}{% else %}{{ c.course_label }}{% endif %}</div>
+          {% if c.debt > 0 %}<span class="danger strong">Debe S/ {{ c.debt|floatformat:2 }}</span>{% else %}<span class="debt-ok strong"><i class="material-icons tiny" aria-hidden="true">check_circle</i> Al día</span>{% endif %}
+        </div>
+        {% if c.course %}<div class="small muted"><i class="material-icons tiny" aria-hidden="true">schedule</i> {{ c.course.schedule }} · Grupo {{ c.course.group }}{% if c.course.start_date %} · <i class="material-icons tiny" aria-hidden="true">event</i> Inicio: {{ c.course.start_date|date:"d/m/Y" }}{% endif %}</div>{% endif %}
+        <div class="small muted"><i class="material-icons tiny" aria-hidden="true">sell</i> Costo: S/ {{ c.total|floatformat:2 }} · Pagado: S/ {{ c.paid|floatformat:2 }}</div>
+        {% if c.charges %}
+        <ul class="debt-items">
+          {% for p in c.charges %}<li>
+            <span><strong>{{ p.label }}</strong> <span class="small muted">· S/ {{ p.amount|floatformat:2 }}{% if p.paid and p.balance %} · pagado S/ {{ p.paid|floatformat:2 }}{% endif %} · vence {{ p.due_date|date:"d/m/Y" }}</span></span>
+            {% if not p.balance %}<span class="debt-tag paid">Pagada</span>{% elif p.late %}<span class="debt-tag late">Vencida hace {{ p.late }} día{{ p.late|pluralize }}</span>{% elif p.days == 0 %}<span class="debt-tag today">Vence hoy</span>{% else %}<span class="debt-tag">Vence en {{ p.days }} día{{ p.days|pluralize }}</span>{% endif %}
+            <span class="amount{% if p.balance %} danger{% else %} debt-ok{% endif %}">{% if p.balance %}S/ {{ p.balance|floatformat:2 }}{% else %}✓{% endif %}</span>
+          </li>{% endfor %}
+        </ul>
+        {% else %}
+        <p class="small muted">Sin cargos registrados.</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
     {% endif %}
     {% if last_note %}<p class="muted">Última llamada: {{ last_note.created_at|date:"d/m/Y" }} · {{ last_note.get_response_display }}{% if last_note.note %} · {{ last_note.note|truncatechars:80 }}{% endif %}</p>{% endif %}
     <form method="post" action="{% url 'calls-quick-note' claim.student.pk %}" class="mt">

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Crear sublistas de llamadas · EduTrack{% endblock %}
 {% block content %}
-<div class="mb"><h1 class="mb-0">Crear sublistas de llamadas</h1><div class="muted">Define el nombre y el estado, elige a los usuarios que realizarán las llamadas y selecciona las matrículas con ayuda del filtro. Cada usuario pertenece a una sola sublista. Quienes asignan llamadas ven todas.</div></div>
+<div class="mb"><h1 class="mb-0">Crear sublistas de llamadas</h1><div class="muted">Define el nombre y el estado, elige a los usuarios que realizarán las llamadas y selecciona las matrículas con ayuda del filtro. Cada usuario pertenece a una sola sublista por sede y puede tener otra en una sede distinta. Quienes asignan llamadas ven todas.</div></div>
 <div class="card card-pad">
   <form id="list-form" method="post">
     {% csrf_token %}
@@ -16,7 +16,7 @@
         </select></div>
     </div>
     <h6 class="strong mt">Usuarios que realizan llamadas</h6>
-    <p class="muted">Marca uno o varios. Todos verán las mismas matrículas. Quien ya pertenece a otra sublista aparece bloqueado hasta quitarlo de ella (abajo, en «Sublistas existentes»).</p>
+    <p class="muted">Marca uno o varios. Todos verán las mismas matrículas. Quien ya pertenece a otra sublista de esta sede aparece bloqueado hasta quitarlo de ella (abajo, en «Sublistas existentes»). Las asignaciones en otras sedes no lo bloquean.</p>
     <div class="callers-list">
     {% for c in callers %}
       <div class="caller-option{% if c.other or c.no_campus %} is-unavailable{% endif %}">

@@ -215,24 +215,30 @@ def seed_fichas(ctx):
 
 
 def seed_installments(ctx):
+    # Como en el sistema real, cada matrícula solo tiene la matrícula y una mensualidad.
     today = ctx.today
     current, debt = ctx.current, ctx.debt_enrollment
+    current_due = today - timedelta(days=40)
+    debt_due = today - timedelta(days=5)
     specs = (
-        ("fee", current, "Matrícula", "100.00", -40),
-        ("month_one", current, "Mensualidad 1", "200.00", -10),
-        ("month_two", current, "Mensualidad 2 · parcial", "200.00", -1),
-        (None, current, "Mensualidad 3 · vencida", "200.00", -30),
-        (None, current, "Mensualidad 4 · futura", "200.00", 30),
-        (None, debt, "Cuota vencida sin pago", "180.00", -5),
-        (None, debt, "Cuota pendiente futura", "180.00", 25),
+        ("fee", current, "Matrícula", "100.00", current_due),
+        ("monthly", current, f"Mensualidad inicial ({current_due:%Y-%m})", "200.00", current_due),
+        (None, debt, "Matrícula", "80.00", debt_due),
+        (
+            None,
+            debt,
+            f"Mensualidad inicial ({debt_due:%Y-%m})",
+            "180.00",
+            today + timedelta(days=25),
+        ),
     )
     ctx.installments = {}
-    for key, enrollment, concept, amount, days in specs:
+    for key, enrollment, concept, amount, due_date in specs:
         installment = Installment.objects.create(
             enrollment=enrollment,
             concept=concept,
             amount=Decimal(amount),
-            due_date=today + timedelta(days=days),
+            due_date=due_date,
         )
         if key:
             ctx.installments[key] = installment
@@ -244,28 +250,23 @@ def seed_payments(ctx):
     inst = ctx.installments
     ctx.payment_full = Payment.objects.create(
         receipt_number="D100",
-        amount=Decimal("300.00"),
+        amount=Decimal("100.00"),
         reference="OPERACION-DEMO-100",
-        notes="Pago completo de matrícula y primera cuota.",
+        notes="Pago completo de la matrícula.",
         **base,
     )
     PaymentAllocation.objects.create(
         payment=ctx.payment_full, installment=inst["fee"], amount=inst["fee"].amount
     )
-    PaymentAllocation.objects.create(
-        payment=ctx.payment_full,
-        installment=inst["month_one"],
-        amount=inst["month_one"].amount,
-    )
     partial = Payment.objects.create(
         receipt_number="D101",
         amount=Decimal("75.00"),
         reference="OPERACION-DEMO-101",
-        notes="Abono parcial.",
+        notes="Abono parcial de la mensualidad.",
         **base,
     )
     PaymentAllocation.objects.create(
-        payment=partial, installment=inst["month_two"], amount=Decimal("75.00")
+        payment=partial, installment=inst["monthly"], amount=Decimal("75.00")
     )
     void = Payment.objects.create(
         receipt_number="A100",
@@ -275,7 +276,7 @@ def seed_payments(ctx):
         **base,
     )
     PaymentAllocation.objects.create(
-        payment=void, installment=inst["month_two"], amount=Decimal("40.00")
+        payment=void, installment=inst["monthly"], amount=Decimal("40.00")
     )
     ctx.payment_full.voucher.save("voucher-demo.png", ContentFile(PNG_1X1), save=True)
 
@@ -284,7 +285,7 @@ def seed_cash_closings(ctx):
     CashClosing.objects.create(
         campus=ctx.central,
         date=ctx.today,
-        confirmed_total=Decimal("375.00"),
+        confirmed_total=Decimal("175.00"),
         voided_total=Decimal("40.00"),
         payments_count=3,
         note="Cierre de caja ficticio para pruebas.",
@@ -359,7 +360,7 @@ ELEMENTS = {
     ),
     "fichas": ("Fichas de matrícula", ("enrollments",), seed_fichas),
     "installments": (
-        "Cuotas (pagadas, parciales, vencidas, futuras)",
+        "Matrícula y una mensualidad por matrícula (pagada, parcial, vencida, por vencer)",
         ("enrollments",),
         seed_installments,
     ),

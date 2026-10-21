@@ -439,8 +439,46 @@ class CallAssignmentTests(TestCase):
         )
         self.assertContains(response, "ya pertenece a otra sublista")
         self.assertFalse(CallList.objects.filter(name="Lista B").exists())
-        self.assertEqual(self.caller.call_membership.call_list, first)
+        self.assertEqual(self.caller.call_memberships.get(campus=self.campus).call_list, first)
         self.assertContains(self.client.get(url), "bloqueado: ya está en «Lista A»")
+
+    def test_user_can_be_assigned_to_one_list_in_each_campus(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        self.caller.campuses.add(other_campus)
+        self.boss.campuses.add(other_campus)
+        first = make_list(other_campus, "Lista ajena", [], [self.caller])
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        page = self.client.get(url)
+        caller = next(c for c in page.context["callers"] if c["user"] == self.caller)
+        self.assertIsNone(caller["other"])
+        self.assertFalse(caller["no_campus"])
+        response = self.client.post(
+            url,
+            {
+                "accion": "crear_lista",
+                "nombre": "Lista local",
+                "usuarios": [self.caller.pk],
+                "enrollments": [self.enrollments[0].pk],
+            },
+            follow=True,
+        )
+        self.assertContains(response, "Sublista «Lista local» creada")
+        local = CallList.objects.get(campus=self.campus, name="Lista local")
+        self.assertEqual(
+            set(
+                CallListMember.objects.filter(user=self.caller).values_list(
+                    "call_list_id", flat=True
+                )
+            ),
+            {first.pk, local.pk},
+        )
+        self.client.post(
+            url,
+            {"accion": "quitar_usuario", "lista": local.pk, "miembro": local.members.get().pk},
+        )
+        self.assertTrue(first.members.filter(user=self.caller).exists())
+        self.assertFalse(local.members.exists())
 
     def test_user_can_move_after_being_removed_from_the_previous_list(self):
         first = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
@@ -483,11 +521,18 @@ class CallAssignmentTests(TestCase):
         self.assertContains(response, "Ya existe una sublista llamada")
         self.assertEqual(CallList.objects.count(), 1)
 
-    def test_database_rejects_a_user_in_two_lists(self):
+    def test_database_rejects_a_user_in_two_lists_in_the_same_campus(self):
         make_list(self.campus, "Lista A", [], [self.caller])
         other = CallList.objects.create(campus=self.campus, name="Lista B")
         with self.assertRaises(IntegrityError), transaction.atomic():
             CallListMember.objects.create(call_list=other, user=self.caller)
+
+    def test_database_allows_a_user_in_lists_of_different_campuses(self):
+        make_list(self.campus, "Lista A", [], [self.caller])
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        other = make_list(other_campus, "Lista B", [], [self.caller])
+        self.assertEqual(CallListMember.objects.filter(user=self.caller).count(), 2)
+        self.assertEqual(other.members.get().campus, other_campus)
 
     def test_deleting_a_list_frees_its_users(self):
         call_list = make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
@@ -650,6 +695,75 @@ class CallQueueTests(TestCase):
         self._ask(self.outsider)
         self.assertEqual(CallClaim.objects.count(), 0)
 
+    def test_queue_uses_the_list_of_the_selected_campus(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        self.u1.campuses.add(other_campus)
+        student = Student.objects.create(campus=other_campus, full_name="Dora", phone="987654321")
+        course = Course.objects.create(campus=other_campus, name="Arte", schedule="M", group="A")
+        enrollment = Enrollment.objects.create(campus=other_campus, student=student, course=course)
+        other = make_list(other_campus, "A primero", [enrollment], [self.u1])
+        self._login(self.u1)
+        self.client.post(reverse("calls-queue"), {"accion": "pedir"})
+        claim = CallClaim.objects.get(user=self.u1, status=CallClaim.Status.ACTIVE)
+        self.assertEqual(claim.call_list, self.call_list)
+        self.client.post(reverse("select-campus"), {"campus": other_campus.pk})
+        self.client.post(reverse("calls-queue"), {"accion": "pedir"})
+        claim = CallClaim.objects.get(user=self.u1, status=CallClaim.Status.ACTIVE)
+        self.assertEqual((claim.call_list, claim.student), (other, student))
+
+    def test_switching_campus_releases_call_and_notifies_previous_team(self):
+        other_campus = Campus.objects.create(name="Otra sede", active=True)
+        self.u1.campuses.add(other_campus)
+        self._ask(self.u2)
+        teammate_claim = CallClaim.objects.get(user=self.u2)
+        self._ask(self.u1)
+        claim = CallClaim.objects.get(user=self.u1)
+
+        with (
+            self.captureOnCommitCallbacks(execute=True),
+            patch("calls.realtime.broadcast") as broadcast,
+        ):
+            response = self.client.post(reverse("select-campus"), {"campus": other_campus.pk})
+        self.assertRedirects(response, reverse("dashboard"), fetch_redirect_response=False)
+        self.assertEqual(self.client.session["selected_campus_id"], other_campus.pk)
+        claim.refresh_from_db()
+        teammate_claim.refresh_from_db()
+        self.assertEqual(claim.status, CallClaim.Status.RELEASED)
+        self.assertIsNotNone(claim.finished_at)
+        self.assertEqual(teammate_claim.status, CallClaim.Status.ACTIVE)
+        self.assertFalse(CallNote.objects.exists())
+        broadcast.assert_called_once_with(self.campus.pk)
+
+        make_list(self.campus, "Relevo", [claim.student.enrollments.get()], [self.outsider])
+        self._ask(self.outsider)
+        replacement = CallClaim.objects.get(user=self.outsider, status=CallClaim.Status.ACTIVE)
+        self.assertEqual(replacement.student, claim.student)
+
+    def test_selecting_current_campus_keeps_call_in_progress(self):
+        self._ask(self.u1)
+        claim = CallClaim.objects.get(user=self.u1)
+        self.client.post(reverse("select-campus"), {"campus": self.campus.pk})
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, CallClaim.Status.ACTIVE)
+        self.assertIsNone(claim.finished_at)
+
+    def test_rejected_campus_switch_keeps_call_in_progress(self):
+        other_campus = Campus.objects.create(name="Sin acceso", active=True)
+        self._ask(self.u1)
+        claim = CallClaim.objects.get(user=self.u1)
+        response = self.client.post(reverse("select-campus"), {"campus": other_campus.pk})
+        self.assertContains(response, "Selecciona una sede activa a la que tengas acceso.")
+        self.assertEqual(self.client.session["selected_campus_id"], self.campus.pk)
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, CallClaim.Status.ACTIVE)
+
+    def test_opening_campus_selector_keeps_call_in_progress(self):
+        self._ask(self.u1)
+        claim = CallClaim.objects.get(user=self.u1)
+        self.client.get(reverse("select-campus"))
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, CallClaim.Status.ACTIVE)
+
     def test_two_users_get_different_students(self):
         self._ask(self.u1)
         self._ask(self.u2)
@@ -674,7 +788,73 @@ class CallQueueTests(TestCase):
         page = self.client.get(reverse("calls-queue"))
         self.assertContains(page, "INGLES")
         self.assertContains(page, "REDES")
-        self.assertContains(page, "Deuda total: S/ 150,00")
+        self.assertContains(page, 'data-total-debt="150.00"')
+        self.assertContains(page, "S/ 150,00")
+
+    def test_claim_card_shows_enrollment_fee_and_single_monthly_fee(self):
+        student = self.enrollments[0].student
+        enrollment = self.enrollments[0]
+        today = timezone.localdate()
+        due = today - timedelta(days=12)
+        fee = Installment.objects.create(
+            enrollment=enrollment, concept="Matrícula", amount=Decimal("100"), due_date=due
+        )
+        Installment.objects.create(
+            enrollment=enrollment,
+            concept=f"Mensualidad inicial ({due:%Y-%m})",
+            amount=Decimal("80"),
+            due_date=due,
+        )
+        payment = Payment.objects.create(
+            campus=self.campus,
+            enrollment=enrollment,
+            cashier=self.u2,
+            receipt_number="Q-1",
+            amount=Decimal("100"),
+        )
+        PaymentAllocation.objects.create(payment=payment, installment=fee, amount=Decimal("100"))
+        CallClaim.objects.create(
+            campus=self.campus, user=self.u1, call_list=self.call_list, student=student
+        )
+        self._login(self.u1)
+        page = self.client.get(reverse("calls-queue"))
+        summary = page.context["debt_summary"]
+        self.assertEqual(summary["fee"], Decimal("0"))
+        self.assertEqual(summary["monthly"], Decimal("80.00"))
+        self.assertEqual(summary["oldest_overdue_days"], 12)
+        charges = page.context["courses"][0]["charges"]
+        self.assertEqual([c["label"] for c in charges], ["Matrícula", "Mensualidad"])
+        self.assertEqual([c["balance"] for c in charges], [Decimal("0"), Decimal("80.00")])
+        self.assertContains(page, "Solo se cobra la matrícula y 1 mensualidad")
+        self.assertContains(page, '<span class="debt-tag paid">Pagada</span>', html=True)
+        self.assertContains(page, "Vencida hace 12 días")
+        self.assertContains(page, "S/ 80,00")
+        self.assertContains(page, "Pagado: S/ 100,00")
+        self.assertEqual(summary["other"], Decimal("0"))
+        self.assertNotContains(page, "Otros cobros")
+
+    def test_claim_card_keeps_other_charges_separate_from_monthly_fee(self):
+        student = self.enrollments[0].student
+        enrollment = self.enrollments[0]
+        due = timezone.localdate() + timedelta(days=3)
+        Installment.objects.create(
+            enrollment=enrollment, concept="Mensualidad inicial", amount=Decimal("80"), due_date=due
+        )
+        Installment.objects.create(
+            enrollment=enrollment, concept="Saldo pendiente", amount=Decimal("45"), due_date=due
+        )
+        CallClaim.objects.create(
+            campus=self.campus, user=self.u1, call_list=self.call_list, student=student
+        )
+        self._login(self.u1)
+        page = self.client.get(reverse("calls-queue"))
+        summary = page.context["debt_summary"]
+        self.assertEqual(summary["monthly"], Decimal("80.00"))
+        self.assertEqual(summary["other"], Decimal("45.00"))
+        labels = [c["label"] for c in page.context["courses"][0]["charges"]]
+        self.assertEqual(labels, ["Mensualidad", "Saldo pendiente"])
+        self.assertContains(page, "Otros cobros")
+        self.assertContains(page, "Vence en 3 días")
 
     def test_asking_twice_keeps_same_claim(self):
         self._ask(self.u1)
@@ -1107,6 +1287,22 @@ class CallQueueConsumerTests(RealtimeFixture, TransactionTestCase):
         message = await communicator.receive_output(timeout=3)
         self.assertEqual(json.loads(message["text"]), {"type": "changed"})
         await self._disconnect(communicator)
+
+    async def test_member_of_two_campuses_connects_to_the_selected_campus_only(self):
+        await sync_to_async(self.user.campuses.add)(self.other_campus)
+        await sync_to_async(make_list)(self.other_campus, "A primero", [], [self.user])
+        for campus, foreign in (
+            (self.campus, self.other_campus),
+            (self.other_campus, self.campus),
+        ):
+            communicator, connected = await self._connect(self.user, campus.pk)
+            self.assertTrue(connected)
+            await sync_to_async(broadcast)(foreign.pk)
+            self.assertTrue(await communicator.receive_nothing(timeout=0.3))
+            await sync_to_async(broadcast)(campus.pk)
+            message = await communicator.receive_output(timeout=3)
+            self.assertEqual(json.loads(message["text"]), {"type": "changed"})
+            await self._disconnect(communicator)
 
     async def test_rejects_anonymous_unauthorized_or_foreign_campus(self):
         outsider = await sync_to_async(create_user)(username="nada", password="x" * 12)

@@ -1,9 +1,12 @@
 from io import StringIO
-from unittest import mock
+from unittest import mock, skipUnless
 
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
+from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
+from django.db.migrations.recorder import MigrationRecorder
 from django.test import TransactionTestCase
 
 from core.management.commands.reset_system import CONFIRMATION
@@ -58,6 +61,37 @@ class ResetSystemTests(TransactionTestCase):
             call_command("reset_system", "--keep-media", "--force-color", stdout=out)
 
         self.assertEqual(list(User.objects.values_list("username", flat=True)), ["nuevo"])
+
+    @skipUnless(connection.vendor == "postgresql", "PostgreSQL TRUNCATE CASCADE regression")
+    def test_wipes_legacy_referencing_tables_and_preserves_catalogs(self):
+        preserved_models = (Group, Permission, ContentType, MigrationRecorder.Migration)
+        preserved_rows = {
+            model: list(model.objects.order_by("pk").values()) for model in preserved_models
+        }
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE calls_callmessage ("
+                "id integer PRIMARY KEY, campus_id bigint REFERENCES core_campus (id))"
+            )
+            self.addCleanup(self.drop_legacy_table)
+            cursor.execute(
+                "INSERT INTO calls_callmessage (id, campus_id) VALUES (%s, %s)",
+                [1, self.campus.pk],
+            )
+
+        self.run_command([CONFIRMATION, "nuevo"], [PASSWORD, PASSWORD])
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM calls_callmessage")
+            self.assertEqual(cursor.fetchone()[0], 0)
+        self.assertEqual(list(User.objects.values_list("username", flat=True)), ["nuevo"])
+        for model, rows in preserved_rows.items():
+            with self.subTest(model=model.__name__):
+                self.assertEqual(list(model.objects.order_by("pk").values()), rows)
+
+    def drop_legacy_table(self):
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE calls_callmessage")
 
     def test_wrong_confirmation_changes_nothing(self):
         output = self.run_command(["no"], [])

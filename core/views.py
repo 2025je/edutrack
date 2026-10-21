@@ -20,6 +20,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from students.models import Student, Enrollment, Course, Promoter
 from payments.models import Payment, PaymentAllocation, Installment
+from calls.call_queue import release_campus_claims
 
 User = get_user_model()
 
@@ -74,6 +75,10 @@ def select_campus(request):
         if campus is None:
             messages.error(request, "Selecciona una sede activa a la que tengas acceso.")
         else:
+            previous_campus_id = request.session.get("selected_campus_id")
+            if previous_campus_id and previous_campus_id != campus.pk:
+                if release_campus_claims(request.user, previous_campus_id):
+                    messages.info(request, "La llamada en curso de la sede anterior se liberó.")
             request.session["selected_campus_id"] = campus.pk
             messages.success(request, f"Sede seleccionada: {campus.name}.")
             next_url = request.POST.get("next", "")

@@ -46,8 +46,8 @@ class CallQueueConsumer(AsyncJsonWebsocketConsumer):
             return None
         if not available_campuses(user).filter(pk=campus_id).exists():
             return None
-        call_list = user_list(user)
-        if call_list is None or call_list.campus_id != campus_id:
+        call_list = user_list(user, campus_id)
+        if call_list is None:
             return None
         return call_list.campus_id
 

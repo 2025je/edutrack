@@ -219,13 +219,16 @@ class CallList(models.Model):
 
 
 class CallListMember(models.Model):
-    """Un usuario de llamadas pertenece como máximo a una sublista."""
+    """Un usuario de llamadas pertenece como máximo a una sublista por sede."""
 
+    campus = models.ForeignKey(
+        Campus, on_delete=models.CASCADE, related_name="+", editable=False, verbose_name="Sede"
+    )
     call_list = models.ForeignKey(
         CallList, on_delete=models.CASCADE, related_name="members", verbose_name="Sublista"
     )
-    user = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name="call_membership", verbose_name="Usuario"
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="call_memberships", verbose_name="Usuario"
     )
     assigned_by = models.ForeignKey(
         User,
@@ -240,6 +243,15 @@ class CallListMember(models.Model):
     class Meta:
         verbose_name = "usuario de sublista"
         verbose_name_plural = "usuarios de sublistas"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "campus"], name="unique_call_member_campus"),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.campus_id = self.call_list.campus_id
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"campus"}
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user} → {self.call_list}"

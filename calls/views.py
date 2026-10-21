@@ -25,6 +25,7 @@ from core.campus import (
 from core.pagination import paginate_context
 from payments.forms import pending_enrollments_for_campus
 from payments.models import Installment, Payment, PaymentAllocation
+from students.installments import installment_kind
 from students.models import Enrollment, Student, mark_student_phone_invalid
 
 from .call_queue import (
@@ -247,6 +248,55 @@ def course_debts(request, student, all_courses=False):
         }
         for e in enrollments
     ]
+
+
+CHARGE_KINDS = {"enrollment_fee": ("fee", "Matrícula"), "monthly_fee": ("monthly", "Mensualidad")}
+
+
+def attach_charges(courses, today=None):
+    """Añade a cada curso sus cargos y resume lo pendiente por matrícula, mensualidad y otros."""
+    today = today or timezone.localdate()
+    charges = defaultdict(list)
+    installments = (
+        Installment.objects.filter(
+            enrollment__in=[c["enrollment_id"] for c in courses], active=True
+        )
+        .annotate(
+            paid=Coalesce(
+                Sum(
+                    "allocations__amount",
+                    filter=Q(allocations__payment__status=Payment.Status.CONFIRMED),
+                ),
+                ZERO,
+            )
+        )
+        .order_by("due_date", "id")
+    )
+    for item in installments:
+        # Cobros con otro concepto se muestran con su nombre y no se mezclan con la mensualidad.
+        kind, label = CHARGE_KINDS.get(installment_kind(item), ("other", item.concept))
+        balance = max(item.amount - item.paid, ZERO)
+        charges[item.enrollment_id].append(
+            {
+                "kind": kind,
+                "label": label,
+                "concept": item.concept,
+                "amount": item.amount,
+                "paid": min(item.paid, item.amount),
+                "balance": balance,
+                "due_date": item.due_date,
+                "days": (item.due_date - today).days,
+                "late": max((today - item.due_date).days, 0) if balance else 0,
+            }
+        )
+    summary = {"fee": ZERO, "monthly": ZERO, "other": ZERO, "oldest_overdue_days": 0}
+    for course in courses:
+        items = charges.get(course["enrollment_id"], [])
+        course["charges"] = items
+        for item in items:
+            summary[item["kind"]] += item["balance"]
+            summary["oldest_overdue_days"] = max(summary["oldest_overdue_days"], item["late"])
+    return summary
 
 
 class CallNoteListView(StudentNotesMixin, TemplateView):
@@ -706,9 +756,8 @@ class CallQueueMixin(FeaturePermissionMixin, SelectedCampusRequiredMixin):
     required_permission = "calls.add_callnote"
 
     def get_call_list(self):
-        call_list = user_list(self.request.user)
         campus = get_selected_campus(self.request)
-        return call_list if call_list and call_list.campus_id == campus.pk else None
+        return user_list(self.request.user, campus)
 
     def get_history(self, call_list):
         """Resumen de hoy: cada alumno de la sublista, si se llamó, se está llamando o falta."""
@@ -817,6 +866,7 @@ class CallQueueView(CallQueueMixin, TemplateView):
             context["phones"] = [p.strip() for p in student.phone.split(",") if p.strip()]
             context["courses"] = course_debts(self.request, student, all_courses=True)
             context["total_debt"] = sum((c["debt"] for c in context["courses"]), ZERO)
+            context["debt_summary"] = attach_charges(context["courses"])
             context["last_note"] = student.call_notes.select_related("author").first()
         return context
 
@@ -1127,7 +1177,7 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
         allowed = {u.pk for u in self.get_users()}
         picked = {int(i) for i in request.POST.getlist("usuarios") if i.isdigit()} & allowed
         busy = dict(
-            CallListMember.objects.filter(user_id__in=picked).values_list(
+            CallListMember.objects.filter(user_id__in=picked, call_list__campus=campus).values_list(
                 "user__username", "call_list__name"
             )
         )
@@ -1135,7 +1185,7 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
             detail = ", ".join(f"{user} (en «{lst}»)" for user, lst in sorted(busy.items()))
             messages.error(
                 request,
-                f"No se creó la sublista: {detail} ya pertenece a otra sublista. "
+                f"No se creó la sublista: {detail} ya pertenece a otra sublista de esta sede. "
                 "Quítalo de ella primero.",
             )
             return None
@@ -1146,7 +1196,9 @@ class CallAssignmentView(FeaturePermissionMixin, SelectedCampusRequiredMixin, Te
                     campus=campus, name=name, active=active, created_by=request.user
                 )
                 CallListMember.objects.bulk_create(
-                    CallListMember(call_list=call_list, user_id=pk, assigned_by=request.user)
+                    CallListMember(
+                        campus=campus, call_list=call_list, user_id=pk, assigned_by=request.user
+                    )
                     for pk in picked
                 )
                 chosen = {int(i) for i in request.POST.getlist("enrollments") if i.isdigit()}

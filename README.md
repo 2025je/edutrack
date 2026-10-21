@@ -57,7 +57,7 @@ Por ejemplo, `students.add_course` permite registrar cursos y `payments.change_p
 | `core.change_enrollment_course` | Cambiar el curso de una matrícula. | Ninguno |
 | `core.void_payment` | Anular un pago sin borrar su recibo ni su historial. | Ninguno |
 | `core.edit_call_notes` | Editar notas de llamadas existentes. | Ninguno |
-| `core.assign_calls` | Crear sublistas de llamadas y asignarlas a usuarios (cada usuario solo puede estar en una). Los gestores de la sublista piden su siguiente llamada en «Pedir llamada» (`/llamadas/cola/`); el equipo ve en vivo a quién llama cada compañero y el reclamo expira a los 15 min. | Asignador de llamadas |
+| `core.assign_calls` | Crear sublistas de llamadas y asignarlas a usuarios (cada usuario puede estar en una sublista por sede, con asignaciones simultáneas en distintas sedes). Los gestores de la sublista piden su siguiente llamada en «Pedir llamada» (`/llamadas/cola/`); el equipo ve en vivo a quién llama cada compañero y el reclamo expira a los 15 min. | Asignador de llamadas |
 | `core.view_all_calls` | Consultar las llamadas de todos los gestores del campus. | Supervisor de campus, Administrador general |
 | `core.view_financial_reports` | Consultar reportes financieros. | Caja, Administrador general |
 | `core.view_pending_balances` | Consultar cuotas y saldos pendientes. | Caja, Administrador general |
@@ -163,6 +163,13 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web ws
 
 La cola de llamadas recibe los cambios del equipo por WebSocket (`/ws/llamadas/cola/`). En Docker, Gunicorn sigue atendiendo HTTP y el servicio `ws` (Uvicorn/ASGI) atiende solo `/ws/`; nginx enruta cada ruta y ambos procesos se comunican mediante Redis (`CHANNEL_LAYERS`). La conexión requiere sesión, permiso y pertenencia a una sublista activa de la sede seleccionada. El WebSocket solo avisa que algo cambió: la página vuelve a pedir `/llamadas/cola/estado/`, que aplica los permisos. La página envía un heartbeat cada 25 segundos; cada ping renueva la pertenencia al grupo Redis y, si no hay respuesta, el navegador cierra y reconecta con espera incremental. Si el WebSocket no está disponible, consulta el estado cada 4 segundos.
 
+Un gestor puede pertenecer a una sublista por sede, incluso si la sublista está inactiva.
+Puede estar asignado simultáneamente en varias sedes a las que tenga acceso, pero no en
+dos sublistas de la misma sede. La cola y sus avisos WebSocket usan la sede seleccionada.
+Al cambiar de sede, su llamada en curso en la sede anterior se libera automáticamente
+y se avisa al equipo para que otro gestor pueda tomarla. Seleccionar la misma sede o
+intentar cambiar a una sede sin acceso no libera la llamada.
+
 El servicio WebSocket no procesa `X-Forwarded-*`; Uvicorn no habilita `--proxy-headers` ni confía en todos los contenedores. nginx conserva esos encabezados para el servicio HTTP Gunicorn. El healthcheck de `ws` ejecuta `check_channel_layer`, que envía y recibe un mensaje de prueba a través del backend Redis; las conexiones y desconexiones se registran en los logs de Django sin incluir nombres de usuario.
 
 Con el stack levantado (`docker compose up --build -d`), ejecuta la prueba de humo desde la raíz. Verifica Redis/Channels, la salud HTTP y los estáticos a través de nginx, y que el proxy rechaza una conexión WebSocket anónima. No modifica datos de la aplicación:
@@ -242,6 +249,10 @@ común para las cuentas `demo_admin`, `demo_matriculas`, `demo_caja`, `demo_gest
 `demo_asignador`, `demo_supervisor`, `demo_administrador` y `demo_catalogo`. Borra también los archivos multimedia
 subidos; conserva los grupos, permisos y el historial de migraciones del sistema. Haz un respaldo
 antes de confirmar y úsalo únicamente en una base de datos de desarrollo o pruebas.
+
+En PostgreSQL, el vaciado usa `TRUNCATE ... CASCADE`: también elimina los registros de
+tablas dependientes antiguas que ya no tienen un modelo Django, para evitar errores de
+claves foráneas. Este comportamiento se aplica tanto a `seed_test_data` como a `reset_system`.
 
 Puedes elegir qué crear. Sin opciones muestra un menú (Enter = todo); también:
 

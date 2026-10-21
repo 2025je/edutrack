@@ -22,9 +22,13 @@ def expire_stale(call_list):
     return expired
 
 
-def user_list(user):
-    """Sublista activa del usuario, o None si no pertenece a ninguna."""
-    return CallList.objects.filter(members__user=user, active=True).select_related("campus").first()
+def user_list(user, campus):
+    """Sublista activa del usuario en la sede seleccionada, o None."""
+    return (
+        CallList.objects.filter(members__user=user, campus=campus, active=True)
+        .select_related("campus")
+        .first()
+    )
 
 
 def active_claim(user, call_list):
@@ -97,3 +101,12 @@ def close_claim(user, student, status=CallClaim.Status.DONE):
     if closed:
         notify_queue_changed(student.campus_id)
     return closed
+
+
+def release_campus_claims(user, campus_id):
+    released = CallClaim.objects.filter(
+        user=user, campus_id=campus_id, status=CallClaim.Status.ACTIVE
+    ).update(status=CallClaim.Status.RELEASED, finished_at=timezone.now())
+    if released:
+        notify_queue_changed(campus_id)
+    return released

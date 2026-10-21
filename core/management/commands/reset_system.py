@@ -39,8 +39,9 @@ def tables_to_wipe():
 
 def flush_database(tables=None):
     tables = tables if tables is not None else tables_to_wipe()
+    # Include legacy tables that still reference current models.
     statements = connection.ops.sql_flush(
-        no_style(), tables, reset_sequences=True, allow_cascade=False
+        no_style(), tables, reset_sequences=True, allow_cascade=True
     )
     with connection.cursor() as cursor:
         for sql in statements:
