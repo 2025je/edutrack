@@ -191,7 +191,37 @@
       })
       .catch(function () {});
   }
-  setInterval(poll, 4000);
+  var refreshTimer = null;
+  function refreshSoon() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(function () { refreshTimer = null; poll(); }, 250);
+  }
+  // Con WebSocket abierto el servidor avisa cada cambio; la consulta periódica queda como respaldo
+  // (y para liberar reservas vencidas). Sin WebSocket se vuelve a consultar cada 4 segundos.
+  var live = false;
+  var retryDelay = 1000;
+  function connect() {
+    if (!("WebSocket" in window)) return;
+    var ws;
+    try {
+      ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/llamadas/cola/");
+    } catch (e) { return; }
+    ws.onopen = function () { live = true; retryDelay = 1000; refreshSoon(); };
+    ws.onmessage = function (e) {
+      try { if (JSON.parse(e.data).type === "changed") refreshSoon(); } catch (err) {}
+    };
+    ws.onclose = function () {
+      live = false;
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    };
+  }
+  connect();
+  var ticks = 0;
+  setInterval(function () {
+    ticks++;
+    if (!live || ticks % 8 === 0) poll();
+  }, 4000);
   body.addEventListener("change", function (e) {
     var box = e.target.closest("[data-wa-mark]");
     if (!box) return;

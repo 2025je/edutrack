@@ -9,13 +9,17 @@ from django.utils import timezone
 from students.models import Student
 
 from .models import CallClaim, CallList, CallNote
+from .realtime import notify_queue_changed
 
 
 def expire_stale(call_list):
     limit = timezone.now() - timedelta(minutes=CallClaim.MINUTES)
-    return CallClaim.objects.filter(
+    expired = CallClaim.objects.filter(
         call_list=call_list, status=CallClaim.Status.ACTIVE, started_at__lt=limit
     ).update(status=CallClaim.Status.EXPIRED, finished_at=timezone.now())
+    if expired:
+        notify_queue_changed(call_list.campus_id)
+    return expired
 
 
 def user_list(user):
@@ -87,6 +91,9 @@ def claim_next(user, call_list, student_id=None):
 
 
 def close_claim(user, student, status=CallClaim.Status.DONE):
-    return CallClaim.objects.filter(
+    closed = CallClaim.objects.filter(
         user=user, student=student, status=CallClaim.Status.ACTIVE
     ).update(status=status, finished_at=timezone.now())
+    if closed:
+        notify_queue_changed(student.campus_id)
+    return closed

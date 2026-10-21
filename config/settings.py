@@ -113,6 +113,16 @@ CACHES = {
         else {},
     }
 }
+# Avisos en vivo (Django Channels). Con varios procesos (Gunicorn + servicio `ws`) se
+# necesita Redis; la capa en memoria solo sirve para un único proceso de desarrollo.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [os.getenv("REDIS_URL")], "prefix": "edutrack-channels"},
+    }
+    if os.getenv("REDIS_URL")
+    else {"BACKEND": "channels.layers.InMemoryChannelLayer"}
+}
 AUTH_USER_MODEL = "core.User"
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

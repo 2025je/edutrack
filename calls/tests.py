@@ -1,15 +1,23 @@
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
+from unittest.mock import patch
 
+from asgiref.sync import sync_to_async
+from asgiref.testing import ApplicationCommunicator
+from django.contrib.auth.models import AnonymousUser
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Campus, User
 from core.testing import create_user, grant, revoke
 from payments.models import Installment, Payment, PaymentAllocation
+from calls.call_queue import expire_stale
+from calls.consumers import CallQueueConsumer
+from calls.realtime import broadcast
 from calls.models import (
     CallClaim,
     CallList,
@@ -975,3 +983,132 @@ class CallWorkflowTests(TestCase):
         self.assertEqual(
             (row["assigned"], row["called"], row["pending"], row["progress"]), (2, 1, 1, 50)
         )
+
+
+IN_MEMORY_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+
+
+class RealtimeFixture:
+    path = "/ws/llamadas/cola/"
+
+    def setUp(self):
+        self.campus = Campus.objects.create(name="Sede Vivo", active=True)
+        self.other_campus = Campus.objects.create(name="Otra Sede", active=True)
+        course = Course.objects.create(campus=self.campus, name="Ingles", schedule="L", group="A")
+        student = Student.objects.create(campus=self.campus, full_name="Ana", phone="987654321")
+        enrollment = Enrollment.objects.create(campus=self.campus, student=student, course=course)
+        self.user = create_user(username="vivo", password="x" * 12, manage_calls=True)
+        self.user.campuses.add(self.campus)
+        self.call_list = make_list(self.campus, "Cola", [enrollment], [self.user])
+
+
+# El consumer abre sus propias consultas (database_sync_to_async), que cierran la conexión
+# de un TestCase; por eso estas pruebas usan TransactionTestCase.
+@override_settings(CHANNEL_LAYERS=IN_MEMORY_LAYERS)
+class CallQueueConsumerTests(RealtimeFixture, TransactionTestCase):
+    serialized_rollback = True
+
+    async def _connect(self, user, campus_id):
+        communicator = ApplicationCommunicator(
+            CallQueueConsumer.as_asgi(),
+            {
+                "type": "websocket",
+                "path": self.path,
+                "headers": [],
+                "subprotocols": [],
+                "user": user,
+                "session": {"selected_campus_id": campus_id},
+            },
+        )
+        await communicator.send_input({"type": "websocket.connect"})
+        reply = await communicator.receive_output(timeout=3)
+        return communicator, reply["type"] == "websocket.accept"
+
+    async def _disconnect(self, communicator):
+        await communicator.send_input({"type": "websocket.disconnect", "code": 1000})
+        await communicator.wait(timeout=3)
+
+    async def test_member_receives_changes_of_their_campus(self):
+        communicator, connected = await self._connect(self.user, self.campus.pk)
+        self.assertTrue(connected)
+        await sync_to_async(broadcast)(self.other_campus.pk)
+        self.assertTrue(await communicator.receive_nothing(timeout=0.3))
+        await sync_to_async(broadcast)(self.campus.pk)
+        message = await communicator.receive_output(timeout=3)
+        self.assertEqual(json.loads(message["text"]), {"type": "changed"})
+        await self._disconnect(communicator)
+
+    async def test_rejects_anonymous_unauthorized_or_foreign_campus(self):
+        outsider = await sync_to_async(create_user)(username="nada", password="x" * 12)
+        await sync_to_async(outsider.campuses.add)(self.campus)
+        for user, campus_id in (
+            (AnonymousUser(), self.campus.pk),
+            (outsider, self.campus.pk),
+            (self.user, self.other_campus.pk),
+            (self.user, None),
+        ):
+            communicator, connected = await self._connect(user, campus_id)
+            self.assertFalse(connected)
+            await self._disconnect(communicator)
+
+
+@override_settings(CHANNEL_LAYERS=IN_MEMORY_LAYERS)
+class CallQueueNotifyTests(RealtimeFixture, TestCase):
+    def _login(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+
+    def test_queue_actions_notify_the_campus(self):
+        self._login()
+        with patch("calls.realtime.broadcast") as sent:
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(reverse("calls-queue"), {"accion": "pedir"})
+            sent.assert_called_with(self.campus.pk)
+            sent.reset_mock()
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(reverse("calls-queue"), {"accion": "liberar"})
+            sent.assert_called_with(self.campus.pk)
+
+    def test_note_and_whatsapp_mark_notify_the_campus(self):
+        self._login()
+        student = Student.objects.get()
+        with patch("calls.realtime.broadcast") as sent:
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(
+                    reverse("calls-whatsapp-mark", args=[student.pk]), {"enviado": "1"}
+                )
+            sent.assert_called_with(self.campus.pk)
+            sent.reset_mock()
+            with self.captureOnCommitCallbacks(execute=True):
+                CallNote.objects.create(
+                    campus=self.campus, student=student, author=self.user, note="hola"
+                )
+            sent.assert_called_with(self.campus.pk)
+
+    def test_expired_claims_notify_the_campus(self):
+        CallClaim.objects.create(
+            campus=self.campus,
+            call_list=self.call_list,
+            student=Student.objects.get(),
+            user=self.user,
+        )
+        CallClaim.objects.update(
+            started_at=timezone.now() - timedelta(minutes=CallClaim.MINUTES + 1)
+        )
+        with patch("calls.realtime.broadcast") as sent:
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertEqual(expire_stale(self.call_list), 1)
+            sent.assert_called_once_with(self.campus.pk)
+
+    def test_failed_broadcast_does_not_break_the_request(self):
+        self._login()
+        with (
+            patch("calls.realtime.get_channel_layer", side_effect=OSError("redis caido")),
+            self.assertLogs("calls.realtime", "WARNING"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(reverse("calls-queue"), {"accion": "pedir"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(CallClaim.objects.filter(status=CallClaim.Status.ACTIVE).exists())

@@ -851,7 +851,7 @@ class CallQueueView(CallQueueMixin, TemplateView):
 
 
 class CallQueueStatusView(CallQueueMixin, TemplateView):
-    """Estado en vivo del equipo, consultado cada pocos segundos por la página."""
+    """Estado en vivo del equipo; la página lo pide al recibir un aviso por WebSocket."""
 
     http_method_names = ["get"]
 

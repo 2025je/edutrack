@@ -105,7 +105,7 @@ Requisitos: Docker Desktop con Docker Compose.
 La aplicación ejecuta migraciones al iniciar el contenedor web. Para revisar los registros:
 
 ```powershell
-docker compose logs -f web nginx
+docker compose logs -f web ws nginx
 ```
 
 Para detener los servicios sin borrar los datos:
@@ -150,10 +150,24 @@ uv run python manage.py runserver_plus 127.0.0.1:8000
 El archivo `docker-compose.dev.yml` permite activar la recarga automática del servidor en el contenedor:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web ws
 ```
 
 `runserver_plus` y `DEBUG=True` son solo para desarrollo; no expongas el depurador a Internet ni a una red compartida.
+
+### Tiempo real (Django Channels)
+
+La cola de llamadas recibe los cambios del equipo por WebSocket (`/ws/llamadas/cola/`). En Docker, Gunicorn sigue atendiendo HTTP y el servicio `ws` (Uvicorn/ASGI) atiende solo `/ws/`; nginx enruta cada ruta y ambos procesos se comunican mediante Redis (`CHANNEL_LAYERS`). El WebSocket solo avisa que algo cambió: la página vuelve a pedir `/llamadas/cola/estado/`, que aplica los permisos. Si el WebSocket no está disponible, la página consulta el estado cada 4 segundos.
+
+`runserver_plus` no atiende WebSockets (la cola usa la consulta periódica). Para probarlos en local, ejecuta todo con Uvicorn. La opción `--env-file .env` de `uv` carga las variables antes de iniciar Django; en desarrollo, activa `DEBUG` para que el ASGI sirva también los archivos estáticos. Sin ello, la página puede cargar sin el CSS ni las imágenes locales. Sin `REDIS_URL` se usa una capa en memoria válida solo para un proceso:
+
+```powershell
+$env:DJANGO_DEBUG = "True"
+$env:DB_HOST = "127.0.0.1"
+uv run --env-file .env uvicorn config.asgi:application --host 127.0.0.1 --port 8000 --reload
+```
+
+Limita el servidor de desarrollo a tu equipo y no uses `DEBUG=True` en producción. El nombre `db` solo se resuelve dentro de Docker. Las variables ya exportadas en la terminal tienen prioridad sobre `.env`.
 
 ## Pruebas y calidad
 
