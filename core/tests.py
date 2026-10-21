@@ -312,18 +312,40 @@ class RoleGroupMatrixTests(TestCase):
         self.user_in("Matrículas")
         self.assertContains(self.client.get(reverse("student-list")), "+ Nuevo estudiante")
 
-    def test_special_permissions_are_not_granted_by_default(self):
-        user = self.user_in("Matrículas", "Caja", "Supervisor de campus", "Administrador general")
+    def test_sensitive_permissions_belong_to_supervisor_or_admin(self):
+        from django.contrib.auth.models import Group
+
+        expected = {
+            "core.deactivate_student": {"Supervisor de campus"},
+            "core.deactivate_enrollment": {"Supervisor de campus"},
+            "core.change_enrollment_course": {"Supervisor de campus"},
+            "core.edit_call_notes": {"Supervisor de campus"},
+            "core.void_payment": {"Administrador general"},
+            "core.assign_calls": {"Asignador de llamadas"},
+        }
+        for perm, groups in expected.items():
+            codename = perm.split(".")[1]
+            with self.subTest(perm=perm):
+                self.assertEqual(
+                    set(
+                        Group.objects.filter(
+                            permissions__content_type__app_label="core",
+                            permissions__codename=codename,
+                        ).values_list("name", flat=True)
+                    ),
+                    groups,
+                )
+
+    def test_cashier_cannot_void_payments(self):
+        user = self.user_in("Caja", "Matrículas", "Gestor de llamadas")
         for perm in (
+            "core.void_payment",
             "core.deactivate_student",
             "core.deactivate_enrollment",
             "core.change_enrollment_course",
-            "core.void_payment",
             "core.edit_call_notes",
-            "core.assign_calls",
-            "core.export_reports",
         ):
-            self.assertEqual(user.has_perm(perm), perm == "core.export_reports", perm)
+            self.assertFalse(user.has_perm(perm), perm)
 
     def test_permissions_accumulate_across_groups(self):
         user = self.user_in("Matrículas", "Caja")

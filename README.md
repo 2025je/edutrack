@@ -52,11 +52,11 @@ Por ejemplo, `students.add_course` permite registrar cursos y `payments.change_p
 
 | Permiso | Acción | Grupo inicial |
 |---|---|---|
-| `core.deactivate_student` | Dar de baja un estudiante conservando sus registros. | Ninguno |
-| `core.deactivate_enrollment` | Dar de baja una matrícula conservando su historial. | Ninguno |
-| `core.change_enrollment_course` | Cambiar el curso de una matrícula. | Ninguno |
-| `core.void_payment` | Anular un pago sin borrar su recibo ni su historial. | Ninguno |
-| `core.edit_call_notes` | Editar notas de llamadas existentes. | Ninguno |
+| `core.deactivate_student` | Dar de baja un estudiante conservando sus registros. | Supervisor de campus |
+| `core.deactivate_enrollment` | Dar de baja una matrícula conservando su historial. | Supervisor de campus |
+| `core.change_enrollment_course` | Cambiar el curso de una matrícula. | Supervisor de campus |
+| `core.void_payment` | Anular un pago sin borrar su recibo ni su historial. Nunca se asigna a Caja: quien cobra no anula sus propios recibos. | Administrador general |
+| `core.edit_call_notes` | Editar notas de llamadas existentes. | Supervisor de campus |
 | `core.assign_calls` | Crear sublistas de llamadas y asignarlas a usuarios (cada usuario puede estar en una sublista por sede, con asignaciones simultáneas en distintas sedes). Los gestores de la sublista piden su siguiente llamada en «Pedir llamada» (`/llamadas/cola/`); el equipo ve en vivo a quién llama cada compañero y el reclamo expira a los 15 min. | Asignador de llamadas |
 | `core.view_all_calls` | Consultar las llamadas de todos los gestores del campus. | Supervisor de campus, Administrador general |
 | `core.view_financial_reports` | Consultar reportes financieros. | Caja, Administrador general |
