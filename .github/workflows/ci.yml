@@ -2,11 +2,33 @@ name: Django CI
 
 on:
   push:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".vscode/**"
+      - "scripts/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".editorconfig"
+      - ".vscode/**"
+      - "scripts/**"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
