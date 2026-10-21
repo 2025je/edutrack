@@ -12,7 +12,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Campus, User
+from core.models import ActivityLog, Campus, User
 from core.testing import create_user, grant, revoke
 from payments.models import Installment, Payment, PaymentAllocation
 from calls.call_queue import expire_stale
@@ -37,7 +37,7 @@ def make_list(campus, name, enrollments=(), users=()):
     return call_list
 
 
-class CallStudentListTests(TestCase):
+class CallViewsTests(TestCase):
     def setUp(self):
         self.campus = Campus.objects.create(name="Sede Llamadas", active=True)
         user = create_user(username="caja", password="x", manage_calls=True, edit_call_notes=True)
@@ -48,7 +48,7 @@ class CallStudentListTests(TestCase):
         session["selected_campus_id"] = self.campus.pk
         session.save()
 
-    def test_lists_student_phone_courses_and_debt_per_course(self):
+    def test_students_url_displays_assignment_page_with_debt_filter(self):
         student = Student.objects.create(
             campus=self.campus, full_name="Ana Perez", phone="987654321"
         )
@@ -70,17 +70,18 @@ class CallStudentListTests(TestCase):
             payment=payment, installment=installment, amount=Decimal("30")
         )
 
-        response = self.client.get(reverse("calls-students"), {"deuda": "1"})
+        response = self.client.get(reverse("calls-assignments"), {"deuda": "1"})
 
         self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "calls/assignments.html")
+        self.assertTemplateNotUsed(response, "calls/student_list.html")
         row = response.context["rows"][0]
-        self.assertEqual(row["student"], student)
-        self.assertEqual(row["courses"][0]["debt"], Decimal("70"))
-        self.assertContains(response, "https://api.whatsapp.com/send?phone=51987654321&amp;text=")
-        self.assertContains(response, "ANA%20PEREZ")
-        self.assertEqual([p.receipt_number for p in row["courses"][0]["receipts"]], ["1"])
+        self.assertEqual(row["enrollment"], enrollment)
+        self.assertContains(response, "Crear sublistas de llamadas")
+        self.assertContains(response, "ANA PEREZ")
+        self.assertEqual(self.client.get("/llamadas/seguimiento/").status_code, 404)
 
-    def test_template_supports_emojis_and_icon_link(self):
+    def test_template_supports_emojis_in_whatsapp_message(self):
         self.client.post(
             reverse("calls-template"), {"tipo": "BIENVENIDA", "body": "Hola {alumno} 👋💰"}
         )
@@ -92,10 +93,10 @@ class CallStudentListTests(TestCase):
             WhatsAppTemplate.objects.get(campus=self.campus, kind="BIENVENIDA").body,
             "Hola {alumno} 👋💰",
         )
-        response = self.client.get(reverse("calls-students"))
+        response = self.client.get(reverse("calls-whatsapp-open", args=[student.pk]))
 
-        self.assertContains(response, "text=Hola%20EVA%20%F0%9F%91%8B%F0%9F%92%B0")
-        self.assertContains(response, "<svg")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("text=Hola%20EVA%20%F0%9F%91%8B%F0%9F%92%B0", response.url)
 
     def test_notes_can_be_added_and_listed_per_student(self):
         student = Student.objects.create(campus=self.campus, full_name="Eva", phone="933333333")
@@ -117,7 +118,7 @@ class CallStudentListTests(TestCase):
         self.assertContains(history, "Pagará el viernes")
         self.assertContains(history, "Asistirá")
         self.assertContains(
-            self.client.get(reverse("calls-students")),
+            history,
             reverse("calls-note-create", args=[student.pk]),
         )
         self.assertEqual(
@@ -227,12 +228,14 @@ class CallStudentListTests(TestCase):
         session["selected_campus_id"] = self.campus.pk
         session.save()
 
-        for name in ("calls-students", "calls-template", "calls-notes-all"):
+        for name in ("calls-assignments", "calls-template", "calls-notes-all"):
             self.assertEqual(self.client.get(reverse(name)).status_code, 403)
         self.assertEqual(self.client.get(reverse("calls-note-update", args=[1])).status_code, 403)
         self.assertEqual(self.client.post(reverse("calls-note-delete", args=[1])).status_code, 403)
 
     def test_template_can_be_edited_and_is_used_in_message(self):
+        from calls.views import student_message_links
+
         response = self.client.post(
             reverse("calls-template"), {"body": "Hola {alumno}, debes S/ {deuda_total}"}
         )
@@ -246,13 +249,15 @@ class CallStudentListTests(TestCase):
             enrollment=enrollment, concept="Cuota", amount=Decimal("20"), due_date=date.today()
         )
 
-        response = self.client.get(reverse("calls-students"))
+        response = self.client.get(reverse("calls-whatsapp-open", args=[student.pk]))
 
-        self.assertContains(
-            response,
-            "https://api.whatsapp.com/send?phone=51911111111&amp;text=Hola%20LUIS%2C%20debes%20S%2F%2020.00",
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            "https://api.whatsapp.com/send?phone=51911111111&text=Hola%20LUIS%2C%20debes%20S%2F%2020.00",
         )
-        self.assertContains(response, "https://api.whatsapp.com/send?phone=51922222222&amp;text=")
+        links = student_message_links(response.wsgi_request, self.campus, student)
+        self.assertEqual([link["number"] for link in links], ["911111111", "922222222"])
 
 
 class CallAssignmentTests(TestCase):
@@ -286,13 +291,13 @@ class CallAssignmentTests(TestCase):
 
     def test_caller_cannot_open_follow_up_and_sees_nothing_without_assignments(self):
         self._login(self.caller)
-        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
         self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 0)
 
     def test_caller_sees_only_assigned_enrollments_and_their_history(self):
         make_list(self.campus, "Lista A", [self.enrollments[0]], [self.caller])
         self._login(self.caller)
-        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
         notes = self.client.get(reverse("calls-notes-all")).context["notes"]
         self.assertEqual([n.student.full_name for n in notes], ["ANA"])
         other = self.enrollments[1].student
@@ -337,12 +342,55 @@ class CallAssignmentTests(TestCase):
 
     def test_assigner_sees_everything(self):
         self._login(self.boss)
-        self.assertEqual(len(self.client.get(reverse("calls-students")).context["rows"]), 2)
+        self.assertEqual(len(self.client.get(reverse("calls-assignments")).context["rows"]), 2)
         self.assertEqual(len(self.client.get(reverse("calls-notes-all")).context["notes"]), 2)
 
     def test_only_assigner_can_open_assignments(self):
         self._login(self.caller)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
+
+    def test_supervisor_without_assignment_permission_cannot_open_assignment(self):
+        supervisor = self._user("supervisor", manage_calls=True)
+        grant(supervisor, "core.view_all_calls")
+        self._login(supervisor)
+        self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
+        page = self.client.get(reverse("dashboard"))
+        self.assertNotContains(page, f'href="{reverse("calls-assignments")}"')
+
+    def test_assignment_permission_alone_shows_the_assignment_entry(self):
+        assigner = self._user("solo_asignador", assign_calls=True)
+        self._login(assigner)
+        page = self.client.get(reverse("calls-assignments"))
+        self.assertContains(page, f'href="{reverse("calls-assignments")}"')
+        self.assertNotContains(page, ">Seguimiento</a>")
+        self.assertTemplateUsed(page, "calls/assignments.html")
+
+    def test_assignment_url_is_descriptive_and_old_urls_redirect(self):
+        self._login(self.boss)
+        url = reverse("calls-assignments")
+        self.assertEqual(url, "/llamadas/asignacion/")
+        for old in ("/llamadas/alumnos/", "/llamadas/asignaciones/"):
+            response = self.client.get(old, {"deuda": "1"})
+            self.assertRedirects(response, f"{url}?deuda=1", fetch_redirect_response=False)
+
+    def test_assignment_actions_are_logged(self):
+        self._login(self.boss)
+        response = self.client.post(
+            reverse("calls-assignments"),
+            {
+                "accion": "crear_lista",
+                "nombre": "Desde asignacion",
+                "enrollments": [self.enrollments[0].pk],
+            },
+        )
+        self.assertRedirects(response, reverse("calls-assignments"))
+        call_list = CallList.objects.get(name="Desde asignacion")
+        self.assertEqual(list(call_list.enrollments.all()), [self.enrollments[0]])
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                path=reverse("calls-assignments"), description="Asignó llamadas"
+            ).exists()
+        )
 
     def test_assigner_creates_a_list_with_the_filtered_enrollments(self):
         self._login(self.boss)
@@ -919,14 +967,10 @@ class CallWorkflowTests(TestCase):
         )
         return enrollment
 
-    def rows(self, **params):
-        response = self.client.get(reverse("calls-students"), params)
-        return [r["student"].full_name for r in response.context["rows"]]
-
     def quick(self, student, **data):
         return self.client.post(
             reverse("calls-quick-note", args=[student.pk]),
-            {"next": reverse("calls-students"), **data},
+            {"next": reverse("calls-assignments"), **data},
         )
 
     def test_quick_note_defaults_detail_to_the_result(self):
@@ -942,20 +986,18 @@ class CallWorkflowTests(TestCase):
         self.quick(self.ana.student, response="PROMETIO_PAGO", promise_date="2000-02-01")
         self.assertEqual(CallNote.objects.get().promise_date, date(2000, 2, 1))
 
-    def test_broken_promises_are_flagged_and_filterable(self):
+    def test_broken_promises_use_the_whatsapp_promise_template(self):
+        WhatsAppTemplate.objects.create(
+            campus=self.campus,
+            kind=WhatsAppTemplate.Kind.PROMISE,
+            body="Promesa incumplida {alumno}",
+        )
         self.quick(self.ana.student, response="PROMETIO_PAGO", promise_date="2000-02-01")
         self.quick(self.beto.student, response="PROMETIO_PAGO", promise_date="2999-02-01")
-        self.assertEqual(self.rows(promesa="vencida"), ["ANA"])
-        row = self.client.get(reverse("calls-students")).context["rows"][0]
-        self.assertTrue(row["promise_broken"])
-
-    def test_filter_by_last_contact_and_priority_order(self):
-        self.quick(self.ana.student, response="NO_CONTESTO")
-        self.assertEqual(self.rows(contacto="nunca"), ["BETO"])
-        self.assertEqual(self.rows(contacto="7"), ["BETO"])
-        self.assertEqual(self.rows(orden="sin_contacto"), ["BETO", "ANA"])
-        self.assertEqual(self.rows(orden="vencida"), ["ANA", "BETO"])
-        self.assertEqual(self.rows(orden="deuda")[0], "ANA")
+        overdue = self.client.get(reverse("calls-whatsapp-open", args=[self.ana.student_id]))
+        future = self.client.get(reverse("calls-whatsapp-open", args=[self.beto.student_id]))
+        self.assertIn("text=Promesa%20incumplida%20ANA", overdue.url)
+        self.assertNotIn("Promesa%20incumplida", future.url)
 
     def test_quick_note_requires_permission_to_add_calls(self):
         viewer = self._user("lector")
@@ -966,9 +1008,24 @@ class CallWorkflowTests(TestCase):
         session.save()
         self.assertEqual(self.quick(self.ana.student, response="OTROS").status_code, 403)
 
-    def test_pay_button_links_to_the_course_with_debt(self):
-        page = self.client.get(reverse("calls-students"))
-        self.assertContains(page, reverse("payment-create-for", args=[self.ana.pk]))
+    def test_quick_note_without_next_returns_non_assigners_to_the_queue(self):
+        grant(self.caller, "core.view_all_calls")
+        self.client.force_login(self.caller)
+        session = self.client.session
+        session["selected_campus_id"] = self.campus.pk
+        session.save()
+        response = self.client.post(
+            reverse("calls-quick-note", args=[self.ana.student_id]),
+            {"response": "NO_CONTESTO"},
+        )
+        self.assertRedirects(response, reverse("calls-queue"))
+
+    def test_assignment_page_does_not_expose_old_follow_up_controls(self):
+        page = self.client.get(reverse("calls-assignments"))
+        self.assertTemplateUsed(page, "calls/assignments.html")
+        self.assertNotContains(page, reverse("payment-create-for", args=[self.ana.pk]))
+        self.assertNotContains(page, 'name="promesa"')
+        self.assertNotContains(page, 'name="contacto"')
 
     def test_report_shows_assignment_progress_per_user(self):
         make_list(self.campus, "Lista", [self.ana, self.beto], [self.caller])
@@ -1038,14 +1095,31 @@ class CallQueueConsumerTests(RealtimeFixture, TransactionTestCase):
         self.assertEqual(json.loads(message["text"]), {"type": "changed"})
         await self._disconnect(communicator)
 
+    async def test_ping_renews_group_membership_and_returns_pong(self):
+        communicator, connected = await self._connect(self.user, self.campus.pk)
+        self.assertTrue(connected)
+        await communicator.send_input(
+            {"type": "websocket.receive", "text": json.dumps({"type": "ping"})}
+        )
+        message = await communicator.receive_output(timeout=3)
+        self.assertEqual(json.loads(message["text"]), {"type": "pong"})
+        await sync_to_async(broadcast)(self.campus.pk)
+        message = await communicator.receive_output(timeout=3)
+        self.assertEqual(json.loads(message["text"]), {"type": "changed"})
+        await self._disconnect(communicator)
+
     async def test_rejects_anonymous_unauthorized_or_foreign_campus(self):
         outsider = await sync_to_async(create_user)(username="nada", password="x" * 12)
         await sync_to_async(outsider.campuses.add)(self.campus)
+        unassigned = await sync_to_async(create_user)(username="sin_lista", manage_calls=True)
+        await sync_to_async(unassigned.campuses.add)(self.campus)
         for user, campus_id in (
             (AnonymousUser(), self.campus.pk),
             (outsider, self.campus.pk),
+            (unassigned, self.campus.pk),
             (self.user, self.other_campus.pk),
             (self.user, None),
+            (self.user, "sede-invalida"),
         ):
             communicator, connected = await self._connect(user, campus_id)
             self.assertFalse(connected)
@@ -1054,6 +1128,13 @@ class CallQueueConsumerTests(RealtimeFixture, TransactionTestCase):
 
 @override_settings(CHANNEL_LAYERS=IN_MEMORY_LAYERS)
 class CallQueueNotifyTests(RealtimeFixture, TestCase):
+    def test_channel_layer_health_check(self):
+        from django.core.management import call_command
+
+        output = StringIO()
+        call_command("check_channel_layer", stdout=output)
+        self.assertIn("está disponible", output.getvalue())
+
     def _login(self):
         self.client.force_login(self.user)
         session = self.client.session

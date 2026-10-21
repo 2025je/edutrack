@@ -5,7 +5,7 @@
   <div><h1 class="mb-0">Historial de llamadas</h1><div class="muted">Todo el historial de llamadas registrado en la sede seleccionada.</div></div>
   <div class="no-print">
     <button class="btn-flat grey-text text-darken-2" onclick="window.print()">Imprimir</button>
-    <a class="btn-flat blue-text" href="{% url 'calls-students' %}">Volver a llamadas</a>
+    {% if perms.core.assign_calls %}<a class="btn-flat blue-text" href="{% url 'calls-assignments' %}">Asignar llamadas</a>{% elif perms.calls.add_callnote %}<a class="btn-flat blue-text" href="{% url 'calls-queue' %}">Pedir llamada</a>{% endif %}
   </div>
 </div>
 <form method="get" class="row no-print" data-live-filter>

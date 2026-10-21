@@ -637,7 +637,7 @@ class CallStudentListView(FeaturePermissionMixin, SelectedCampusRequiredMixin, L
 
 
 class CallQuickNoteView(StudentNotesMixin, TemplateView):
-    """Registro rápido de una llamada desde la lista de alumnos."""
+    """Registro rápido de una llamada desde la cola."""
 
     required_permission = "calls.add_callnote"
     http_method_names = ["post"]
@@ -663,10 +663,7 @@ class CallQuickNoteView(StudentNotesMixin, TemplateView):
             target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
         ):
             target = reverse(
-                "calls-students"
-                if request.user.has_perm("core.view_all_calls")
-                or request.user.has_perm("core.assign_calls")
-                else "calls-queue"
+                "calls-assignments" if request.user.has_perm("core.assign_calls") else "calls-queue"
             )
         return redirect(target)
 

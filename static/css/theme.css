@@ -77,6 +77,8 @@
     html:root body .btn-flat:hover{background:var(--md-hover)}
     html:root body main input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=submit]),html:root body main textarea,html:root body main select.browser-default{background:var(--md-surface);color:var(--md-text);border-color:var(--md-border)}
     html[data-theme=dark]:root body main input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=submit]),html[data-theme=dark]:root body main textarea,html[data-theme=dark]:root body main select.browser-default{background:var(--md-background);border-color:rgba(255,255,255,.16)}
+    html[data-theme=dark]:root body [type=checkbox]:not(.filled-in):disabled:not(:checked)+span:not(.lever):before{background:var(--md-surface-alt);border:2px solid var(--md-muted)}
+    html[data-theme=dark]:root body [type=checkbox]:not(.filled-in):disabled:checked+span:not(.lever):before{border-right-color:var(--md-muted);border-bottom-color:var(--md-muted)}
     html:root body main input::placeholder,html:root body main textarea::placeholder{color:var(--md-muted)}
     html:root body header nav .header-search form{background:rgba(255,255,255,.16)}
     html:root body .check-list{background:var(--md-surface);border-color:var(--md-border)}

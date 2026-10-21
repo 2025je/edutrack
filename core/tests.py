@@ -91,7 +91,7 @@ class OnboardingGuideTests(TestCase):
         urls = {step["url"] for step in tour}
         self.assertIn(reverse("payment-create"), urls)
         self.assertNotIn(reverse("user-list"), urls)
-        self.assertNotIn(reverse("calls-students"), urls)
+        self.assertNotIn(reverse("calls-assignments"), urls)
 
     def test_tour_filters_actions_by_permission(self):
         user = create_user(username="cajero-tour2", register_payments=True)
@@ -456,7 +456,7 @@ class RoleGroupMatrixTests(TestCase):
         for hidden in (
             reverse("student-create"),
             reverse("enrollment-list"),
-            reverse("calls-students"),
+            reverse("calls-assignments"),
             reverse("calls-report"),
             reverse("user-list"),
             reverse("campus-list"),
@@ -490,15 +490,19 @@ class RoleGroupMatrixTests(TestCase):
         page = self.client.get(reverse("global-search"), {"q": "usuarios"})
         self.assertNotContains(page, f'href="{reverse("user-list")}"')
         page = self.client.get(reverse("global-search"), {"q": "segui"})
-        self.assertNotContains(page, f'href="{reverse("calls-students")}"')
+        self.assertNotContains(page, f'href="{reverse("calls-assignments")}"')
         page = self.client.get(reverse("global-search"), {"q": "pedir"})
         self.assertContains(page, f'href="{reverse("calls-queue")}"')
 
     def test_search_finds_subsections_and_quick_filters_and_returns_json(self):
-        self.user_in("Administrador general")
-        response = self.client.get(reverse("global-search"), {"q": "llamar hoy", "json": "1"})
+        self.user_in("Asignador de llamadas")
+        response = self.client.get(reverse("global-search"), {"q": "asignar llamadas", "json": "1"})
         urls = [r["url"] for r in response.json()["results"]]
-        self.assertIn(reverse("calls-students") + "?promesa=hoy", urls)
+        self.assertIn(reverse("calls-assignments"), urls)
+        self.assertNotIn(reverse("calls-assignments") + "?promesa=hoy", urls)
+        for query in ("seguimiento", "llamar hoy"):
+            response = self.client.get(reverse("global-search"), {"q": query, "json": "1"})
+            self.assertEqual(response.json()["results"], [])
         self.user_in("Gestor de llamadas")
         response = self.client.get(reverse("global-search"), {"q": "plantilla promesa"})
         self.assertContains(response, "?tipo=PROMESA")
@@ -523,11 +527,9 @@ class RoleGroupMatrixTests(TestCase):
 
     def test_call_manager_sees_queue_but_not_follow_up_or_assignments(self):
         self.user_in("Gestor de llamadas")
-        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 403)
         self.assertEqual(self.client.get(reverse("calls-queue")).status_code, 200)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 403)
         self.user_in("Asignador de llamadas")
-        self.assertEqual(self.client.get(reverse("calls-students")).status_code, 200)
         self.assertEqual(self.client.get(reverse("calls-assignments")).status_code, 200)
 
     def test_administrator_manages_users_and_campuses_without_superuser(self):

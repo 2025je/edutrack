@@ -14,7 +14,7 @@
   <select name="promesa" class="browser-default" aria-label="Promesas">{% for key, label in promises %}<option value="{{ key }}" {% if promise_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
   <label class="call-filters-debt"><input type="checkbox" name="deuda" value="1" {% if only_debt %}checked{% endif %}><span>Solo con deuda</span></label>
   <button class="btn">Buscar</button>
-  <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Limpiar</a>
+  <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-assignments' %}">Limpiar</a>
 </form>
 <style>
 .call-filters{display:flex;flex-wrap:wrap;align-items:center;gap:12px}

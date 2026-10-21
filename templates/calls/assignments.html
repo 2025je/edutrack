@@ -17,8 +17,16 @@
     </div>
     <h6 class="strong mt">Usuarios que realizan llamadas</h6>
     <p class="muted">Marca uno o varios. Todos verán las mismas matrículas. Quien ya pertenece a otra sublista aparece bloqueado hasta quitarlo de ella (abajo, en «Sublistas existentes»).</p>
-    <div style="max-height:220px;overflow:auto">
-    {% for c in callers %}<div><label><input type="checkbox" name="usuarios" value="{{ c.user.pk }}" {% if c.other or c.no_campus %}disabled{% endif %}><span {% if c.other or c.no_campus %}style="opacity:.75"{% endif %}>{{ c.user.username }}</span></label>{% if c.no_campus %} <span class="muted">· no tiene acceso a esta sede; asígnale la sede en Usuarios para poder agregarlo.</span>{% elif c.other %} <span class="muted">· bloqueado: ya está en «{{ c.other.name }}».</span>{% endif %}</div>
+    <div class="callers-list">
+    {% for c in callers %}
+      <div class="caller-option{% if c.other or c.no_campus %} is-unavailable{% endif %}">
+        <label>
+          <input type="checkbox" name="usuarios" value="{{ c.user.pk }}" {% if c.other or c.no_campus %}disabled aria-describedby="caller-reason-{{ c.user.pk }}"{% endif %}>
+          <span class="caller-name"><strong>{{ c.user.username }}</strong><span class="caller-state">{% if c.other or c.no_campus %}<i class="material-icons" aria-hidden="true">lock</i>No disponible{% else %}<i class="material-icons" aria-hidden="true">check_circle</i>Disponible{% endif %}</span></span>
+        </label>
+        {% if c.no_campus %}<div class="caller-reason" id="caller-reason-{{ c.user.pk }}">Este usuario no tiene acceso a esta sede; asígnale la sede en Usuarios para poder agregarlo.</div>
+        {% elif c.other %}<div class="caller-reason" id="caller-reason-{{ c.user.pk }}">Usuario bloqueado: ya está en «{{ c.other.name }}». Quítalo de esa sublista para habilitarlo.</div>{% endif %}
+      </div>
     {% empty %}<div class="help">No hay usuarios con acceso a llamadas en esta sede.</div>{% endfor %}
     </div>
 
@@ -68,10 +76,26 @@
     <p class="mt"><strong id="selected-count">0</strong> matrícula(s) seleccionada(s) para la sublista.</p>
     <div id="selected-inputs"></div>
     <button class="btn" type="submit">Crear sublista</button>
-    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver</a>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'dashboard' %}">Volver al panel</a>
   </form>
 </div>
 <style>
+  .callers-list{--caller-accent:#1565c0;--caller-bg:#f1f7ff;--caller-text:#183b63;--caller-border:#8eb7e5;--caller-state:#14532d;--caller-state-bg:#dcfce7;--caller-blocked-bg:#f3f4f6;--caller-blocked-text:#515965;--caller-blocked-border:#8b929c;--caller-blocked-state:#78350f;--caller-blocked-state-bg:#fef3c7;max-height:300px;overflow:auto;padding:4px}
+  html[data-theme=dark] .callers-list{--caller-accent:#90caf9;--caller-bg:#23364d;--caller-text:#f1f5ff;--caller-border:#73a6d4;--caller-state:#bbf7d0;--caller-state-bg:#194332;--caller-blocked-bg:#30323d;--caller-blocked-text:#b6bdca;--caller-blocked-border:#81899a;--caller-blocked-state:#fde68a;--caller-blocked-state-bg:#493c25}
+  .caller-option{padding:8px 10px;margin-bottom:6px;border:1px solid var(--caller-border);border-radius:6px;background:var(--caller-bg)}
+  .caller-option.is-unavailable{border-color:var(--caller-blocked-border);border-style:dashed;background:var(--caller-blocked-bg)}
+  .caller-option label{display:block;cursor:pointer}
+  .caller-option.is-unavailable label{cursor:not-allowed}
+  html:root body main .callers-list .caller-name{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;height:auto;min-height:25px;line-height:1.5;padding-left:32px;color:var(--caller-text);opacity:1}
+  html:root body main .callers-list .is-unavailable .caller-name{color:var(--caller-blocked-text)}
+  .caller-state{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:12px;font-size:.75rem;font-weight:600;background:var(--caller-state-bg);color:var(--caller-state)}
+  .caller-state .material-icons{font-size:15px}
+  .is-unavailable .caller-state{background:var(--caller-blocked-state-bg);color:var(--caller-blocked-state)}
+  .caller-reason{margin:4px 0 0 32px;font-size:.85rem;line-height:1.5;color:var(--caller-blocked-text)}
+  html:root body main .callers-list .caller-option input[type=checkbox]:not(.filled-in):not(:disabled):not(:checked)+span.caller-name:not(.lever):before{border:2px solid var(--caller-accent);background:transparent}
+  html:root body main .callers-list .caller-option input[type=checkbox]:not(.filled-in):disabled:not(:checked)+span.caller-name:not(.lever):before{border:2px dashed var(--caller-blocked-border);background:repeating-linear-gradient(135deg,transparent,transparent 3px,var(--caller-blocked-border) 3px,var(--caller-blocked-border) 4px)}
+  html:root body main .callers-list input[type=checkbox]:checked+.caller-name:before{border-right-color:var(--caller-accent);border-bottom-color:var(--caller-accent)}
+  .callers-list input:focus-visible+.caller-name{outline:2px solid var(--caller-accent);outline-offset:3px;border-radius:3px}
   .sub-item{padding:12px 0;border-top:1px solid rgba(128,128,128,.25)}
   .sub-item:first-of-type{border-top:0}
   .sub-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

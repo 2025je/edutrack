@@ -5,7 +5,6 @@ from django.urls import reverse
 ACADEMIC = ("core.view_academic_reports",)
 DEBTS = ("core.view_pending_balances",)
 CALLS = ("calls.view_callnote",)
-FOLLOW_UP = ("calls.view_callnote", "core.view_all_calls")
 
 
 def entry(group, name, url_name, perms=(), keywords="", query="", superuser=False):
@@ -124,23 +123,6 @@ SECTIONS = [
         "cash-closing",
         ("payments.view_payment", "core.view_financial_reports"),
         "arqueo cajero cerrar firmar",
-    ),
-    entry("Llamadas", "Seguimiento de llamadas", "calls-students", FOLLOW_UP, "cobranza whatsapp"),
-    entry(
-        "Llamadas",
-        "Llamar hoy (promesas de pago)",
-        "calls-students",
-        FOLLOW_UP,
-        "promesas vencen hoy mañana recordatorio",
-        "?promesa=hoy",
-    ),
-    entry(
-        "Llamadas",
-        "Promesas incumplidas",
-        "calls-students",
-        FOLLOW_UP,
-        "vencidas promesa pago",
-        "?promesa=vencida",
     ),
     entry(
         "Llamadas",

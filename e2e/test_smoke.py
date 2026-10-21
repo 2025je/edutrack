@@ -28,7 +28,7 @@ def logged_page(page: Page) -> Page:
     page.wait_for_load_state("networkidle")
     assert "/ingresar" not in page.url, "No se pudo iniciar sesión con las credenciales E2E"
     chooser = page.locator("main select")
-    page.goto(f"{BASE_URL}/llamadas/alumnos/")
+    page.goto(f"{BASE_URL}/llamadas/asignacion/")
     if chooser.count() and page.get_by_role("button", name="Continuar").count():
         chooser.first.select_option(index=1)
         page.get_by_role("button", name="Continuar").click()
@@ -51,13 +51,13 @@ def test_search_shortcut_focuses_global_search(logged_page: Page):
 
 @needs_login
 def test_call_list_filters(logged_page: Page):
-    logged_page.goto(f"{BASE_URL}/llamadas/alumnos/")
+    logged_page.goto(f"{BASE_URL}/llamadas/asignacion/")
     expect(logged_page.locator("select[name=orden]")).to_be_visible()
 
 
 @needs_login
 def test_table_headers_are_sticky(logged_page: Page):
-    logged_page.goto(f"{BASE_URL}/llamadas/alumnos/")
+    logged_page.goto(f"{BASE_URL}/llamadas/asignacion/")
     header = logged_page.locator("main .table-wrap thead th").first
     expect(header).to_have_css("position", re.compile("sticky"))
 

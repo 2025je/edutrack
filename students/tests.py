@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 import threading
@@ -8,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.formats import localize
 from openpyxl import load_workbook
 
 from core.models import Campus, User
@@ -304,6 +306,88 @@ class ExtraReportsTests(TestCase):
         )
         response = self.client.get(reverse("report-debt-by-course"))
         self.assertEqual(response.context["totals"], ["Total", "", "", 1, "80.00"])
+
+    def _share_enrollment(self, enrollment, other_count):
+        promoters = [self.promoter]
+        for index in range(other_count):
+            promoter = Promoter.objects.create(name=f"Promotor compartido {index}")
+            promoter.campuses.add(self.campus)
+            promoters.append(promoter)
+        enrollment.promoter.set(promoters)
+        return promoters
+
+    def test_promoter_report_splits_shared_enrollments_in_html_and_excel(self):
+        self.pending.promoter.add(self.promoter)
+        self.seat.promoter.add(self.promoter)
+        shared = Enrollment.objects.create(
+            campus=self.campus,
+            student=Student.objects.create(campus=self.campus, full_name="Ficha compartida"),
+            course=self.course,
+        )
+        promoters = self._share_enrollment(shared, 3)
+        url = reverse("report-enrollments-by-promoter")
+        response = self.client.get(url)
+        self.assertIn(
+            [self.promoter.name, Decimal("3.25"), Decimal("2.25"), 1],
+            response.context["rows"],
+        )
+        self.assertEqual(response.context["rows"][0][0], self.promoter.name)
+        self.assertContains(
+            response,
+            f'<td class="right-align">{localize(Decimal("3.25"))}</td>',
+            html=True,
+        )
+        for promoter in promoters[1:]:
+            self.assertIn(
+                [promoter.name, Decimal("0.25"), Decimal("0.25"), 0],
+                response.context["rows"],
+            )
+        self.assertEqual(response.context["totals"], ["Total de matrículas", 4, 3, 1])
+
+        grant(self.user, "core.export_reports")
+        response = self.client.get(url, {"export": "xlsx"})
+        self.assertEqual(response.status_code, 200)
+        sheet = load_workbook(BytesIO(response.content), data_only=True).active
+        rows = list(sheet.iter_rows(values_only=True))
+        self.assertIn((self.promoter.name, 3.25, 2.25, 1), rows)
+        self.assertEqual(rows[-1], ("Total de matrículas", 4, 3, 1))
+
+    def test_promoter_report_accumulates_thirds_before_rounding(self):
+        promoters = self._share_enrollment(self.with_course, 2)
+        self.pending.promoter.set(promoters)
+        self.seat.promoter.set(promoters)
+        response = self.client.get(reverse("report-enrollments-by-promoter"))
+        for promoter in promoters:
+            self.assertIn(
+                [promoter.name, 1, Decimal("0.67"), Decimal("0.33")],
+                response.context["rows"],
+            )
+        self.assertEqual(response.context["totals"], ["Total de matrículas", 3, 2, 1])
+
+    def test_promoter_report_preserves_unassigned_and_excludes_inactive_and_other_campuses(self):
+        promoters = self._share_enrollment(self.with_course, 1)
+        inactive = Enrollment.objects.create(campus=self.campus, course=self.course, active=False)
+        inactive.promoter.set(promoters)
+        other_campus = Campus.objects.create(name="Otra sede de informes", active=True)
+        foreign = Enrollment.objects.create(
+            campus=other_campus,
+            student=Student.objects.create(campus=other_campus, full_name="Otra sede"),
+        )
+        foreign.promoter.set(promoters)
+        response = self.client.get(reverse("report-enrollments-by-promoter"))
+        for promoter in promoters:
+            self.assertIn(
+                [promoter.name, Decimal("0.50"), Decimal("0.50"), 0],
+                response.context["rows"],
+            )
+        self.assertIn(["Sin promotor", 2, 1, 1], response.context["rows"])
+        self.assertEqual(response.context["totals"], ["Total de matrículas", 3, 2, 1])
+
+    def test_promoter_report_without_active_enrollments_is_empty(self):
+        Enrollment.objects.filter(campus=self.campus).update(active=False)
+        response = self.client.get(reverse("report-enrollments-by-promoter"))
+        self.assertEqual(response.context["rows"], [])
+        self.assertIsNone(response.context["totals"])
 
     def test_financial_report_requires_permission(self):
         limited = create_user(username="limited", password="x-Test-pass-123", manage_students=True)

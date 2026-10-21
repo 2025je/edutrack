@@ -26,7 +26,7 @@
     {% for error in form.note.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     <button class="btn" type="submit">Guardar registro</button>
     <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-notes' student.pk %}">Ver historial</a>
-    <a class="btn-flat grey-text text-darken-2" href="{% if next %}{{ next }}{% else %}{% url 'calls-students' %}{% endif %}">Cancelar</a>
+    <a class="btn-flat grey-text text-darken-2" href="{% if next %}{{ next }}{% else %}{% url 'calls-notes-all' %}{% endif %}">Cancelar</a>
   </form>
 </div>
 {% endblock %}

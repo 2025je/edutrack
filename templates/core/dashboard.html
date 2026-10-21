@@ -59,7 +59,7 @@
   <a class="btn-flat blue-text" href="{% url 'installment-list' %}">Ver cuotas pendientes</a>
   <a class="btn-flat blue-text" href="{% url 'pending-debts' %}">Consultar deudas</a>
   {% endif %}
-  {% if perms.core.view_all_calls or perms.core.assign_calls %}<a class="btn-flat blue-text" href="{% url 'calls-students' %}">Llamadas</a>{% endif %}
+  {% if perms.core.assign_calls %}<a class="btn-flat blue-text" href="{% url 'calls-assignments' %}">Asignar llamadas</a>{% endif %}
     {% if perms.core.view_call_reports %}<a class="btn-flat blue-text" href="{% url 'calls-report' %}">Reporte de llamadas</a>{% endif %}  {% if not perms.students.view_student and not perms.students.view_enrollment and not perms.students.add_enrollment and not perms.payments.add_payment and not perms.payments.view_payment and not perms.calls.view_callnote %}<p class="muted mb-0">Tu usuario no tiene permisos operativos asignados. Contacta al administrador.</p>{% endif %}
 </div></div>
 <div class="card card-pad"><h2>Sedes habilitadas</h2>{% if campuses %}<ul class="browser-default mb-0" style="padding-left:1.5rem;list-style:disc">{% for campus in campuses %}<li>{{ campus.name }}</li>{% endfor %}</ul>{% else %}<p class="muted mb-0">Tu usuario aún no tiene sedes asignadas. Solicita al administrador que configure tus permisos.</p>{% endif %}</div>

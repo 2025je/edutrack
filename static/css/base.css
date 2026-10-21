@@ -101,7 +101,7 @@
     html[data-theme=dark] textarea{height:auto;padding:8px 10px}
     html[data-theme=dark] input:focus:not([readonly]),html[data-theme=dark] textarea:focus:not([readonly]),html[data-theme=dark] select.browser-default:focus{border:1px solid #64b5f6!important;box-shadow:0 0 0 2px rgba(100,181,246,.25)!important;outline:0}
     html[data-theme=dark] input::placeholder,html[data-theme=dark] textarea::placeholder{color:#6b7280}
-    html[data-theme=dark] input:disabled,html[data-theme=dark] select:disabled{opacity:.55}
+    html[data-theme=dark] input:disabled:not([type=checkbox]):not([type=radio]),html[data-theme=dark] select:disabled{opacity:.55}
     html[data-theme=dark] .check-list{background:#12151b;border-color:#303644}
     html[data-theme=dark] [type=checkbox]:checked+span:not(.lever):before{border-right-color:#64b5f6;border-bottom-color:#64b5f6}
     html[data-theme=dark] [type=radio]:checked+span:after,html[data-theme=dark] [type=radio].with-gap:checked+span:before{border-color:#64b5f6}

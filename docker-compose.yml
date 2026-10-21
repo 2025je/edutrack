@@ -67,7 +67,7 @@ services:
     build: .
     container_name: django_ws
     restart: unless-stopped
-    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --workers ${WS_WORKERS:-1} --proxy-headers --forwarded-allow-ips "*" --no-access-log
+    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --workers ${WS_WORKERS:-1} --no-access-log
     env_file:
       - .env
     environment:
@@ -77,10 +77,10 @@ services:
     volumes:
       - .:/app
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8001/salud/', headers={'Host': 'localhost'}), timeout=4)"]
-      interval: 15s
-      timeout: 6s
-      retries: 5
+      test: ["CMD", "python", "manage.py", "check_channel_layer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
       start_period: 30s
     depends_on:
       db:

@@ -203,16 +203,33 @@
   function connect() {
     if (!("WebSocket" in window)) return;
     var ws;
+    var heartbeat = null;
+    var lastPong = 0;
     try {
       ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/llamadas/cola/");
     } catch (e) { return; }
-    ws.onopen = function () { live = true; retryDelay = 1000; refreshSoon(); };
+    ws.onopen = function () {
+      live = true;
+      retryDelay = 1000;
+      lastPong = Date.now();
+      refreshSoon();
+      heartbeat = setInterval(function () {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - lastPong > 65000) { ws.close(); return; }
+        try { ws.send(JSON.stringify({type: "ping"})); } catch (e) { ws.close(); }
+      }, 25000);
+    };
     ws.onmessage = function (e) {
-      try { if (JSON.parse(e.data).type === "changed") refreshSoon(); } catch (err) {}
+      try {
+        var data = JSON.parse(e.data);
+        if (data.type === "pong") lastPong = Date.now();
+        else if (data.type === "changed") refreshSoon();
+      } catch (err) {}
     };
     ws.onclose = function () {
       live = false;
-      setTimeout(connect, retryDelay);
+      if (heartbeat) clearInterval(heartbeat);
+      setTimeout(connect, retryDelay * (0.8 + Math.random() * 0.4));
       retryDelay = Math.min(retryDelay * 2, 30000);
     };
   }

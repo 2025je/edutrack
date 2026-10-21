@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 
 from .views import (
     CallAssignmentView,
@@ -11,7 +12,6 @@ from .views import (
     CallQueueStatusView,
     CallQueueView,
     CallReportView,
-    CallStudentListView,
     WhatsAppMarkView,
     WhatsAppOpenView,
     WhatsAppTemplateView,
@@ -45,7 +45,15 @@ urlpatterns = [
         WhatsAppMarkView.as_view(),
         name="calls-whatsapp-mark",
     ),
-    path("asignaciones/", CallAssignmentView.as_view(), name="calls-assignments"),
+    path("asignacion/", CallAssignmentView.as_view(), name="calls-assignments"),
     path("reportes/", CallReportView.as_view(), name="calls-report"),
-    path("alumnos/", CallStudentListView.as_view(), name="calls-students"),
+    # Rutas anteriores: redirigen conservando los filtros para no romper marcadores.
+    path(
+        "asignaciones/",
+        RedirectView.as_view(pattern_name="calls-assignments", query_string=True),
+    ),
+    path(
+        "alumnos/",
+        RedirectView.as_view(pattern_name="calls-assignments", query_string=True),
+    ),
 ]

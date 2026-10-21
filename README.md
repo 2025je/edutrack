@@ -12,6 +12,10 @@ EduTrack es una aplicación web en español para administrar estudiantes, sedes,
 - **Sedes y usuarios:** campus, usuarios, grupos, permisos, logos y volantes por sede.
 - **Auditoría:** historial de actividades y de cada estudiante.
 
+La asignación de sublistas de llamadas está en `/llamadas/asignacion/` y requiere `core.assign_calls`; las rutas anteriores `/llamadas/alumnos/` y `/llamadas/asignaciones/` redirigen allí. La antigua vista de seguimiento ya no tiene acceso desde rutas, menú ni búsqueda. Los gestores siguen trabajando desde la cola de llamadas.
+
+El informe **Matrículas por promotor** reparte cada matrícula entre todos sus promotores: una ficha compartida por cuatro aporta `0.25` a cada uno. El reparto también se aplica a las columnas «Con estudiante» y «Vacantes reservadas», tanto en pantalla como en Excel. Se acumulan las fracciones antes de redondear a dos decimales; la fila de totales cuenta matrículas únicas, por lo que puede diferir de la suma de los valores individuales ya redondeados.
+
 Los recibos son comprobantes internos; no son comprobantes electrónicos autorizados por SUNAT.
 
 ## Grupos y permisos
@@ -157,7 +161,17 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d web ws
 
 ### Tiempo real (Django Channels)
 
-La cola de llamadas recibe los cambios del equipo por WebSocket (`/ws/llamadas/cola/`). En Docker, Gunicorn sigue atendiendo HTTP y el servicio `ws` (Uvicorn/ASGI) atiende solo `/ws/`; nginx enruta cada ruta y ambos procesos se comunican mediante Redis (`CHANNEL_LAYERS`). El WebSocket solo avisa que algo cambió: la página vuelve a pedir `/llamadas/cola/estado/`, que aplica los permisos. Si el WebSocket no está disponible, la página consulta el estado cada 4 segundos.
+La cola de llamadas recibe los cambios del equipo por WebSocket (`/ws/llamadas/cola/`). En Docker, Gunicorn sigue atendiendo HTTP y el servicio `ws` (Uvicorn/ASGI) atiende solo `/ws/`; nginx enruta cada ruta y ambos procesos se comunican mediante Redis (`CHANNEL_LAYERS`). La conexión requiere sesión, permiso y pertenencia a una sublista activa de la sede seleccionada. El WebSocket solo avisa que algo cambió: la página vuelve a pedir `/llamadas/cola/estado/`, que aplica los permisos. La página envía un heartbeat cada 25 segundos; cada ping renueva la pertenencia al grupo Redis y, si no hay respuesta, el navegador cierra y reconecta con espera incremental. Si el WebSocket no está disponible, consulta el estado cada 4 segundos.
+
+El servicio WebSocket no procesa `X-Forwarded-*`; Uvicorn no habilita `--proxy-headers` ni confía en todos los contenedores. nginx conserva esos encabezados para el servicio HTTP Gunicorn. El healthcheck de `ws` ejecuta `check_channel_layer`, que envía y recibe un mensaje de prueba a través del backend Redis; las conexiones y desconexiones se registran en los logs de Django sin incluir nombres de usuario.
+
+Con el stack levantado (`docker compose up --build -d`), ejecuta la prueba de humo desde la raíz. Verifica Redis/Channels, la salud HTTP y los estáticos a través de nginx, y que el proxy rechaza una conexión WebSocket anónima. No modifica datos de la aplicación:
+
+```powershell
+uv run python scripts/test_channels.py
+```
+
+Para un host distinto de `127.0.0.1:8080`, define `$env:EDUTRACK_BASE_URL` antes de ejecutar el script. La prueba positiva de autorización y notificaciones se cubre en las pruebas Django; en producción también puedes verificar que una conexión autenticada devuelve `101 Switching Protocols` desde las herramientas de red del navegador.
 
 `runserver_plus` no atiende WebSockets (la cola usa la consulta periódica). Para probarlos en local, ejecuta todo con Uvicorn. La opción `--env-file .env` de `uv` carga las variables antes de iniciar Django; en desarrollo, activa `DEBUG` para que el ASGI sirva también los archivos estáticos. Sin ello, la página puede cargar sin el CSS ni las imágenes locales. Sin `REDIS_URL` se usa una capa en memoria válida solo para un proceso:
 

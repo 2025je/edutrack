@@ -1,4 +1,5 @@
 from decimal import Decimal
+from fractions import Fraction
 
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q, Sum
@@ -11,7 +12,7 @@ from core.campus import get_selected_campus
 from core.excel import xlsx_response
 from payments.models import Payment
 
-from .models import EMPTY_VALUE, Enrollment, Promoter
+from .models import EMPTY_VALUE, Enrollment
 from .views import CampusScopedMixin
 
 
@@ -88,29 +89,47 @@ class SimpleReportView(CampusScopedMixin, TemplateView):
 class EnrollmentsByPromoterReportView(SimpleReportView):
     required_permission = "core.view_academic_reports"
     title = "Matrículas por promotor"
-    description = "Matrículas activas de la sede agrupadas por promotor."
+    description = (
+        "Matrículas activas de la sede. Cada ficha compartida aporta 1 dividido entre "
+        "sus promotores a cada uno. Los valores se redondean a dos decimales; "
+        "el total cuenta las matrículas sin duplicarlas."
+    )
     columns = ("Promotor", "Matrículas", "Con estudiante", "Vacantes reservadas")
     numeric_columns = (1, 2, 3)
 
     def build(self, campus):
-        promoters = (
-            Promoter.objects.filter(enrollments__campus=campus, enrollments__active=True)
-            .annotate(
-                total=Count("enrollments", distinct=True),
-                with_student=Count(
-                    "enrollments", filter=Q(enrollments__student__isnull=False), distinct=True
-                ),
-            )
-            .order_by("-total", "name")
+        enrollments = (
+            Enrollment.objects.filter(campus=campus, active=True)
+            .only("student_id")
+            .prefetch_related("promoter")
         )
-        rows = [[p.name, p.total, p.with_student, p.total - p.with_student] for p in promoters]
-        without = Enrollment.objects.filter(campus=campus, active=True, promoter__isnull=True)
-        total = without.count()
-        if total:
-            with_student = without.filter(student__isnull=False).count()
-            rows.append(["Sin promotor", total, with_student, total - with_student])
-        totals = ["Total de matrículas"] + [sum(row[i] for row in rows) for i in (1, 2, 3)]
-        return rows, None if not rows else totals
+        grouped: dict[int | None, tuple[str, list[Fraction]]] = {}
+        totals = [0, 0, 0]
+        for enrollment in enrollments:
+            promoters = list(enrollment.promoter.all())
+            share = Fraction(1, len(promoters) or 1)
+            category = 1 if enrollment.student_id is not None else 2
+            totals[0] += 1
+            totals[category] += 1
+            for promoter in promoters or [None]:
+                key = promoter.pk if promoter is not None else None
+                name = promoter.name if promoter is not None else "Sin promotor"
+                _, counts = grouped.setdefault(key, (name, [Fraction(0) for _ in range(3)]))
+                counts[0] += share
+                counts[category] += share
+
+        without = grouped.pop(None, None)
+        entries = sorted(grouped.values(), key=lambda entry: (-entry[1][0], entry[0]))
+        if without is not None:
+            entries.append(without)
+
+        def display_count(value: Fraction) -> int | Decimal:
+            if value.denominator == 1:
+                return value.numerator
+            return (Decimal(value.numerator) / value.denominator).quantize(Decimal("0.01"))
+
+        rows = [[name, *(display_count(value) for value in counts)] for name, counts in entries]
+        return rows, ["Total de matrículas", *totals] if rows else None
 
 
 class EnrollmentsByMonthReportView(SimpleReportView):

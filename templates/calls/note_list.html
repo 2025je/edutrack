@@ -5,7 +5,7 @@
   <div><h1 class="mb-0">Historial de llamadas</h1><div class="muted">{{ student.full_name }} · {{ student.phone }}</div></div>
   <div class="no-print">
     {% if perms.calls.add_callnote %}<a class="btn" href="{% url 'calls-note-create' student.pk %}">Registrar llamada</a>{% endif %}
-    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-students' %}">Volver a llamadas</a>
+    <a class="btn-flat grey-text text-darken-2" href="{% url 'calls-notes-all' %}">Volver al historial</a>
   </div>
 </div>
 <details class="mb"><summary class="strong" style="cursor:pointer;font-size:1.3rem;margin-bottom:.75rem">Cursos matriculados{% if courses %} ({{ courses|length }}){% endif %}</summary>
