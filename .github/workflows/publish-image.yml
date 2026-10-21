@@ -1,0 +1,142 @@
+name: Publish production image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Validate release on Python 3.13
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: edutrack_release
+          POSTGRES_USER: edutrack_release
+          POSTGRES_PASSWORD: ci-only-release-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edutrack_release -d edutrack_release"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-a-secret
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DB_NAME: edutrack_release
+      DB_USER: edutrack_release
+      DB_PASSWORD: ci-only-release-password
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      REDIS_URL: redis://127.0.0.1:6379/1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Lint and check formatting
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+
+      - name: Check Django and migrations
+        run: |
+          uv run --locked python manage.py check
+          uv run --locked python manage.py makemigrations --check --dry-run
+
+      - name: Run Django tests
+        run: uv run --locked python manage.py test
+
+  publish:
+    name: Build, scan, and publish
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+
+      - name: Build and push a candidate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/${{ github.repository }}:candidate-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan candidate image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:candidate-${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote the scanned image to release tags
+        env:
+          CANDIDATE: ghcr.io/${{ github.repository }}:candidate-${{ github.sha }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          docker push "$CANDIDATE"
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$CANDIDATE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"

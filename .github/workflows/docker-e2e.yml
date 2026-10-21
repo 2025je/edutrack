@@ -1,0 +1,116 @@
+name: Docker and browser smoke tests
+
+on:
+  push:
+    paths:
+      - "**/*.py"
+      - "templates/**"
+      - "static/**"
+      - "Dockerfile"
+      - "docker-compose*.yml"
+      - "nginx/**"
+      - "e2e/**"
+      - "scripts/test_channels.py"
+      - "requirements-e2e.txt"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docker-e2e.yml"
+  pull_request:
+    paths:
+      - "**/*.py"
+      - "templates/**"
+      - "static/**"
+      - "Dockerfile"
+      - "docker-compose*.yml"
+      - "nginx/**"
+      - "e2e/**"
+      - "scripts/test_channels.py"
+      - "requirements-e2e.txt"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docker-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Docker, Redis, nginx, and Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      E2E_URL: http://127.0.0.1:8080
+      E2E_USER: e2e-manager
+      E2E_PASSWORD: ci-only-e2e-password
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install application and test dependencies
+        run: |
+          uv sync --locked
+          uv pip install --python .venv/bin/python --requirement requirements-e2e.txt
+
+      - name: Install Chromium
+        run: uv run --no-sync -- python -m playwright install --with-deps chromium
+
+      - name: Create isolated Compose environment
+        run: |
+          cat > .env <<'EOF'
+          DJANGO_SECRET_KEY=ci-only-not-a-secret
+          DJANGO_DEBUG=False
+          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+          DB_NAME=edutrack_ci
+          DB_USER=edutrack_ci
+          DB_PASSWORD=ci-only-db-password
+          DB_HOST=db
+          DB_PORT=5432
+          GRAFANA_ADMIN_PASSWORD=ci-only-grafana-password
+          BACKUP_ON_START=0
+          EOF
+          chmod 600 .env
+
+      - name: Build and start production services
+        run: docker compose up --build --wait --wait-timeout 300 web ws nginx
+
+      - name: Seed fictitious browser-test data
+        run: docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python e2e/seed_ci.py
+
+      - name: Test Redis, nginx, static files, and WebSocket rejection
+        run: uv run --no-sync -- python scripts/test_channels.py
+
+      - name: Run Playwright smoke tests
+        run: >-
+          uv run --no-sync -- python -m pytest e2e -q --browser chromium
+          --tracing retain-on-failure --screenshot only-on-failure
+          --output test-results
+
+      - name: Upload browser artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop ephemeral services
+        if: always()
+        run: docker compose down --volumes --remove-orphans

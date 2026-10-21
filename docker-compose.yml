@@ -35,6 +35,7 @@ services:
 
   # Instancia 2: Aplicación Django
   web:
+    image: ${EDUTRACK_IMAGE:-edutrack:local}
     build: .
     container_name: django_app
     restart: unless-stopped
@@ -46,7 +47,6 @@ services:
     expose:
       - "8000"
     volumes:
-      - .:/app
       - django_media:/app/media
       - django_static:/app/staticfiles
     healthcheck:
@@ -64,6 +64,7 @@ services:
   # Instancia 2b: WebSockets (Django Channels sobre Uvicorn/ASGI). Gunicorn sigue
   # atendiendo HTTP; este servicio solo recibe /ws/ y comparte avisos vía Redis.
   ws:
+    image: ${EDUTRACK_IMAGE:-edutrack:local}
     build: .
     container_name: django_ws
     restart: unless-stopped
@@ -74,8 +75,6 @@ services:
       REDIS_URL: redis://redis:6379/1
     expose:
       - "8001"
-    volumes:
-      - .:/app
     healthcheck:
       test: ["CMD", "python", "manage.py", "check_channel_layer"]
       interval: 30s

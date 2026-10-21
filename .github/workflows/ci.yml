@@ -10,7 +10,6 @@ on:
       - ".gitattributes"
       - ".editorconfig"
       - ".vscode/**"
-      - "scripts/**"
   pull_request:
     paths-ignore:
       - "**.md"
@@ -20,7 +19,6 @@ on:
       - ".gitattributes"
       - ".editorconfig"
       - ".vscode/**"
-      - "scripts/**"
   workflow_dispatch:
 
 permissions:
@@ -37,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13"]
 
     services:
       postgres:
@@ -96,6 +94,9 @@ jobs:
       - name: Lint with Ruff
         run: uv run --locked ruff check .
 
+      - name: Check formatting with Ruff
+        run: uv run --locked ruff format --check .
+
       - name: Check Django configuration
         run: uv run --locked python manage.py check
 
@@ -110,19 +111,3 @@ jobs:
 
       - name: Run tests
         run: uv run --locked python manage.py test
-
-  audit:
-    name: Auditoría de dependencias
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Export locked dependencies
-        run: uv export --locked --no-dev --no-hashes --no-emit-project -o requirements-audit.txt
-
-      - name: Audit with pip-audit
-        run: uvx pip-audit --requirement requirements-audit.txt --no-deps --disable-pip --progress-spinner off

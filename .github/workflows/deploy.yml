@@ -1,0 +1,118 @@
+name: Deploy production image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Published release tag to deploy (for example, v1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy approved GHCR image
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      GHCR_READ_USERNAME: ${{ secrets.GHCR_READ_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate deployment settings and configure SSH
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS GHCR_READ_USERNAME GHCR_READ_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required in the production environment."
+              exit 1
+            fi
+          done
+          [[ "$IMAGE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::image_tag must be a published vMAJOR.MINOR.PATCH release tag."
+            exit 1
+          }
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$GHCR_READ_USERNAME" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9_/-]+$ ]]
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/edutrack_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/edutrack_deploy" "$HOME/.ssh/known_hosts"
+
+      - name: Copy Compose configuration without runtime data
+        run: |
+          SSH="ssh -i $HOME/.ssh/edutrack_deploy -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          rsync -az \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='.venv/' \
+            --exclude='media/' \
+            --exclude='staticfiles/' \
+            --exclude='backups/' \
+            --exclude='__pycache__/' \
+            --exclude='.ruff_cache/' \
+            -e "$SSH" ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Log in to GHCR on the deployment host
+        run: |
+          printf '%s' "$GHCR_READ_TOKEN" |
+            ssh -i "$HOME/.ssh/edutrack_deploy" \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "docker login ghcr.io --username '$GHCR_READ_USERNAME' --password-stdin"
+
+      - name: Deploy, verify health, and roll back on failure
+        run: |
+          ssh -i "$HOME/.ssh/edutrack_deploy" \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash -s -- '$DEPLOY_PATH' '$IMAGE_TAG'" <<'REMOTE'
+          set -euo pipefail
+          deploy_path=$1
+          image_tag=$2
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          cd "$deploy_path"
+          test -f .env || { echo "Deployment .env is missing." >&2; exit 1; }
+          previous_tag=$(cat .edutrack-image-tag 2>/dev/null || true)
+
+          deploy() {
+            local tag=$1
+            export EDUTRACK_IMAGE="ghcr.io/2025je/edutrack:${tag}"
+            docker compose pull web ws || return 1
+            docker compose up -d --no-build --wait --wait-timeout 300 web ws nginx || return 1
+            docker compose exec -T ws python manage.py check_channel_layer || return 1
+            curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8080/salud/ >/dev/null
+          }
+
+          if ! deploy "$image_tag"; then
+            echo "Deployment verification failed." >&2
+            if [[ "$previous_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+              echo "Rolling back to $previous_tag." >&2
+              deploy "$previous_tag" || echo "Automatic rollback failed; manual recovery is required." >&2
+            fi
+            exit 1
+          fi
+
+          printf '%s\n' "$image_tag" > .edutrack-image-tag
+          echo "Deployed $image_tag successfully."
+          REMOTE

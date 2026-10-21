@@ -1,0 +1,90 @@
+name: Backup and restore verification
+
+on:
+  schedule:
+    - cron: "43 6 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/backup.sh"
+      - "scripts/restore.sh"
+      - "docker-compose.yml"
+      - "e2e/seed_ci.py"
+      - ".github/workflows/backup-restore.yml"
+  pull_request:
+    paths:
+      - "scripts/backup.sh"
+      - "scripts/restore.sh"
+      - "docker-compose.yml"
+      - "e2e/seed_ci.py"
+      - ".github/workflows/backup-restore.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-restore-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify PostgreSQL and media restoration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Create isolated Compose environment
+        run: |
+          cat > .env <<'EOF'
+          DJANGO_SECRET_KEY=ci-only-not-a-secret
+          DJANGO_DEBUG=False
+          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+          DB_NAME=edutrack_backup_ci
+          DB_USER=edutrack_backup_ci
+          DB_PASSWORD=ci-only-db-password
+          DB_HOST=db
+          DB_PORT=5432
+          GRAFANA_ADMIN_PASSWORD=ci-only-grafana-password
+          BACKUP_ON_START=0
+          EOF
+          chmod 600 .env
+
+      - name: Build and start an isolated database
+        run: docker compose up --build --wait --wait-timeout 300 web
+
+      - name: Seed fictitious records and media
+        env:
+          E2E_PASSWORD: ci-only-e2e-password
+        run: |
+          docker compose exec -T -e E2E_PASSWORD="$E2E_PASSWORD" web python e2e/seed_ci.py
+          docker compose exec -T web sh -c 'printf "restore-check\n" > /app/media/ci-restore-check.txt'
+
+      - name: Create and restore-test a one-time backup
+        env:
+          BACKUP_DIR: /backups/ci_${{ github.run_id }}_${{ github.run_attempt }}
+        run: docker compose run --rm -e BACKUP_ONCE=1 -e BACKUP_DIR backup
+
+      - name: Verify media archive can be restored
+        env:
+          BACKUP_DIR: /backups/ci_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          docker compose run --rm -e BACKUP_DIR --entrypoint sh backup -c '
+            set -eu
+            test "$(cut -d" " -f1 "$BACKUP_DIR/STATUS")" = "OK"
+            archive=$(find "$BACKUP_DIR/media" -type f -name "*.tar.gz" -print -quit)
+            test -n "$archive"
+            mkdir -p /tmp/media-restore
+            tar -xzf "$archive" -C /tmp/media-restore
+            cmp /tmp/media-restore/ci-restore-check.txt /srv/media/ci-restore-check.txt
+          '
+
+      - name: Stop ephemeral services and remove test backup
+        if: always()
+        env:
+          BACKUP_DIR: backups/ci_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          docker compose down --volumes --remove-orphans
+          rm -rf "$BACKUP_DIR"

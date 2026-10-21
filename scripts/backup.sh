@@ -141,6 +141,10 @@ seconds_until_next_run() {
 
 log "Servicio de respaldos iniciado (diario a las ${AT_HOUR}:00 UTC, se conservan $KEEP)."
 until pg_isready -q; do sleep 2; done
+if [ "${BACKUP_ONCE:-0}" = "1" ]; then
+  backup_once
+  exit $?
+fi
 [ "$ON_START" = "1" ] && backup_once
 while true; do
   wait_s=$(seconds_until_next_run)

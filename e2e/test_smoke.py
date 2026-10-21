@@ -52,7 +52,16 @@ def test_search_shortcut_focuses_global_search(logged_page: Page):
 @needs_login
 def test_call_list_filters(logged_page: Page):
     logged_page.goto(f"{BASE_URL}/llamadas/asignacion/")
-    expect(logged_page.locator("select[name=orden]")).to_be_visible()
+    expect(logged_page.locator("select#curso")).to_be_visible()
+    expect(logged_page.locator("select#estado")).to_be_visible()
+
+
+@needs_login
+def test_assignment_page_shows_available_callers(logged_page: Page):
+    logged_page.goto(f"{BASE_URL}/llamadas/asignacion/")
+    caller = logged_page.locator(".caller-option").filter(has_text="e2e-caller")
+    expect(caller).to_be_visible()
+    expect(caller.locator(".caller-state")).to_contain_text("Disponible")
 
 
 @needs_login
