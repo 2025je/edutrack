@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Sincronizar EduTrack Desktop · EduTrack{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col s12 l10 offset-l1">
+        <div class="card card-pad">
+            <h1>Sincronizar EduTrack Desktop</h1>
+            <p>Descarga el archivo completo de la sede seleccionada para trabajar sin conexión. Después de editarlo en Desktop, sube el archivo de sincronización para revisar los cambios antes de aplicarlos.</p>
+            <p class="note">El archivo contiene datos personales. Guárdalo y compártelo solo por un medio autorizado. Los registros que no se incluyan en la sincronización no se borran.</p>
+            {% if selected_campus %}
+                <p><a class="btn-flat blue-text" href="{% url 'desktop-campus-export' %}">Descargar datos de esta sede</a></p>
+            {% elif perms.core.add_campus %}
+                <p>¿Aún no existe la sede en la web? Sube aquí un paquete inicial creado en EduTrack Desktop para crearla junto con sus cursos, promotores, estudiantes y matrículas.</p>
+            {% endif %}
+
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="preview">
+                <div class="field">
+                    <label for="offline-package">Paquete de sede o sincronización (.edutrack)</label>
+                    <input id="offline-package" type="file" name="package" accept=".edutrack,.zip" required>
+                </div>
+                <button class="btn" type="submit">Revisar cambios</button>
+            </form>
+        </div>
+
+        {% if preview %}
+            <div class="card card-pad">
+                <h2>Vista previa de {{ preview.campus_name }}</h2>
+                <p class="muted small">Paquete: {{ preview.bundle_id }}. Los cambios se guardarán solo al confirmar.</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="confirm">
+                    <input type="hidden" name="token" value="{{ import_token }}">
+
+                    {% for title, rows in preview.preview_sections %}
+                        {% if rows %}
+                            <h3>{{ title }}</h3>
+                            <div class="table-wrap">
+                                <table class="highlight">
+                                    <thead><tr><th>Registro</th><th>Acción</th><th>Detalle / resolución</th></tr></thead>
+                                    <tbody>
+                                        {% for row in rows %}
+                                            <tr>
+                                                <td>{{ row.label|default:row.kind }}</td>
+                                                <td>
+                                                    {% if row.state == "new" %}Nuevo
+                                                    {% elif row.state == "update" %}Actualizar
+                                                    {% elif row.state == "unchanged" %}Sin cambios
+                                                    {% elif row.state == "conflict" %}Conflicto
+                                                    {% elif row.state == "omitted" %}Omitido
+                                                    {% else %}No se puede aplicar{% endif %}
+                                                </td>
+                                                <td>
+                                                    {{ row.message|default:"Se sincronizará." }}
+                                                    {% if row.resolvable %}
+                                                        <label for="resolution-{{ row.kind }}-{{ row.source_id }}">Resolución</label>
+                                                        <select id="resolution-{{ row.kind }}-{{ row.source_id }}" name="resolution:{{ row.kind }}:{{ row.source_id }}" required>
+                                                            <option value="" {% if not row.selected_resolution %}selected{% endif %} disabled>Selecciona una opción</option>
+                                                            <option value="web" {% if row.selected_resolution == "web" %}selected{% endif %}>Conservar versión web</option>
+                                                            <option value="desktop" {% if row.selected_resolution == "desktop" %}selected{% endif %}>Aplicar versión Desktop</option>
+                                                        </select>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                    {% if preview.can_import %}
+                        <button class="btn mt" type="submit">Confirmar sincronización</button>
+                    {% else %}
+                        <p class="note">No hay cambios que aplicar.</p>
+                    {% endif %}
+                </form>
+            </div>
+        {% endif %}
+
+        {% if initial_preview %}
+            <div class="card card-pad">
+                <h2>Crear sede: {{ initial_preview.campus_name }}</h2>
+                <p class="muted small">Paquete: {{ initial_preview.bundle_id }}. La sede y todos sus datos se crearán juntos al confirmar.</p>
+                <p><strong>Dirección:</strong> {{ initial_preview.campus_address|default:"No indicada" }}</p>
+                <p><strong>Incluye:</strong> {{ initial_preview.courses|length }} curso(s), {{ initial_preview.promoters|length }} promotor(es), {{ initial_preview.students|length }} estudiante(s) y {{ initial_preview.enrollments|length }} matrícula(s).</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="confirm">
+                    <input type="hidden" name="token" value="{{ import_token }}">
+                    <h3>Estudiantes</h3>
+                    <ul>
+                        {% for row in initial_preview.students %}
+                            <li>{{ row.label }}</li>
+                        {% empty %}
+                            <li>No hay estudiantes en el paquete.</li>
+                        {% endfor %}
+                    </ul>
+                    <h3>Matrículas</h3>
+                    <ul>
+                        {% for row in initial_preview.enrollments %}
+                            <li>{{ row.label }}</li>
+                        {% empty %}
+                            <li>No hay matrículas en el paquete.</li>
+                        {% endfor %}
+                    </ul>
+                    <button class="btn mt" type="submit">Crear sede e importar paquete</button>
+                </form>
+            </div>
+        {% endif %}
+
+        {% if result %}
+            <div class="card card-pad">
+                {% if result.initial_campus %}
+                    <h2>Sede creada e importación completada</h2>
+                    <p><strong>{{ result.campus_name }}</strong> ya está disponible para trabajar en EduTrack web.</p>
+                    <p>Cursos: {{ result.created_courses }} creados. Promotores: {{ result.linked_promoters }} vinculados. Estudiantes: {{ result.created_students }} creados. Matrículas: {{ result.created_enrollments }} creadas.</p>
+                    <p><a class="btn" href="{% url 'desktop-campus-export' %}">Descargar sede para continuar en Desktop</a></p>
+                {% else %}
+                    <h2>Sincronización terminada</h2>
+                    <p>Cursos: {{ result.created_courses }} creados.</p>
+                    <p>Estudiantes: {{ result.created_students }} creados, {{ result.updated_students }} actualizados.</p>
+                    <p>Matrículas: {{ result.created_enrollments }} creadas, {{ result.updated_enrollments }} actualizadas.</p>
+                    <p>Omitidos por errores o conflictos: {{ result.skipped_courses }} curso(s), {{ result.skipped_students }} estudiante(s) y {{ result.skipped_enrollments }} matrícula(s).</p>
+                {% endif %}
+                <p class="muted small">Paquete: {{ result.bundle_id }}</p>
+                {% for title, rows in result_sections %}
+                    {% if rows %}
+                        <h3>{{ title }}</h3>
+                        <div class="table-wrap">
+                            <table class="highlight">
+                                <thead><tr><th>Registro</th><th>Resultado</th><th>Detalle</th></tr></thead>
+                                <tbody>
+                                    {% for row in rows %}
+                                        <tr>
+                                            <td>{{ row.label|default:row.kind }}</td>
+                                            <td>{{ row.state }}</td>
+                                            <td>{{ row.message|default:"Sin cambios." }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

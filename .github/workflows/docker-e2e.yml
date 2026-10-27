@@ -3,31 +3,31 @@ name: Docker and browser smoke tests
 on:
   push:
     paths:
-      - "**/*.py"
-      - "templates/**"
-      - "static/**"
-      - "Dockerfile"
-      - "docker-compose*.yml"
-      - "nginx/**"
-      - "e2e/**"
-      - "scripts/test_channels.py"
-      - "requirements-e2e.txt"
-      - "pyproject.toml"
-      - "uv.lock"
+      - "edutrack-web/**/*.py"
+      - "edutrack-web/templates/**"
+      - "edutrack-web/static/**"
+      - "edutrack-web/Dockerfile"
+      - "edutrack-web/docker-compose*.yml"
+      - "edutrack-web/nginx/**"
+      - "edutrack-web/e2e/**"
+      - "edutrack-web/scripts/test_channels.py"
+      - "edutrack-web/requirements-e2e.txt"
+      - "edutrack-web/pyproject.toml"
+      - "edutrack-web/uv.lock"
       - ".github/workflows/docker-e2e.yml"
   pull_request:
     paths:
-      - "**/*.py"
-      - "templates/**"
-      - "static/**"
-      - "Dockerfile"
-      - "docker-compose*.yml"
-      - "nginx/**"
-      - "e2e/**"
-      - "scripts/test_channels.py"
-      - "requirements-e2e.txt"
-      - "pyproject.toml"
-      - "uv.lock"
+      - "edutrack-web/**/*.py"
+      - "edutrack-web/templates/**"
+      - "edutrack-web/static/**"
+      - "edutrack-web/Dockerfile"
+      - "edutrack-web/docker-compose*.yml"
+      - "edutrack-web/nginx/**"
+      - "edutrack-web/e2e/**"
+      - "edutrack-web/scripts/test_channels.py"
+      - "edutrack-web/requirements-e2e.txt"
+      - "edutrack-web/pyproject.toml"
+      - "edutrack-web/uv.lock"
       - ".github/workflows/docker-e2e.yml"
   workflow_dispatch:
 
@@ -43,6 +43,9 @@ jobs:
     name: Docker, Redis, nginx, and Playwright
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: edutrack-web
     env:
       E2E_URL: http://127.0.0.1:8080
       E2E_USER: e2e-manager
@@ -60,7 +63,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: edutrack-web/uv.lock
 
       - name: Install application and test dependencies
         run: |
@@ -107,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failures
-          path: test-results/
+          path: edutrack-web/test-results/
           if-no-files-found: ignore
           retention-days: 7
 

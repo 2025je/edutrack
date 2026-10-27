@@ -1,5 +1,6 @@
 from django.urls import path
 from .duplicates import StudentDuplicatesView
+from .desktop_import import DesktopOfflineImportView, OfflineCampusExportView
 from .importer import StudentImportView
 from .profile import StudentProfileView
 from .timeline import StudentTimelineView
@@ -37,6 +38,12 @@ from .views import (
 urlpatterns = [
     path("", StudentListView.as_view(), name="student-list"),
     path("importar/", StudentImportView.as_view(), name="student-import"),
+    path("importar-desktop/", DesktopOfflineImportView.as_view(), name="desktop-import"),
+    path(
+        "importar-desktop/exportar/",
+        OfflineCampusExportView.as_view(),
+        name="desktop-campus-export",
+    ),
     path("duplicados/", StudentDuplicatesView.as_view(), name="student-duplicates"),
     path("<int:pk>/historial/", StudentTimelineView.as_view(), name="student-timeline"),
     path("<int:pk>/ficha/", StudentProfileView.as_view(), name="student-profile"),

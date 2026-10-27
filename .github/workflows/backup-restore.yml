@@ -6,17 +6,17 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "scripts/backup.sh"
-      - "scripts/restore.sh"
-      - "docker-compose.yml"
-      - "e2e/seed_ci.py"
+      - "edutrack-web/scripts/backup.sh"
+      - "edutrack-web/scripts/restore.sh"
+      - "edutrack-web/docker-compose.yml"
+      - "edutrack-web/e2e/seed_ci.py"
       - ".github/workflows/backup-restore.yml"
   pull_request:
     paths:
-      - "scripts/backup.sh"
-      - "scripts/restore.sh"
-      - "docker-compose.yml"
-      - "e2e/seed_ci.py"
+      - "edutrack-web/scripts/backup.sh"
+      - "edutrack-web/scripts/restore.sh"
+      - "edutrack-web/docker-compose.yml"
+      - "edutrack-web/e2e/seed_ci.py"
       - ".github/workflows/backup-restore.yml"
 
 permissions:
@@ -31,6 +31,9 @@ jobs:
     name: Verify PostgreSQL and media restoration
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: edutrack-web
     steps:
       - name: Check out repository
         uses: actions/checkout@v7

@@ -33,6 +33,7 @@
   {% if perms.students.view_enrollment %}<li><a href="{% url 'enrollment-list' %}"><i class="material-icons">assignment</i>Matrículas</a></li>{% endif %}
   {% if perms.students.view_promoter %}<li><a href="{% url 'promoter-list' %}"><i class="material-icons">badge</i>Promotores</a></li>{% endif %}
   {% if perms.students.add_student %}<li><a href="{% url 'student-import' %}"><i class="material-icons">upload_file</i>Importar Excel</a></li>{% endif %}
+  {% if perms.students.add_student and perms.students.add_enrollment %}<li><a href="{% url 'desktop-import' %}"><i class="material-icons">sync_alt</i>Sincronizar desktop offline</a></li>{% endif %}
   {% if perms.core.deactivate_student and perms.students.change_student %}<li><a href="{% url 'student-duplicates' %}"><i class="material-icons">merge_type</i>Duplicados</a></li>{% endif %}
   {% if perms.core.deactivate_student or perms.core.deactivate_enrollment %}<li><a href="{% url 'trash' %}"><i class="material-icons">delete_sweep</i>Papelera</a></li>{% endif %}
   {% endif %}

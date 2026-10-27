@@ -12,6 +12,7 @@ class Campus(models.Model):
     active = models.BooleanField("Activa", default=True)
     address = models.CharField("Dirección", max_length=200, blank=True)
     logo = models.ImageField("Logo", upload_to="campus_logos/", blank=True)
+    desktop_bundle_id = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     class Meta:
         ordering = ["name"]

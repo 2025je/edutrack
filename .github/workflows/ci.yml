@@ -32,6 +32,9 @@ jobs:
   test:
     name: Python ${{ matrix.python-version }} / PostgreSQL 15
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edutrack-web
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +89,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: edutrack-web/uv.lock
 
       - name: Install dependencies
         run: uv sync --locked

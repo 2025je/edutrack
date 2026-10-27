@@ -3,13 +3,13 @@ name: Dependency audit
 on:
   push:
     paths:
-      - "pyproject.toml"
-      - "uv.lock"
+      - "edutrack-web/pyproject.toml"
+      - "edutrack-web/uv.lock"
       - ".github/workflows/dependency-audit.yml"
   pull_request:
     paths:
-      - "pyproject.toml"
-      - "uv.lock"
+      - "edutrack-web/pyproject.toml"
+      - "edutrack-web/uv.lock"
       - ".github/workflows/dependency-audit.yml"
   schedule:
     - cron: "31 5 * * 1"
@@ -26,6 +26,9 @@ jobs:
   audit:
     name: Audit locked runtime dependencies
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edutrack-web
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -34,7 +37,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: edutrack-web/uv.lock
 
       - name: Export locked production dependencies
         run: uv export --locked --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements-audit.txt"

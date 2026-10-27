@@ -12,6 +12,16 @@ EduTrack es una aplicación web en español para administrar estudiantes, sedes,
 - **Sedes y usuarios:** campus, usuarios, grupos, permisos, logos y volantes por sede.
 - **Auditoría:** historial de actividades y de cada estudiante.
 
+## Sincronización con EduTrack Desktop
+
+En **Estudiantes → Importar desktop offline**, descarga el archivo `.edutrack` de la sede seleccionada. El archivo incluye sus estudiantes, matrículas, cursos y promotores. Ábrelo en la aplicación [EduTrack Desktop](../edutack-desktop/README.md), trabaja sin conexión y genera allí el paquete de sincronización.
+
+Sube el paquete a la misma sección de la web y revisa la vista previa antes de confirmar. Los registros nuevos se crean y los modificados se actualizan. Si un registro también cambió en la web desde la exportación, elige para ese registro si conservar la versión web o aplicar la de Desktop. Los registros ausentes en el paquete no se borran. Las imágenes de fichas se incluyen y pueden adjuntarse o reemplazarse; los pagos no se descargan. Si en Desktop se borra el código de ficha, la web elimina esa ficha y su imagen asociada.
+
+La descarga e importación requieren `students.add_student` y `students.add_enrollment`; para aplicar cambios a registros existentes se requiere además el permiso `students.change_student` o `students.change_enrollment`, según el tipo de registro.
+
+Si la sede aún no existe, un usuario que también tenga `core.add_campus` puede preparar en Desktop un paquete inicial con la sede, cursos, promotores, estudiantes y matrículas. Al confirmar la vista previa, la web crea e importa todo en una sola transacción, asigna la nueva sede al usuario y la selecciona. Los paquetes iniciales no se pueden importar dos veces; después de importar, descarga el archivo de la sede desde la web para continuar sincronizando con sus identificadores definitivos.
+
 La asignación de sublistas de llamadas está en `/llamadas/asignacion/` y requiere `core.assign_calls`; las rutas anteriores `/llamadas/alumnos/` y `/llamadas/asignaciones/` redirigen allí. La antigua vista de seguimiento ya no tiene acceso desde rutas, menú ni búsqueda. Los gestores siguen trabajando desde la cola de llamadas.
 
 El informe **Matrículas por promotor** reparte cada matrícula entre todos sus promotores: una ficha compartida por cuatro aporta `0.25` a cada uno. El reparto también se aplica a las columnas «Con estudiante» y «Vacantes reservadas», tanto en pantalla como en Excel. Se acumulan las fracciones antes de redondear a dos decimales; la fila de totales cuenta matrículas únicas, por lo que puede diferir de la suma de los valores individuales ya redondeados.
@@ -81,7 +91,7 @@ Si aún no tienes el código, clona el repositorio y entra a su carpeta:
 
 ```powershell
 git clone https://github.com/2025je/edutrack.git
-Set-Location edutrack
+Set-Location edutrack\edutrack-web
 ```
 
 1. Crea `.env` desde la plantilla y edita los valores. Usa claves y contraseñas propias; no compartas ni subas este archivo:
@@ -155,7 +165,7 @@ Requisitos: Python 3.12 o 3.13, `uv` y PostgreSQL. La aplicación requiere Postg
 
 ```powershell
 uv sync
-uv run pre-commit install
+uv run pre-commit install --config ../.pre-commit-config.yaml
 ```
 
 Configura en PowerShell las mismas variables de entorno de `.env`, usando `DB_HOST=127.0.0.1`. Django no carga `.env` automáticamente al ejecutarse directamente desde el equipo.
@@ -229,13 +239,13 @@ El script acepta etiquetas de pruebas, por ejemplo `.\scripts\test-postgres.ps1 
 
 El CI prueba Python **3.12 y 3.13**, conforme a `requires-python = ">=3.12,<3.14"`; Python 3.14 no se declara compatible. Los workflows adicionales son:
 
-- **Docker y Playwright** ([docker-e2e.yml](./.github/workflows/docker-e2e.yml)): levanta un stack aislado con PostgreSQL y Redis, crea datos ficticios, prueba nginx/Channels y ejecuta las pruebas de navegador. Los artefactos del navegador se guardan solo si falla.
-- **Respaldos** ([backup-restore.yml](./.github/workflows/backup-restore.yml)): semanalmente y en PR/cambios relevantes, genera un respaldo en una base efímera, verifica la restauración PostgreSQL y extrae/compara el archivo multimedia. No usa ni guarda datos reales.
+- **Docker y Playwright** ([docker-e2e.yml](../.github/workflows/docker-e2e.yml)): levanta un stack aislado con PostgreSQL y Redis, crea datos ficticios, prueba nginx/Channels y ejecuta las pruebas de navegador. Los artefactos del navegador se guardan solo si falla.
+- **Respaldos** ([backup-restore.yml](../.github/workflows/backup-restore.yml)): semanalmente y en PR/cambios relevantes, genera un respaldo en una base efímera, verifica la restauración PostgreSQL y extrae/compara el archivo multimedia. No usa ni guarda datos reales.
   La limpieza usa `sudo -n` solo para eliminar el directorio de respaldo de esa ejecución, cuyos archivos crea el contenedor como `root`.
-- **Auditoría de dependencias** ([dependency-audit.yml](./.github/workflows/dependency-audit.yml)): analiza dependencias de producción al cambiar `uv.lock`/`pyproject.toml` y cada semana.
-- **CodeQL** ([codeql.yml](./.github/workflows/codeql.yml)): analiza Python y JavaScript en push, PR y semanalmente.
-- **Publicación de imagen** ([publish-image.yml](./.github/workflows/publish-image.yml)): al subir una etiqueta `vMAJOR.MINOR.PATCH`, vuelve a probar el proyecto, construye la imagen, analiza vulnerabilidades críticas/altas y solo entonces promueve la imagen en GHCR.
-- **Despliegue** ([deploy.yml](./.github/workflows/deploy.yml)): manual desde GitHub Actions, con el entorno `production` para aprobación y rollback del contenedor si falla la verificación.
+- **Auditoría de dependencias** ([dependency-audit.yml](../.github/workflows/dependency-audit.yml)): analiza dependencias de producción al cambiar `uv.lock`/`pyproject.toml` y cada semana.
+- **CodeQL** ([codeql.yml](../.github/workflows/codeql.yml)): analiza Python y JavaScript en push, PR y semanalmente.
+- **Publicación de imagen** ([publish-image.yml](../.github/workflows/publish-image.yml)): al subir una etiqueta `vMAJOR.MINOR.PATCH`, vuelve a probar el proyecto, construye la imagen, analiza vulnerabilidades críticas/altas y solo entonces promueve la imagen en GHCR.
+- **Despliegue** ([deploy.yml](../.github/workflows/deploy.yml)): manual desde GitHub Actions, con el entorno `production` para aprobación y rollback del contenedor si falla la verificación.
 
 El workflow de Docker crea `.env` temporal con credenciales ficticias y elimina los volúmenes al terminar. Los usuarios y la contraseña E2E se crean solo en esa base de datos efímera.
 La carga se ejecuta desde la raíz del proyecto con `python -m e2e.seed_ci`, para que Python pueda importar `config` y las aplicaciones Django.

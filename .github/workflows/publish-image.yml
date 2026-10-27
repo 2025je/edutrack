@@ -16,6 +16,9 @@ jobs:
   test:
     name: Validate release on Python 3.13
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edutrack-web
     services:
       postgres:
         image: postgres:15-alpine
@@ -62,7 +65,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: edutrack-web/uv.lock
 
       - name: Install locked dependencies
         run: uv sync --locked
@@ -106,7 +109,7 @@ jobs:
       - name: Build and push a candidate image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./edutrack-web
           load: true
           tags: ghcr.io/${{ github.repository }}:candidate-${{ github.sha }}
           cache-from: type=gha
