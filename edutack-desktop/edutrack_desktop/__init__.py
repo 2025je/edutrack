@@ -1,0 +1,1 @@
+"""EduTrack Desktop application package."""

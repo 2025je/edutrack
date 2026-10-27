@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edutrack-desktop"
+version = "0.1.0"
+description = "Aplicación de escritorio offline de EduTrack con Python y QML"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6-Essentials>=6.8,<7",
+    "SQLAlchemy>=2.0,<3",
+    "alembic>=1.13,<2",
+]
+
+[project.scripts]
+edutrack-desktop = "edutrack_desktop.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "pyinstaller>=6,<7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.hatch.build.targets.wheel]
+packages = ["edutrack_desktop"]
+
+[tool.uv]
+package = true
