@@ -35,17 +35,12 @@ class SelectedCampusOrCreatePermissionMixin:
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect("login")
-        if (
-            get_selected_campus(request) is None
-            and not request.user.has_perm("core.add_campus")
-        ):
+        if get_selected_campus(request) is None and not request.user.has_perm("core.add_campus"):
             return redirect("select-campus")
         return super().dispatch(request, *args, **kwargs)
 
 
-class OfflineCampusExportView(
-    DesktopPermissionMixin, SelectedCampusRequiredMixin, View
-):
+class OfflineCampusExportView(DesktopPermissionMixin, SelectedCampusRequiredMixin, View):
     def get(self, request, *args, **kwargs):
         campus = get_selected_campus(request)
         try:
@@ -83,7 +78,9 @@ class DesktopOfflineImportView(
     def preview(self, request):
         upload = request.FILES.get("package")
         if not upload or not upload.name.lower().endswith((".edutrack", ".zip")):
-            messages.error(request, "Selecciona un archivo de sincronización EduTrack (.edutrack o .zip).")
+            messages.error(
+                request, "Selecciona un archivo de sincronización EduTrack (.edutrack o .zip)."
+            )
             return redirect("desktop-import")
         if upload.size > MAX_PACKAGE_BYTES:
             messages.error(request, "El archivo supera el tamaño máximo de 25 MB.")
@@ -125,9 +122,7 @@ class DesktopOfflineImportView(
             {
                 "payload": payload,
                 "campus_id": (
-                    campus.pk
-                    if campus and package["campus_mode"] == "existing"
-                    else None
+                    campus.pk if campus and package["campus_mode"] == "existing" else None
                 ),
                 "campus_mode": package["campus_mode"],
             },
@@ -193,7 +188,9 @@ class DesktopOfflineImportView(
         if missing:
             for row in student_rows + enrollment_rows:
                 row["selected_resolution"] = resolutions[row["kind"]].get(row["source_id"], "")
-            messages.error(request, "Elige para cada conflicto si conservar la web o aplicar Desktop.")
+            messages.error(
+                request, "Elige para cada conflicto si conservar la web o aplicar Desktop."
+            )
             return self.render_preview(
                 request, package, student_rows, enrollment_rows, token, course_rows
             )
@@ -210,25 +207,25 @@ class DesktopOfflineImportView(
                 request, student_rows, enrollment_rows, course_rows, package
             )
             if any(row["state"] == "conflict" for row in student_rows + enrollment_rows):
-                raise OfflinePackageError("Hay conflictos sin resolver; vuelve a revisar el paquete.")
+                raise OfflinePackageError(
+                    "Hay conflictos sin resolver; vuelve a revisar el paquete."
+                )
             (
                 created_courses,
                 created_students,
                 updated_students,
                 created_enrollments,
                 updated_enrollments,
-            ) = (
-                import_package(
-                    package,
-                    campus,
-                    request,
-                    flat_resolutions,
-                    {
-                        "student": request.user.has_perm("students.change_student"),
-                        "enrollment": request.user.has_perm("students.change_enrollment"),
-                        "course": request.user.has_perm("students.add_course"),
-                    },
-                )
+            ) = import_package(
+                package,
+                campus,
+                request,
+                flat_resolutions,
+                {
+                    "student": request.user.has_perm("students.change_student"),
+                    "enrollment": request.user.has_perm("students.change_enrollment"),
+                    "course": request.user.has_perm("students.add_course"),
+                },
             )
         except OfflinePackageError as exc:
             cache.delete(self.cache_key(request, token))
@@ -272,8 +269,7 @@ class DesktopOfflineImportView(
                 )
             )
         can_import = any(
-            row["state"] in ("new", "update")
-            or (row["state"] == "conflict" and row["resolvable"])
+            row["state"] in ("new", "update") or (row["state"] == "conflict" and row["resolvable"])
             for row in course_rows + student_rows + enrollment_rows
         )
         return self.render_to_response(
@@ -302,7 +298,7 @@ class DesktopOfflineImportView(
                 "kind": "student",
                 "source_id": item["id"],
                 "server_id": None,
-                "label": f'{item["last_name"]} {item["first_name"]}'.strip(),
+                "label": f"{item['last_name']} {item['first_name']}".strip(),
                 "state": "new",
                 "message": "Se creará en la sede nueva.",
                 "resolvable": False,
@@ -310,7 +306,7 @@ class DesktopOfflineImportView(
             for item in package["students"]
         ]
         student_names = {
-            item["id"]: f'{item["last_name"]} {item["first_name"]}'.strip()
+            item["id"]: f"{item['last_name']} {item['first_name']}".strip()
             for item in package["students"]
         }
         enrollments = [
@@ -352,7 +348,7 @@ class DesktopOfflineImportView(
                             "kind": "course",
                             "label": item["name"],
                             "state": "Creado",
-                            "message": f'{item["schedule"]} · Grupo {item["group"]}',
+                            "message": f"{item['schedule']} · Grupo {item['group']}",
                         }
                         for item in package["courses"]
                     ],
@@ -373,8 +369,10 @@ class DesktopOfflineImportView(
         elif course_rows:
             result_sections.insert(0, ("Cursos", course_rows))
         if created_courses is None:
-            created_courses = len(package["courses"]) if initial else sum(
-                row["state"] == "new" for row in course_rows
+            created_courses = (
+                len(package["courses"])
+                if initial
+                else sum(row["state"] == "new" for row in course_rows)
             )
         return self.render_to_response(
             self.get_context_data(
@@ -393,12 +391,9 @@ class DesktopOfflineImportView(
                         row["state"] in ("error", "conflict") for row in student_rows
                     ),
                     "skipped_enrollments": sum(
-                        row["state"] in ("error", "conflict", "omitted")
-                        for row in enrollment_rows
+                        row["state"] in ("error", "conflict", "omitted") for row in enrollment_rows
                     ),
-                    "skipped_courses": sum(
-                        row["state"] == "error" for row in course_rows
-                    ),
+                    "skipped_courses": sum(row["state"] == "error" for row in course_rows),
                     "students": student_rows,
                     "enrollments": enrollment_rows,
                     "result_sections": result_sections,
@@ -448,14 +443,10 @@ class DesktopOfflineImportView(
         for enrollment in package["enrollments"]:
             if enrollment["course_id"] not in blocked_course_ids:
                 continue
-            row = next(
-                item
-                for item in enrollment_rows
-                if item["source_id"] == enrollment["id"]
-            )
+            row = next(item for item in enrollment_rows if item["source_id"] == enrollment["id"])
             if row["state"] in ("new", "update"):
-                    row["state"] = "error"
-                    row["message"] = "No tienes permiso para crear el curso vinculado."
+                row["state"] = "error"
+                row["message"] = "No tienes permiso para crear el curso vinculado."
 
     @staticmethod
     def cache_key(request, token):

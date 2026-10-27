@@ -268,14 +268,10 @@ class OfflineSynchronizationTests(TestCase):
         self.assertEqual(unresolved[0]["state"], "conflict")
         self.assertTrue(unresolved[0]["resolvable"])
 
-        keep_web, _ = review_package(
-            package, self.campus, {f'student:{row["id"]}': "web"}
-        )
+        keep_web, _ = review_package(package, self.campus, {f"student:{row['id']}": "web"})
         self.assertEqual(keep_web[0]["state"], "unchanged")
 
-        use_desktop, _ = review_package(
-            package, self.campus, {f'student:{row["id"]}': "desktop"}
-        )
+        use_desktop, _ = review_package(package, self.campus, {f"student:{row['id']}": "desktop"})
         self.assertEqual(use_desktop[0]["state"], "update")
 
     def test_sync_updates_existing_and_creates_new_records(self):

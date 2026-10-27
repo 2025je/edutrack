@@ -27,9 +27,7 @@ MAX_RECORDS = 2000
 MAX_ARCHIVE_FILES = 4002
 PHONE_PATTERN = re.compile(r"9\d{8}\Z")
 HASH_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
-ATTACHMENT_PATTERN = re.compile(
-    r"attachments/[0-9a-f]{64}\.jpg\Z"
-)
+ATTACHMENT_PATTERN = re.compile(r"attachments/[0-9a-f]{64}\.jpg\Z")
 
 STUDENT_FIELDS = (
     "last_name",
@@ -202,11 +200,7 @@ def _enrollment_values(enrollment, attachments=None):
 
 
 def export_campus(campus):
-    students = list(
-        Student.objects.filter(campus=campus)
-        .prefetch_related("phones")
-        .order_by("pk")
-    )
+    students = list(Student.objects.filter(campus=campus).prefetch_related("phones").order_by("pk"))
     student_ids = {student.pk: str(uuid.uuid4()) for student in students}
     student_rows = []
     for student in students:
@@ -280,18 +274,23 @@ def export_campus(campus):
 
 def package_bytes(manifest, attachments=None):
     attachments = attachments or {}
-    if len(manifest.get("students", [])) > MAX_RECORDS or len(
-        manifest.get("enrollments", [])
-    ) > MAX_RECORDS:
+    if (
+        len(manifest.get("students", [])) > MAX_RECORDS
+        or len(manifest.get("enrollments", [])) > MAX_RECORDS
+    ):
         raise OfflinePackageError(f"La sede supera el máximo de {MAX_RECORDS} registros por tipo.")
-    if len(attachments) + 1 > MAX_ARCHIVE_FILES or sum(
-        len(data) for data in attachments.values()
-    ) > MAX_UNCOMPRESSED_BYTES:
+    if (
+        len(attachments) + 1 > MAX_ARCHIVE_FILES
+        or sum(len(data) for data in attachments.values()) > MAX_UNCOMPRESSED_BYTES
+    ):
         raise OfflinePackageError("Las imágenes superan el límite descomprimido permitido.")
-    encoded_manifest = json.dumps(
-        manifest, ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
-    if len(encoded_manifest) + sum(len(data) for data in attachments.values()) > MAX_UNCOMPRESSED_BYTES:
+    encoded_manifest = json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    if (
+        len(encoded_manifest) + sum(len(data) for data in attachments.values())
+        > MAX_UNCOMPRESSED_BYTES
+    ):
         raise OfflinePackageError("Los datos descomprimidos superan el límite permitido.")
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -315,7 +314,9 @@ def parse_package(data):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             infos = archive.infolist()
             if not infos or len(infos) > MAX_ARCHIVE_FILES:
-                raise OfflinePackageError("El paquete contiene una cantidad de archivos no permitida.")
+                raise OfflinePackageError(
+                    "El paquete contiene una cantidad de archivos no permitida."
+                )
             if len({item.filename for item in infos}) != len(infos):
                 raise OfflinePackageError("El paquete contiene nombres de archivo repetidos.")
             if sum(item.file_size for item in infos) > MAX_UNCOMPRESSED_BYTES:
@@ -345,7 +346,9 @@ def parse_package(data):
                 try:
                     with Image.open(io.BytesIO(content)) as image:
                         if image.width * image.height > Image.MAX_IMAGE_PIXELS:
-                            raise OfflinePackageError(f"La imagen {name} supera la resolución permitida.")
+                            raise OfflinePackageError(
+                                f"La imagen {name} supera la resolución permitida."
+                            )
                         image.verify()
                 except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
                     raise OfflinePackageError(f"La imagen {name} no es válida.") from exc
@@ -377,11 +380,7 @@ def _parse_manifest(value, attachments):
         bundle_id = _uuid_text(manifest.get("bundle_id"), "bundle_id")
     except OfflinePackageError:
         raise
-    campus_id = (
-        None
-        if is_new_campus
-        else _positive_id(manifest.get("campus_id"), "campus_id")
-    )
+    campus_id = None if is_new_campus else _positive_id(manifest.get("campus_id"), "campus_id")
     campus_name = _string(manifest.get("campus_name"), "campus_name", 120)
     campus_address = _string(
         manifest.get("campus_address", ""),
@@ -393,15 +392,18 @@ def _parse_manifest(value, attachments):
     raw_enrollments = manifest.get("enrollments")
     raw_courses = manifest.get("courses")
     raw_promoters = manifest.get("promoters")
-    if not all(isinstance(rows, list) for rows in (
-        raw_students, raw_enrollments, raw_courses, raw_promoters
-    )):
+    if not all(
+        isinstance(rows, list)
+        for rows in (raw_students, raw_enrollments, raw_courses, raw_promoters)
+    ):
         raise OfflinePackageError("students, enrollments, courses y promoters deben ser listas.")
     if any(
         len(rows) > MAX_RECORDS
         for rows in (raw_students, raw_enrollments, raw_courses, raw_promoters)
     ):
-        raise OfflinePackageError(f"El paquete supera el máximo de {MAX_RECORDS} registros por tipo.")
+        raise OfflinePackageError(
+            f"El paquete supera el máximo de {MAX_RECORDS} registros por tipo."
+        )
 
     students = []
     student_ids = set()
@@ -424,8 +426,12 @@ def _parse_manifest(value, attachments):
         if not isinstance(phones, list) or not 1 <= len(phones) <= 20:
             raise OfflinePackageError(f"students[{index}] debe tener entre 1 y 20 teléfonos.")
         phones = [_string(phone, "Teléfono", 20) for phone in phones]
-        if any(not PHONE_PATTERN.fullmatch(phone) for phone in phones) or len(set(phones)) != len(phones):
-            raise OfflinePackageError(f"students[{index}] contiene teléfonos inválidos o repetidos.")
+        if any(not PHONE_PATTERN.fullmatch(phone) for phone in phones) or len(set(phones)) != len(
+            phones
+        ):
+            raise OfflinePackageError(
+                f"students[{index}] contiene teléfonos inválidos o repetidos."
+            )
         student = {
             "id": source_id,
             "server_id": server_id,
@@ -461,7 +467,9 @@ def _parse_manifest(value, attachments):
         if student_source_id is not None:
             student_source_id = _uuid_text(student_source_id, "student_id")
             if student_source_id not in student_ids:
-                raise OfflinePackageError(f"enrollments[{index}] apunta a un estudiante inexistente.")
+                raise OfflinePackageError(
+                    f"enrollments[{index}] apunta a un estudiante inexistente."
+                )
         student_server_id = _positive_id(
             row.get("student_server_id"), "student_server_id", optional=True
         )
@@ -481,7 +489,12 @@ def _parse_manifest(value, attachments):
             record_code = None
         elif type(raw_code) is int and raw_code > 0:
             record_code = raw_code
-        elif isinstance(raw_code, str) and raw_code.isascii() and raw_code.isdigit() and int(raw_code) > 0:
+        elif (
+            isinstance(raw_code, str)
+            and raw_code.isascii()
+            and raw_code.isdigit()
+            and int(raw_code) > 0
+        ):
             record_code = int(raw_code)
         else:
             raise OfflinePackageError("El código de ficha debe ser un entero positivo.")
@@ -541,7 +554,9 @@ def _parse_manifest(value, attachments):
                     f"enrollments[{index}] no coincide con el identificador web del estudiante."
                 )
         elif student_server_id is not None:
-            raise OfflinePackageError("Una matrícula sin estudiante no puede tener student_server_id.")
+            raise OfflinePackageError(
+                "Una matrícula sin estudiante no puede tener student_server_id."
+            )
         enrollments.append(enrollment)
 
     if referenced_attachments != set(attachments):
@@ -580,7 +595,8 @@ def _parse_manifest(value, attachments):
             group.isascii() and group.isdigit() and int(group) > 0
         ):
             raise OfflinePackageError("El grupo del curso debe ser un entero positivo.")
-        courses.append({
+        courses.append(
+            {
                 "id": course_id,
                 "server_id": server_id,
                 "name": _string(row.get("name"), "course.name", 120),
@@ -603,7 +619,8 @@ def _parse_manifest(value, attachments):
                     else row.get("capacity")
                 ),
                 "active": _boolean(row.get("active"), "course.active"),
-            })
+            }
+        )
     promoters = []
     promoter_ids = set()
     for raw in raw_promoters:
@@ -614,11 +631,13 @@ def _parse_manifest(value, attachments):
         promoter_ids.add(promoter_id)
         if is_new_campus and row.get("server_id") is not None:
             raise OfflinePackageError("Un promotor de una sede nueva no puede tener ID web.")
-        promoters.append({
+        promoters.append(
+            {
                 "id": promoter_id,
                 "name": _string(row.get("name"), "promoter.name", 120),
                 "active": _boolean(row.get("active"), "promoter.active"),
-            })
+            }
+        )
     if is_new_campus:
         for enrollment in enrollments:
             if enrollment["course_id"] not in course_ids:
@@ -646,9 +665,7 @@ def _row(kind, record, state, message=""):
         "source_id": record["id"],
         "server_id": record["server_id"],
         "label": (
-            f'{record["last_name"]} {record["first_name"]}'.strip()
-            if kind == "student"
-            else ""
+            f"{record['last_name']} {record['first_name']}".strip() if kind == "student" else ""
         ),
         "state": state,
         "message": message,
@@ -722,7 +739,7 @@ def review_courses(package, campus):
             "kind": "course",
             "source_id": item["id"],
             "server_id": server_id,
-            "label": f'{item["name"]} · {item["schedule"]} · Grupo {item["group"]}',
+            "label": f"{item['name']} · {item['schedule']} · Grupo {item['group']}",
             "state": "unchanged",
             "message": "",
             "resolvable": False,
@@ -762,9 +779,11 @@ def review_courses(package, campus):
                 incoming.full_clean()
             except ValidationError as exc:
                 row["state"] = "error"
-                row["message"] = "; ".join(
-                    text for messages in exc.message_dict.values() for text in messages
-                ) if hasattr(exc, "message_dict") else "; ".join(exc.messages)
+                row["message"] = (
+                    "; ".join(text for messages in exc.message_dict.values() for text in messages)
+                    if hasattr(exc, "message_dict")
+                    else "; ".join(exc.messages)
+                )
             else:
                 row["state"] = "new"
                 row["message"] = "Se creará en la sede."
@@ -790,20 +809,21 @@ def review_package(package, campus, resolutions=None):
             _student_values(current) if current else None,
             student_fingerprint,
         )
-        resolution = resolutions.get(f'student:{student["id"]}')
+        resolution = resolutions.get(f"student:{student['id']}")
         if state == "conflict" and resolution in ("web", "desktop"):
             if resolution == "web":
                 state, message = "unchanged", "Se conservará la versión web."
             elif current:
                 state, message = "update", "Se aplicará la versión Desktop elegida."
             else:
-                state, message = "error", "No se puede restaurar automáticamente un registro eliminado."
+                state, message = (
+                    "error",
+                    "No se puede restaurar automáticamente un registro eliminado.",
+                )
         student_states[student["id"]] = state
         student_rows.append(_row("student", student, state, message))
 
-    existing_name_keys = {
-        name_key(item.full_name): item.pk for item in existing_students.values()
-    }
+    existing_name_keys = {name_key(item.full_name): item.pk for item in existing_students.values()}
     existing_documents = {
         item.document_number.strip().casefold(): item.pk
         for item in existing_students.values()
@@ -851,9 +871,11 @@ def review_package(package, campus, resolutions=None):
             student_states[student["id"]] = "error"
             row = next(item for item in student_rows if item["source_id"] == student["id"])
             row["state"] = "error"
-            row["message"] = "; ".join(
-                text for messages in exc.message_dict.values() for text in messages
-            ) if hasattr(exc, "message_dict") else "; ".join(exc.messages)
+            row["message"] = (
+                "; ".join(text for messages in exc.message_dict.values() for text in messages)
+                if hasattr(exc, "message_dict")
+                else "; ".join(exc.messages)
+            )
         else:
             pending_names[key] = student["id"]
             if document:
@@ -862,7 +884,9 @@ def review_package(package, campus, resolutions=None):
     _, courses = review_courses(package, campus)
     promoters = {
         item.pk: item
-        for item in Promoter.objects.filter(Q(campuses=campus) | Q(campuses__isnull=True)).distinct()
+        for item in Promoter.objects.filter(
+            Q(campuses=campus) | Q(campuses__isnull=True)
+        ).distinct()
     }
     enrollments = {
         item.pk: item
@@ -887,32 +911,43 @@ def review_package(package, campus, resolutions=None):
             _enrollment_values(current) if current else None,
             enrollment_fingerprint,
         )
-        resolution = resolutions.get(f'enrollment:{enrollment["id"]}')
+        resolution = resolutions.get(f"enrollment:{enrollment['id']}")
         if state == "conflict" and resolution in ("web", "desktop"):
             if resolution == "web":
                 state, message = "unchanged", "Se conservará la versión web."
             elif current:
                 state, message = "update", "Se aplicará la versión Desktop elegida."
             else:
-                state, message = "error", "No se puede restaurar automáticamente una matrícula eliminada."
+                state, message = (
+                    "error",
+                    "No se puede restaurar automáticamente una matrícula eliminada.",
+                )
         enrollment_states[enrollment["id"]] = state
 
         if state in ("new", "update"):
             linked_student = (
                 next(
-                    (item for item in package["students"] if item["id"] == enrollment["student_id"]),
+                    (
+                        item
+                        for item in package["students"]
+                        if item["id"] == enrollment["student_id"]
+                    ),
                     None,
                 )
                 if enrollment["student_id"]
                 else None
             )
             target_student_id = (
-                linked_student["server_id"] if linked_student and linked_student["server_id"] else None
+                linked_student["server_id"]
+                if linked_student and linked_student["server_id"]
+                else None
             )
             if linked_student and student_states[linked_student["id"]] == "error":
                 state, message = "error", "El estudiante vinculado tiene datos inválidos."
-            elif linked_student and not linked_student["active"] and (
-                not current or current.student_id != linked_student["server_id"]
+            elif (
+                linked_student
+                and not linked_student["active"]
+                and (not current or current.student_id != linked_student["server_id"])
             ):
                 state, message = "error", "No se puede matricular a un estudiante inactivo."
             elif linked_student and student_states[linked_student["id"]] == "conflict":
@@ -925,7 +960,10 @@ def review_package(package, campus, resolutions=None):
                 state, message = "error", "El curso ya no existe o pertenece a otra sede."
             elif enrollment["course_id"] and not course.active:
                 if not current or current.course_id != enrollment["course_id"]:
-                    state, message = "error", "No se pueden asignar matrículas nuevas a un curso inactivo."
+                    state, message = (
+                        "error",
+                        "No se pueden asignar matrículas nuevas a un curso inactivo.",
+                    )
             elif any(pk not in promoters for pk in enrollment["promoter_ids"]):
                 state, message = "error", "Uno o más promotores ya no pertenecen a esta sede."
             elif any(
@@ -945,14 +983,22 @@ def review_package(package, campus, resolutions=None):
                     current.student_id if current and not linked_student else None
                 )
                 duplicate_pair = (
-                    Enrollment.objects.filter(student_id=linked_id, course_id=enrollment["course_id"])
+                    Enrollment.objects.filter(
+                        student_id=linked_id, course_id=enrollment["course_id"]
+                    )
                     .exclude(pk=current.pk if current else None)
                     .exists()
                     if linked_id and enrollment["course_id"]
                     else False
                 )
-                pair_key = (linked_student["id"] if linked_student else None, enrollment["course_id"])
-                code_key = (date.fromisoformat(enrollment["enrollment_date"]), enrollment["record_code"])
+                pair_key = (
+                    linked_student["id"] if linked_student else None,
+                    enrollment["course_id"],
+                )
+                code_key = (
+                    date.fromisoformat(enrollment["enrollment_date"]),
+                    enrollment["record_code"],
+                )
                 if duplicate_pair or (
                     enrollment["course_id"]
                     and pair_key in seen_pairs
@@ -986,7 +1032,7 @@ def review_package(package, campus, resolutions=None):
             linked = next(
                 item for item in package["students"] if item["id"] == enrollment["student_id"]
             )
-            label = f'{linked["last_name"]} {linked["first_name"]}'.strip()
+            label = f"{linked['last_name']} {linked['first_name']}".strip()
         row = _row("enrollment", enrollment, state, message)
         row["label"] = label
         enrollment_rows.append(row)
@@ -1063,8 +1109,7 @@ def import_initial_package(package, request):
                 "campus_mode": "existing",
                 "campus_id": campus.pk,
                 "courses": [
-                    {**item, "server_id": course_map[item["id"]]}
-                    for item in package["courses"]
+                    {**item, "server_id": course_map[item["id"]]} for item in package["courses"]
                 ],
                 "enrollments": [
                     {
@@ -1113,9 +1158,7 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
         with transaction.atomic():
             list(Student.objects.select_for_update().filter(campus=campus))
             list(
-                Enrollment.objects.select_for_update(of=("self",))
-                .filter(campus=campus)
-                .order_by()
+                Enrollment.objects.select_for_update(of=("self",)).filter(campus=campus).order_by()
             )
             list(Course.objects.select_for_update().filter(campus=campus))
             student_rows, enrollment_rows = review_package(package, campus, resolutions)
@@ -1141,16 +1184,13 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 if enrollment["course_id"] not in blocked_course_ids:
                     continue
                 row = next(
-                    item
-                    for item in enrollment_rows
-                    if item["source_id"] == enrollment["id"]
+                    item for item in enrollment_rows if item["source_id"] == enrollment["id"]
                 )
                 if row["state"] in ("new", "update"):
                     row["state"] = "error"
                     row["message"] = "El curso vinculado no se pudo crear o validar."
             if any(
-                row["state"] == "conflict"
-                for row in student_rows + enrollment_rows + course_rows
+                row["state"] == "conflict" for row in student_rows + enrollment_rows + course_rows
             ):
                 raise OfflinePackageError(
                     "Los datos cambiaron durante la revisión. Actualiza la vista previa y resuelve los conflictos."
@@ -1180,7 +1220,7 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 created = model is None
                 if created:
                     model = Student(campus=campus)
-                model.full_name = f'{student["last_name"]} {student["first_name"]}'.strip()
+                model.full_name = f"{student['last_name']} {student['first_name']}".strip()
                 model.last_name = student["last_name"]
                 model.first_name = student["first_name"]
                 model.document_number = student["document_number"]
@@ -1190,7 +1230,10 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 model.save()
                 StudentPhone.objects.filter(student=model, invalid=False).delete()
                 StudentPhone.objects.bulk_create(
-                    [StudentPhone(student=model, number=number) for number in student["phone_numbers"]]
+                    [
+                        StudentPhone(student=model, number=number)
+                        for number in student["phone_numbers"]
+                    ]
                 )
                 student_map[student["id"]] = model
                 if created:
@@ -1212,9 +1255,7 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 created = current is None
                 model = current or Enrollment(campus=campus)
                 linked = (
-                    student_map.get(enrollment["student_id"])
-                    if enrollment["student_id"]
-                    else None
+                    student_map.get(enrollment["student_id"]) if enrollment["student_id"] else None
                 )
                 model.student = linked
                 model.course = course_map.get(enrollment["course_id"])
@@ -1245,18 +1286,12 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                             package["attachments"][enrollment["record_image"]],
                             name=PurePosixPath(enrollment["record_image"]).name,
                         )
-                        ficha.image = to_jpeg(
-                            uploaded, str(enrollment["record_image_quality"])
-                        )
+                        ficha.image = to_jpeg(uploaded, str(enrollment["record_image_quality"]))
                     elif ficha.image:
                         ficha.image = ""
                     ficha.full_clean()
                     ficha.save()
-                    if (
-                        old_image_name
-                        and old_image_storage
-                        and old_image_name != ficha.image.name
-                    ):
+                    if old_image_name and old_image_storage and old_image_name != ficha.image.name:
                         transaction.on_commit(
                             lambda storage=old_image_storage, name=old_image_name: storage.delete(
                                 name
