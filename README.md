@@ -77,48 +77,63 @@ Asigna a cada usuario las sedes en las que puede trabajar. El usuario selecciona
 
 Requisitos: Docker Desktop con Docker Compose.
 
-1. Crea `.env` en la raíz del proyecto. Usa una clave secreta larga y contraseñas propias; no compartas ni subas el archivo:
+Si aún no tienes el código, clona el repositorio y entra a su carpeta:
 
-   ```dotenv
-   DJANGO_SECRET_KEY=clave-larga-aleatoria
-   DJANGO_DEBUG=False
-   DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
-   DJANGO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
-   DB_NAME=edutrack_pagos
-   DB_USER=edutrack_user
-   DB_PASSWORD=contrasena-segura
-   DB_HOST=db
-   DB_PORT=5432
-   GRAFANA_ADMIN_PASSWORD=contrasena-segura
-   ```
+```powershell
+git clone https://github.com/2025je/edutrack.git
+Set-Location edutrack
+```
 
-2. Construye e inicia los servicios:
+1. Crea `.env` desde la plantilla y edita los valores. Usa claves y contraseñas propias; no compartas ni subas este archivo:
 
    ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Reemplaza `DJANGO_SECRET_KEY`, `DB_PASSWORD` y `GRAFANA_ADMIN_PASSWORD`. Configura `DB_HOST=db` para que los contenedores encuentren PostgreSQL.
+
+2. Valida la configuración, construye e inicia todos los servicios desde la raíz:
+
+   ```powershell
+   docker compose config --quiet
    docker compose up --build -d
    ```
 
-3. Crea el primer usuario administrador:
+   En una instalación nueva, Compose crea los volúmenes y una base PostgreSQL vacía. Cuando PostgreSQL está listo, el contenedor `web` crea el esquema aplicando las migraciones versionadas y recopila los archivos estáticos automáticamente. El servicio de respaldos espera a que `web` esté saludable para no respaldar una base aún sin migrar. No necesitas restaurar un respaldo ni borrar migraciones.
+
+3. Comprueba los servicios y crea el primer usuario administrador:
 
    ```powershell
+   docker compose ps
    docker compose exec web python manage.py createsuperuser
    ```
 
-4. Abre <http://localhost:8080/>.
+4. Abre <http://localhost:8080/> e inicia sesión con el usuario creado. Configura campus, cursos, usuarios y permisos en la aplicación.
 
-La aplicación ejecuta migraciones al iniciar el contenedor web. Para revisar los registros:
+Para revisar los registros de inicio:
 
 ```powershell
 docker compose logs -f web ws nginx
 ```
 
-Para detener los servicios sin borrar los datos:
+Para detener los servicios sin borrar datos:
 
 ```powershell
 docker compose down
 ```
 
-> `docker compose down -v` también elimina el volumen de PostgreSQL y todos sus datos.
+### Borrar la base de datos e iniciar de nuevo
+
+```powershell
+docker compose down
+docker volume rm edutrack_postgres_data
+docker compose up --build -d
+docker compose exec web python manage.py createsuperuser
+```
+
+Este procedimiento es **destructivo e irreversible**: elimina usuarios, campus, matrículas, pagos y el historial de PostgreSQL. Conserva los archivos multimedia y los demás volúmenes. Haz un respaldo antes de ejecutarlo. La aplicación vuelve a crear las tablas al iniciar; las migraciones versionadas son necesarias y no deben borrarse para hacer una instalación limpia.
+
+No uses `docker compose down -v` para reiniciar solo PostgreSQL: también borra otros volúmenes persistentes del proyecto.
 
 ### Acceso desde la red local
 

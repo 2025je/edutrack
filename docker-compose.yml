@@ -108,6 +108,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      web:
+        condition: service_healthy
 
   # Instancia 3: Proxy inverso y servidor de archivos estáticosáticos
   nginx:
