@@ -11,7 +11,7 @@ Dialog {
     property string studentId: ""
     property string studentLabel: ""
     property var studentMatches: []
-    property var promoterIds: []
+    property bool withoutStudent: false
     property bool creatingStudent: false
     property string errorMessage: ""
 
@@ -22,13 +22,13 @@ Dialog {
     height: Math.min(appWindow.height - 56, 590)
     anchors.centerIn: parent
 
-    function openWizard() {
+    function openWizard(reserveSeat) {
         appWindow.showEnrollmentEditor = false
-        step = 0
+        withoutStudent = reserveSeat === true
+        step = withoutStudent ? 1 : 0
         studentId = ""
-        studentLabel = ""
+        studentLabel = withoutStudent ? "Cupo reservado (sin estudiante)" : ""
         studentMatches = []
-        promoterIds = []
         creatingStudent = false
         errorMessage = ""
         studentSearch.text = ""
@@ -39,9 +39,28 @@ Dialog {
         enrollmentDate.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
         enrollmentFee.text = ""
         monthlyFee.text = ""
-        recordCode.text = ""
-        course.currentIndex = 0
+        course.currentIndex = withoutStudent && course.count > 1 ? 1 : 0
+        updateCourseFees()
+        if (!withoutStudent)
+            searchStudents("")
         open()
+    }
+
+    function updateCourseFees() {
+        if (!course.currentValue) {
+            enrollmentFee.text = "0.00"
+            monthlyFee.text = "0.00"
+            return
+        }
+        var availableCourses = desktopBackend.courses
+        for (var index = 0; index < availableCourses.length; index++) {
+            var item = availableCourses[index]
+            if (String(item.id) === String(course.currentValue)) {
+                enrollmentFee.text = String(item.enrollment_fee)
+                monthlyFee.text = String(item.monthly_fee)
+                return
+            }
+        }
     }
 
     function searchStudents(query) {
@@ -49,16 +68,15 @@ Dialog {
         var matches = []
         studentId = ""
         studentLabel = ""
-        if (normalized.length >= 2) {
-            for (var index = 0; index < desktopBackend.students.length; index++) {
-                var student = desktopBackend.students[index]
-                var phones = student.phone_numbers ? student.phone_numbers.join(" ") : ""
-                var searchable = (student.label + " "
-                                  + (student.document_number || "") + " "
-                                  + phones).toLowerCase()
-                if (student.active && searchable.indexOf(normalized) >= 0)
-                    matches.push(student)
-            }
+        for (var index = 0; index < desktopBackend.students.length; index++) {
+            var student = desktopBackend.students[index]
+            var phones = student.phone_numbers ? student.phone_numbers.join(" ") : ""
+            var searchable = (student.label + " "
+                              + (student.document_number || "") + " "
+                              + phones).toLowerCase()
+            if (student.active
+                    && (!normalized || searchable.indexOf(normalized) >= 0))
+                matches.push(student)
         }
         studentMatches = matches
     }
@@ -76,6 +94,7 @@ Dialog {
         for (var index = 0; index < desktopBackend.students.length; index++) {
             var student = desktopBackend.students[index]
             if (student.id === sourceId && student.active) {
+                withoutStudent = false
                 studentId = student.id
                 studentLabel = student.label
                 desktopBackend.selectStudent(student.id)
@@ -102,19 +121,10 @@ Dialog {
         }
         studentId = student.id
         studentLabel = student.last_name + " " + student.first_name
+        withoutStudent = false
         creatingStudent = false
         step = 1
         errorMessage = ""
-    }
-
-    function togglePromoter(promoterId, checked) {
-        var selected = promoterIds.slice()
-        var index = selected.indexOf(promoterId)
-        if (checked && index < 0)
-            selected.push(promoterId)
-        else if (!checked && index >= 0)
-            selected.splice(index, 1)
-        promoterIds = selected
     }
 
     function saveEnrollment() {
@@ -123,10 +133,7 @@ Dialog {
             course_id: course.currentValue,
             enrollment_date: enrollmentDate.text,
             enrollment_fee: enrollmentFee.text,
-            monthly_fee: monthlyFee.text,
-            record_code: recordCode.text,
-            record_image_quality: imageQuality.currentValue,
-            promoter_ids: promoterIds
+            monthly_fee: monthlyFee.text
         })
         if (!saved) {
             errorMessage = desktopBackend.errorMessage
@@ -162,32 +169,105 @@ Dialog {
                     }
                     TextField {
                         id: studentSearch
+                        objectName: "studentSearchField"
                         Layout.fillWidth: true
                         placeholderText: "Buscar estudiante"
                         onTextChanged: wizard.searchStudents(text)
                     }
-                    ListView {
+                    Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(wizard.studentMatches.length * 52, 200)
-                        visible: wizard.studentMatches.length > 0
+                        Layout.preferredHeight: 36
+                        visible: !wizard.creatingStudent
+                        radius: 6
+                        color: appWindow.nestedSurfaceColor
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 12
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Estudiante"
+                                font.bold: true
+                                color: appWindow.primaryTextColor
+                            }
+                            Label {
+                                Layout.preferredWidth: 100
+                                text: "DNI"
+                                font.bold: true
+                                color: appWindow.primaryTextColor
+                            }
+                            Label {
+                                Layout.preferredWidth: 150
+                                text: "Celular"
+                                font.bold: true
+                                color: appWindow.primaryTextColor
+                            }
+                        }
+                    }
+                    ListView {
+                        id: studentTable
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(
+                            Math.max(wizard.studentMatches.length, 1) * 44,
+                            220
+                        )
+                        visible: !wizard.creatingStudent
                         clip: true
                         model: wizard.studentMatches
                         delegate: ItemDelegate {
                             width: ListView.view.width
-                            text: modelData.label
-                                  + (modelData.document_number
-                                     ? " · DNI " + modelData.document_number : "")
-                                  + (modelData.phone_numbers.length
-                                     ? " · " + modelData.phone_numbers.join(", ") : "")
-                            highlighted: wizard.studentId === modelData.id
+                            height: 44
+                            padding: 8
+                            background: Rectangle {
+                                color: wizard.studentId === modelData.id
+                                       ? appWindow.accentSurfaceColor
+                                       : parent.hovered
+                                         ? appWindow.nestedSurfaceColor
+                                         : appWindow.surfaceColor
+                                border.color: appWindow.borderColor
+                            }
+                            contentItem: RowLayout {
+                                spacing: 12
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.label
+                                    elide: Text.ElideRight
+                                    color: appWindow.primaryTextColor
+                                }
+                                Label {
+                                    Layout.preferredWidth: 100
+                                    text: modelData.document_number || "—"
+                                    elide: Text.ElideRight
+                                    color: appWindow.secondaryTextColor
+                                }
+                                Label {
+                                    Layout.preferredWidth: 150
+                                    text: modelData.phone_numbers
+                                          ? modelData.phone_numbers.join(", ")
+                                          : "—"
+                                    elide: Text.ElideRight
+                                    color: appWindow.secondaryTextColor
+                                }
+                            }
                             onClicked: wizard.chooseStudent(modelData.id)
                         }
                     }
                     Label {
                         Layout.fillWidth: true
-                        visible: studentSearch.text.trim().length >= 2
+                        visible: !wizard.creatingStudent
+                                 && studentSearch.text.trim().length > 0
                                  && wizard.studentMatches.length === 0
                         text: "No encontramos coincidencias. Puedes registrar un estudiante nuevo."
+                        wrapMode: Text.Wrap
+                        color: appWindow.secondaryTextColor
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: !wizard.creatingStudent
+                                 && studentSearch.text.trim().length === 0
+                                 && wizard.studentMatches.length === 0
+                        text: "No hay estudiantes activos. Puedes registrar uno nuevo."
                         wrapMode: Text.Wrap
                         color: appWindow.secondaryTextColor
                     }
@@ -212,6 +292,12 @@ Dialog {
                                 wizard.beginStudentCreation()
                             }
                         }
+                    }
+                    Button {
+                        Layout.fillWidth: true
+                        visible: !wizard.creatingStudent
+                        text: "Reservar cupo sin estudiante"
+                        onClicked: wizard.openWizard(true)
                     }
                     GridLayout {
                         Layout.fillWidth: true
@@ -276,11 +362,14 @@ Dialog {
                         ComboBox {
                             id: course
                             Layout.fillWidth: true
-                            model: desktopBackend.courses.filter(function(item) {
+                            model: [{ id: "", label: "PENDIENTE DE ASIGNACIÓN" }].concat(
+                                desktopBackend.courses.filter(function(item) {
                                 return item.active
-                            })
+                                })
+                            )
                             textRole: "label"
                             valueRole: "id"
+                            onActivated: wizard.updateCourseFees()
                         }
                         Label { text: "Fecha de matrícula" }
                         TextField {
@@ -292,52 +381,15 @@ Dialog {
                         TextField {
                             id: enrollmentFee
                             Layout.fillWidth: true
+                            readOnly: !Boolean(course.currentValue)
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
                         }
                         Label { text: "Mensualidad" }
                         TextField {
                             id: monthlyFee
                             Layout.fillWidth: true
+                            readOnly: !Boolean(course.currentValue)
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        }
-                        Label { text: "Código de ficha" }
-                        TextField {
-                            id: recordCode
-                            Layout.fillWidth: true
-                            placeholderText: "Opcional"
-                            inputMethodHints: Qt.ImhDigitsOnly
-                        }
-                        Label { text: "Calidad de imagen" }
-                        ComboBox {
-                            id: imageQuality
-                            Layout.fillWidth: true
-                            model: [
-                                { label: "Baja · 60%", value: 60 },
-                                { label: "Recomendada · 80%", value: 80 },
-                                { label: "Alta · 90%", value: 90 }
-                            ]
-                            textRole: "label"
-                            valueRole: "value"
-                            currentIndex: 1
-                        }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Promotores (opcional)"
-                        font.bold: true
-                    }
-                    Flow {
-                        Layout.fillWidth: true
-                        Repeater {
-                            model: desktopBackend.promoterOptions.filter(function(promoter) {
-                                return promoter.active
-                            })
-                            CheckBox {
-                                required property var modelData
-                                text: modelData.name
-                                checked: wizard.promoterIds.indexOf(modelData.id) >= 0
-                                onToggled: wizard.togglePromoter(modelData.id, checked)
-                            }
                         }
                     }
                     Label {
@@ -345,7 +397,9 @@ Dialog {
                         visible: desktopBackend.courses.filter(function(item) {
                             return item.active
                         }).length === 0
-                        text: "No hay cursos activos. Agrega un curso desde la sección «Cursos» y vuelve a la matrícula."
+                        text: wizard.withoutStudent
+                              ? "No hay cursos activos. Agrega un curso desde la sección «Cursos» para reservar un cupo."
+                              : "No hay cursos activos. Puedes guardar una matrícula pendiente o agregar un curso."
                         color: appWindow.errorColor
                         wrapMode: Text.Wrap
                     }
@@ -377,7 +431,9 @@ Dialog {
             }
             Button {
                 visible: wizard.step === 1
-                enabled: course.currentIndex >= 0
+                enabled: wizard.withoutStudent
+                         ? course.currentIndex > 0
+                         : Boolean(wizard.studentId) && course.currentIndex >= 0
                 text: "Guardar matrícula"
                 highlighted: true
                 onClicked: wizard.saveEnrollment()

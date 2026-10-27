@@ -4,7 +4,7 @@ from pathlib import Path
 
 import PySide6
 from PySide6.QtCore import QCoreApplication, QUrl
-from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
+from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
@@ -16,6 +16,11 @@ def main():
     QCoreApplication.setOrganizationName("EduTrack")
     QCoreApplication.setApplicationName("EduTrack Desktop")
     app = QGuiApplication(sys.argv)
+    icon_path = Path(__file__).resolve().parent / "icons" / "logo.svg"
+    app_icon = QIcon(str(icon_path))
+    if app_icon.isNull():
+        raise RuntimeError(f"No se pudo cargar el logo de EduTrack: {icon_path}")
+    app.setWindowIcon(app_icon)
     QQuickStyle.setStyle("Material")
     font_path = Path(__file__).resolve().parent / "fonts" / "Roboto[wdth,wght].ttf"
     font_id = QFontDatabase.addApplicationFont(str(font_path))

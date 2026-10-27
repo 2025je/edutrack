@@ -32,8 +32,11 @@ ApplicationWindow {
     Material.primary: appTheme.primary
     Material.accent: Material.Teal
     property string pendingPackagePath: ""
+    property string pendingDatabasePath: ""
+    property string pendingDatabaseAction: ""
     property var desktopBackend: null
     property int currentPage: 0
+    property bool creatingCampus: false
     property bool showEnrollmentEditor: false
     property bool editingEnrollment: Boolean(
         appWindow.showEnrollmentEditor
@@ -70,27 +73,15 @@ ApplicationWindow {
         enrollmentDate.text = enrollment.enrollment_date || Qt.formatDate(new Date(), "yyyy-MM-dd")
         enrollmentFee.text = enrollment.enrollment_fee || ""
         monthlyFee.text = enrollment.monthly_fee || ""
-        recordCode.text = enrollment.record_code || ""
-        imageQuality.currentIndex = enrollment.record_image_quality === 60 ? 0
-                                     : enrollment.record_image_quality === 90 ? 2 : 1
     }
 
     function saveEnrollment() {
-        var selectedPromoters = []
-        for (var index = 0; index < promoterRepeater.count; index++) {
-            var item = promoterRepeater.itemAt(index)
-            if (item && item.checked)
-                selectedPromoters.push(item.promoterId)
-        }
         backend.saveEnrollment(backend.selectedEnrollment.id || "", {
             student_id: studentSelect.currentValue,
             course_id: courseSelect.currentValue,
             enrollment_date: enrollmentDate.text,
             enrollment_fee: enrollmentFee.text,
-            monthly_fee: monthlyFee.text,
-            record_code: recordCode.text,
-            record_image_quality: imageQuality.currentValue,
-            promoter_ids: selectedPromoters
+            monthly_fee: monthlyFee.text
         })
     }
 
@@ -108,30 +99,117 @@ ApplicationWindow {
 
     FileDialog {
         id: openDialog
-        title: "Abrir datos de una sede"
+        title: "Importar paquete de sede"
         fileMode: FileDialog.OpenFile
         nameFilters: ["EduTrack (*.edutrack *.zip)", "Todos los archivos (*)"]
         onAccepted: {
-            appWindow.pendingPackagePath = selectedFile.toLocalFile()
-            if (backend.hasWorkspace)
-                replaceDialog.open()
-            else
-                backend.openPackage(appWindow.pendingPackagePath)
+            appWindow.pendingPackagePath = selectedFile.toString()
+            appWindow.pendingDatabaseAction = "import"
+            databasePathDialog.open()
         }
     }
 
+    FileDialog {
+        id: databasePathDialog
+        title: appWindow.pendingDatabaseAction === "create"
+               ? "Guardar la base de datos de la nueva sede"
+               : "Guardar la base de datos de la sede importada"
+        fileMode: FileDialog.SaveFile
+        currentFile: appWindow.pendingDatabaseAction === "create"
+                     ? backend.suggestedDatabaseFileName(newCampusNameInput.text)
+                     : "edutrack-sede-importada.sqlite3"
+        nameFilters: ["Base de datos SQLite (*.sqlite3)"]
+        onAccepted: {
+            var databasePath = selectedFile.toString()
+            var succeeded = false
+            if (appWindow.pendingDatabaseAction === "create") {
+                succeeded = backend.createWorkspace(
+                    newCampusNameInput.text,
+                    newCampusAddressInput.text,
+                    databasePath
+                )
+            } else if (appWindow.pendingDatabaseAction === "import") {
+                if (backend.isRegisteredDatabase(databasePath)) {
+                    appWindow.pendingDatabasePath = databasePath
+                    replaceImportDialog.open()
+                } else {
+                    succeeded = backend.openPackage(
+                        appWindow.pendingPackagePath,
+                        databasePath
+                    )
+                }
+            }
+            if (succeeded) {
+                appWindow.creatingCampus = false
+                appWindow.currentPage = 0
+                appWindow.pendingPackagePath = ""
+                newCampusNameInput.text = ""
+                newCampusAddressInput.text = ""
+            }
+            appWindow.pendingDatabaseAction = ""
+        }
+        onRejected: appWindow.pendingDatabaseAction = ""
+    }
+
     Dialog {
-        id: replaceDialog
-        title: "Reemplazar el espacio de trabajo"
+        id: replaceImportDialog
+        title: "Actualizar los datos de esta sede"
         modal: true
         standardButtons: Dialog.Yes | Dialog.No
         anchors.centerIn: parent
         Label {
-            text: "Abrir otro archivo reemplaza los datos locales guardados en este dispositivo. ¿Deseas continuar?"
+            text: "Se reemplazarán los datos locales de la sede elegida con el contenido del paquete. Continúa solo si ya importaste y confirmaste la sincronización en la web."
             wrapMode: Text.Wrap
         }
-        onAccepted: backend.openPackage(appWindow.pendingPackagePath)
-        onRejected: appWindow.pendingPackagePath = ""
+        onAccepted: {
+            if (backend.openPackage(
+                    appWindow.pendingPackagePath,
+                    appWindow.pendingDatabasePath,
+                    true
+                )) {
+                appWindow.creatingCampus = false
+                appWindow.currentPage = 0
+                newCampusNameInput.text = ""
+                newCampusAddressInput.text = ""
+            }
+            appWindow.pendingPackagePath = ""
+            appWindow.pendingDatabasePath = ""
+        }
+        onRejected: {
+            appWindow.pendingPackagePath = ""
+            appWindow.pendingDatabasePath = ""
+        }
+    }
+
+    Dialog {
+        id: closeCampusDialog
+        title: "Cerrar sede activa"
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        anchors.centerIn: parent
+        Label {
+            text: "La sede se cerrará en Desktop, pero su base de datos y sus datos se conservarán. Podrás volver a abrirla desde el selector de sedes."
+            wrapMode: Text.Wrap
+        }
+        onAccepted: {
+            if (backend.closeCampus()) {
+                appWindow.creatingCampus = false
+                appWindow.currentPage = 0
+            }
+        }
+    }
+
+    FileDialog {
+        id: localDatabaseDialog
+        title: "Abrir una base de datos de sede"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Base de datos SQLite (*.sqlite3 *.db)", "Todos los archivos (*)"]
+        onAccepted: {
+            if (backend.openLocalDatabase(selectedFile.toString())) {
+                appWindow.creatingCampus = false
+                appWindow.currentPage = 0
+            }
+        }
     }
 
     FileDialog {
@@ -142,30 +220,7 @@ ApplicationWindow {
                      ? "edutrack-sede-inicial.edutrack"
                      : "edutrack-sincronizacion.edutrack"
         nameFilters: ["EduTrack (*.edutrack)"]
-        onAccepted: backend.exportPackage(selectedFile.toLocalFile())
-    }
-
-    FileDialog {
-        id: imageDialog
-        title: "Seleccionar imagen de ficha"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Imágenes (*.jpg *.jpeg *.png *.webp)"]
-        onAccepted: backend.attachEnrollmentImage(selectedFile.toLocalFile())
-    }
-
-    Dialog {
-        id: promoterDialog
-        title: "Agregar promotor"
-        modal: true
-        width: 380
-        standardButtons: Dialog.Save | Dialog.Cancel
-        anchors.centerIn: parent
-        TextField {
-            id: promoterNameInput
-            width: parent.width
-            placeholderText: "Nombre del promotor"
-        }
-        onAccepted: backend.createPromoter(promoterNameInput.text)
+        onAccepted: backend.exportPackage(selectedFile.toString())
     }
 
     CourseWizardDialog {
@@ -230,7 +285,7 @@ ApplicationWindow {
                     }
                 }
                 Button {
-                    text: "Abrir archivo de sede"
+                    text: "Importar paquete"
                     flat: true
                     icon.source: Qt.resolvedUrl("icons/folder-open.svg")
                     icon.width: 18
@@ -238,6 +293,51 @@ ApplicationWindow {
                     icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     onClicked: openDialog.open()
+                }
+                ComboBox {
+                    id: campusSelector
+                    Layout.preferredWidth: 190
+                    visible: backend.campuses.length > 0 && !appWindow.creatingCampus
+                    model: backend.campuses
+                    textRole: "campus_name"
+                    currentIndex: backend.activeCampusIndex
+                    onActivated: function(index) {
+                        if (backend.switchCampus(backend.campuses[index].path))
+                            appWindow.currentPage = 0
+                    }
+                }
+                Button {
+                    text: "Nueva sede"
+                    flat: true
+                    visible: backend.hasWorkspace
+                    icon.source: Qt.resolvedUrl("icons/add.svg")
+                    icon.width: 18
+                    icon.height: 18
+                    icon.color: appTheme.headerText
+                    Material.foreground: appTheme.headerText
+                    onClicked: {
+                        appWindow.creatingCampus = true
+                        newCampusNameInput.text = ""
+                        newCampusAddressInput.text = ""
+                    }
+                }
+                Button {
+                    text: "Abrir base"
+                    flat: true
+                    visible: backend.hasWorkspace
+                    icon.source: Qt.resolvedUrl("icons/folder-open.svg")
+                    icon.width: 18
+                    icon.height: 18
+                    icon.color: appTheme.headerText
+                    Material.foreground: appTheme.headerText
+                    onClicked: localDatabaseDialog.open()
+                }
+                Button {
+                    text: "Cerrar sede"
+                    flat: true
+                    visible: backend.hasWorkspace
+                    Material.foreground: appTheme.headerText
+                    onClicked: closeCampusDialog.open()
                 }
                 Button {
                     text: appWindow.darkMode ? "Modo claro" : "Modo nocturno"
@@ -297,7 +397,7 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !backend.hasWorkspace
+            visible: !backend.hasWorkspace || appWindow.creatingCampus
             radius: 14
             color: appWindow.surfaceColor
             border.color: appWindow.borderColor
@@ -330,7 +430,7 @@ ApplicationWindow {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "Ingresa los datos básicos y crea aquí cursos, estudiantes y matrículas. Al importar el paquete inicial, la web creará la sede con toda su información."
+                    text: "Ingresa los datos básicos y elige dónde guardar la base SQLite de esta sede. Cada sede conserva sus propios cursos, estudiantes y matrículas."
                     horizontalAlignment: Text.AlignHCenter
                     color: appWindow.secondaryTextColor
                     font.pixelSize: 15
@@ -351,7 +451,7 @@ ApplicationWindow {
                 Button {
                     id: createWorkspaceButton
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Crear sede en este dispositivo"
+                    text: "Elegir ubicación y crear sede"
                     icon.source: Qt.resolvedUrl("icons/add.svg")
                     icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
@@ -363,16 +463,29 @@ ApplicationWindow {
                         color: createWorkspaceButton.down
                                ? appTheme.createButtonPressed : appTheme.createButton
                     }
-                    onClicked: backend.createWorkspace(
-                        newCampusNameInput.text,
-                        newCampusAddressInput.text
-                    )
+                    onClicked: {
+                        appWindow.pendingDatabaseAction = "create"
+                        databasePathDialog.open()
+                    }
                 }
                 Button {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Abrir una sede existente"
+                    text: "Importar paquete de sede"
                     flat: true
                     onClicked: openDialog.open()
+                }
+                Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Abrir una base existente"
+                    flat: true
+                    onClicked: localDatabaseDialog.open()
+                }
+                Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: backend.hasWorkspace
+                    text: "Volver a la sede abierta"
+                    flat: true
+                    onClicked: appWindow.creatingCampus = false
                 }
             }
         }
@@ -381,7 +494,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 16
-            visible: backend.hasWorkspace
+            visible: backend.hasWorkspace && !appWindow.creatingCampus
 
             Rectangle {
                 Layout.preferredWidth: 190
@@ -690,97 +803,6 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                }
-                                Label { text: "Código de ficha" }
-                                TextField {
-                                    id: recordCode
-                                    Layout.fillWidth: true
-                                    enabled: backend.hasWorkspace
-                                    placeholderText: "Opcional"
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                }
-                                Label { text: "Calidad de imagen" }
-                                ComboBox {
-                                    id: imageQuality
-                                    Layout.fillWidth: true
-                                    enabled: backend.hasWorkspace
-                                    model: [
-                                        { label: "Baja · 60%", value: 60 },
-                                        { label: "Recomendada · 80%", value: 80 },
-                                        { label: "Alta · 90%", value: 90 }
-                                    ]
-                                    textRole: "label"
-                                    valueRole: "value"
-                                    currentIndex: 1
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                visible: appWindow.editingEnrollment
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: backend.enrollmentImageName
-                                    elide: Text.ElideMiddle
-                                    color: appWindow.secondaryTextColor
-                                }
-                                Button {
-                                    text: "Adjuntar/reemplazar imagen"
-                                    enabled: backend.hasWorkspace
-                                             && Boolean(backend.selectedEnrollment.id)
-                                             && Boolean(backend.selectedEnrollment.record_code)
-                                    onClicked: imageDialog.open()
-                                }
-                                Button {
-                                    text: "Quitar imagen"
-                                    enabled: backend.hasWorkspace
-                                             && Boolean(backend.selectedEnrollment.record_image)
-                                    onClicked: backend.clearEnrollmentImage()
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                visible: appWindow.editingEnrollment
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: "Promotores"
-                                    font.bold: true
-                                }
-                                Button {
-                                    text: "Nuevo promotor"
-                                    visible: backend.isNewCampus
-                                    enabled: backend.isNewCampus
-                                    onClicked: {
-                                        promoterNameInput.text = ""
-                                        promoterDialog.open()
-                                    }
-                                }
-                            }
-                            ScrollView {
-                                visible: appWindow.editingEnrollment
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: Math.min(
-                                    Math.max(backend.promoterOptions.length * 64, 128),
-                                    256
-                                )
-                                clip: true
-                                Flow {
-                                    width: parent.width
-                                    Repeater {
-                                        id: promoterRepeater
-                                        model: backend.promoterOptions
-                                        CheckBox {
-                                            required property var modelData
-                                            property int promoterId: modelData.id
-                                            text: modelData.name + (modelData.active ? "" : " (inactivo)")
-                                            checked: appWindow.desktopBackend
-                                                     && appWindow.desktopBackend.selectedEnrollment.promoter_ids
-                                                     ? appWindow.desktopBackend.selectedEnrollment.promoter_ids.indexOf(modelData.id) >= 0
-                                                     : false
-                                            enabled: appWindow.desktopBackend
-                                                     ? appWindow.desktopBackend.hasWorkspace
-                                                     : false
-                                        }
-                                    }
                                 }
                             }
                         }

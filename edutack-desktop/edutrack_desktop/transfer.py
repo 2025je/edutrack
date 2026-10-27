@@ -138,6 +138,8 @@ def validate_manifest(manifest):
         enrollment_ids.add(enrollment["id"])
         if enrollment.get("student_id") and enrollment["student_id"] not in student_ids:
             raise PackageError("Una matrícula apunta a un estudiante inexistente.")
+        if not enrollment.get("student_id") and enrollment.get("course_id") in (None, ""):
+            raise PackageError("Una matrícula necesita un estudiante o un curso.")
         image_path = enrollment.get("record_image")
         if image_path and (
             not isinstance(image_path, str) or not ATTACHMENT_PATTERN.fullmatch(image_path)

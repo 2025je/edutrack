@@ -36,6 +36,10 @@ datas = qt_datas + [
         "edutrack_desktop/icons",
     ),
     (
+        str(ROOT / "edutrack_desktop" / "icons" / "logo.svg"),
+        "edutrack_desktop/icons",
+    ),
+    (
         str(ROOT / "edutrack_desktop" / "icons" / "folder-open.svg"),
         "edutrack_desktop/icons",
     ),
