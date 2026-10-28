@@ -1151,7 +1151,9 @@ ApplicationWindow {
                                         }
                                         RowLayout {
                                             Layout.fillWidth: true
-                                            Layout.fillHeight: true
+                                            Layout.preferredHeight: 220
+                                            Layout.minimumHeight: 180
+                                            Layout.maximumHeight: 260
                                             spacing: 12
                                             Rectangle {
                                                 Layout.preferredWidth: 310
@@ -1237,72 +1239,84 @@ ApplicationWindow {
                                                         color: appWindow.secondaryTextColor
                                                         wrapMode: Text.Wrap
                                                     }
-                                                    GridLayout {
-                                                        objectName: "courseEditor"
+                                                    ScrollView {
+                                                        id: courseEditorScroll
+                                                        objectName: "courseEditorScroll"
                                                         visible: appWindow.editingCourse
                                                                  && Boolean(backend.selectedCourse.id)
                                                         Layout.fillWidth: true
-                                                        columns: 2
-                                                        columnSpacing: 10
-                                                        rowSpacing: 6
-                                                        Label { text: "Nombre" }
-                                                        UppercaseTextField {
-                                                            id: courseNameEdit
-                                                            objectName: "courseNameEdit"
-                                                            Layout.fillWidth: true
-                                                            placeholderText: "Nombre del curso"
-                                                        }
-                                                        Label { text: "Horario" }
-                                                        UppercaseTextField {
-                                                            id: courseScheduleEdit
-                                                            objectName: "courseScheduleEdit"
-                                                            Layout.fillWidth: true
-                                                            placeholderText: "Horario"
-                                                        }
-                                                        Label { text: "Grupo" }
-                                                        UppercaseTextField {
-                                                            id: courseGroupEdit
-                                                            objectName: "courseGroupEdit"
-                                                            Layout.fillWidth: true
-                                                            inputMethodHints: Qt.ImhDigitsOnly
-                                                            placeholderText: "Grupo"
-                                                        }
-                                                        Label { text: "Capacidad" }
-                                                        UppercaseTextField {
-                                                            id: courseCapacityEdit
-                                                            objectName: "courseCapacityEdit"
-                                                            Layout.fillWidth: true
-                                                            inputMethodHints: Qt.ImhDigitsOnly
-                                                            placeholderText: "Capacidad"
-                                                        }
-                                                        Label { text: "Fecha de inicio" }
-                                                        DatePickerField {
-                                                            id: courseStartDateEdit
-                                                            objectName: "courseStartDateEdit"
-                                                            Layout.fillWidth: true
-                                                            placeholderText: "AAAA-MM-DD"
-                                                        }
-                                                        Label { text: "Costo de matrícula" }
-                                                        UppercaseTextField {
-                                                            id: courseEnrollmentFeeEdit
-                                                            objectName: "courseEnrollmentFeeEdit"
-                                                            Layout.fillWidth: true
-                                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                                            placeholderText: "Costo de matrícula"
-                                                        }
-                                                        Label { text: "Mensualidad" }
-                                                        UppercaseTextField {
-                                                            id: courseMonthlyFeeEdit
-                                                            objectName: "courseMonthlyFeeEdit"
-                                                            Layout.fillWidth: true
-                                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                                            placeholderText: "Mensualidad"
-                                                        }
-                                                        CheckBox {
-                                                            id: courseActiveEdit
-                                                            objectName: "courseActiveEdit"
-                                                            Layout.columnSpan: 2
-                                                            text: "Curso activo"
+                                                        Layout.fillHeight: true
+                                                        Layout.preferredHeight: 220
+                                                        Layout.minimumHeight: 100
+                                                        clip: true
+                                                        contentWidth: availableWidth
+
+                                                        GridLayout {
+                                                            id: courseEditor
+                                                            objectName: "courseEditor"
+                                                            width: courseEditorScroll.availableWidth
+                                                            columns: 2
+                                                            columnSpacing: 10
+                                                            rowSpacing: 6
+                                                            Label { text: "Nombre" }
+                                                            UppercaseTextField {
+                                                                id: courseNameEdit
+                                                                objectName: "courseNameEdit"
+                                                                Layout.fillWidth: true
+                                                                placeholderText: "Nombre del curso"
+                                                            }
+                                                            Label { text: "Horario" }
+                                                            UppercaseTextField {
+                                                                id: courseScheduleEdit
+                                                                objectName: "courseScheduleEdit"
+                                                                Layout.fillWidth: true
+                                                                placeholderText: "Horario"
+                                                            }
+                                                            Label { text: "Grupo" }
+                                                            UppercaseTextField {
+                                                                id: courseGroupEdit
+                                                                objectName: "courseGroupEdit"
+                                                                Layout.fillWidth: true
+                                                                inputMethodHints: Qt.ImhDigitsOnly
+                                                                placeholderText: "Grupo"
+                                                            }
+                                                            Label { text: "Capacidad" }
+                                                            UppercaseTextField {
+                                                                id: courseCapacityEdit
+                                                                objectName: "courseCapacityEdit"
+                                                                Layout.fillWidth: true
+                                                                inputMethodHints: Qt.ImhDigitsOnly
+                                                                placeholderText: "Capacidad"
+                                                            }
+                                                            Label { text: "Fecha de inicio" }
+                                                            DatePickerField {
+                                                                id: courseStartDateEdit
+                                                                objectName: "courseStartDateEdit"
+                                                                Layout.fillWidth: true
+                                                                placeholderText: "AAAA-MM-DD"
+                                                            }
+                                                            Label { text: "Costo de matrícula" }
+                                                            UppercaseTextField {
+                                                                id: courseEnrollmentFeeEdit
+                                                                objectName: "courseEnrollmentFeeEdit"
+                                                                Layout.fillWidth: true
+                                                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                                placeholderText: "Costo de matrícula"
+                                                            }
+                                                            Label { text: "Mensualidad" }
+                                                            UppercaseTextField {
+                                                                id: courseMonthlyFeeEdit
+                                                                objectName: "courseMonthlyFeeEdit"
+                                                                Layout.fillWidth: true
+                                                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                                placeholderText: "Mensualidad"
+                                                            }
+                                                            CheckBox {
+                                                                id: courseActiveEdit
+                                                                objectName: "courseActiveEdit"
+                                                                Layout.columnSpan: 2
+                                                                text: "Curso activo"
+                                                            }
                                                         }
                                                     }
                                                     RowLayout {
@@ -1325,15 +1339,18 @@ ApplicationWindow {
                                                         Layout.fillWidth: true
                                                         height: 1
                                                         color: appWindow.dividerColor
+                                                        visible: !appWindow.editingCourse
                                                     }
                                                     Label {
                                                         text: backend.courseStudents.length + " estudiantes"
                                                         color: appWindow.secondaryTextColor
                                                         font.bold: true
+                                                        visible: !appWindow.editingCourse
                                                     }
                                                     ListView {
                                                         Layout.fillWidth: true
                                                         Layout.fillHeight: true
+                                                        visible: !appWindow.editingCourse
                                                         clip: true
                                                         model: backend.courseStudents
                                                         delegate: ItemDelegate {
@@ -1345,6 +1362,7 @@ ApplicationWindow {
                                                         Layout.fillWidth: true
                                                         visible: Boolean(backend.selectedCourse.id)
                                                                  && backend.courseStudents.length === 0
+                                                                 && !appWindow.editingCourse
                                                         text: "Este curso todavía no tiene estudiantes matriculados."
                                                         color: appWindow.secondaryTextColor
                                                         wrapMode: Text.Wrap
