@@ -8,13 +8,15 @@ Desktop permite tener varias sedes abiertas en el mismo equipo. Al crear una sed
 
 El catálogo de rutas se guarda como `campuses.json` en la carpeta de datos de la aplicación. La base local que ya existía se conserva y se registra automáticamente si contiene una sede. Si mueves una base a otra carpeta, vuelve a abrirla desde Desktop para actualizar su ubicación en el catálogo.
 
+Al volver a abrir Desktop, se restaura la sede activa, la sección, el tema, la posición y el tamaño de la ventana, las selecciones y los formularios que estaban abiertos, incluidos sus datos aún no guardados. Este estado de sesión se conserva en la configuración local del usuario y no se incluye en la base SQLite ni en los paquetes de sincronización.
+
 ## Flujo de sincronización
 
 ### Cuando la sede ya existe en la web
 
 1. En la web, selecciona una sede y descarga **Datos de esta sede** desde Estudiantes → Importar desktop offline.
 2. En Desktop, importa el archivo `.edutrack` y elige una ubicación SQLite para esa sede. El paquete incluye estudiantes, matrículas, cursos y promotores.
-3. Usa el sidebar para cambiar entre estudiantes, matrículas y cursos. Los botones para crear estudiantes, matrículas y cursos abren asistentes paso a paso; las vistas de gestión siguen disponibles para consultar y modificar registros existentes. En Cursos también puedes consultar los estudiantes matriculados.
+3. Usa el sidebar para cambiar entre estudiantes, matrículas y cursos. Estudiantes muestra la lista; selecciona un registro para editar sus apellidos, nombres, DNI o celulares. Para crear un estudiante, puedes hacerlo desde el asistente de matrícula. Los asistentes para matrículas y cursos guían el registro paso a paso; en Cursos también puedes consultar los estudiantes matriculados y editar el curso seleccionado.
 4. Los cambios se guardan automáticamente en la base SQLite del dispositivo. Genera un archivo `.edutrack` y súbelo en la misma sección de la web.
 5. Revisa la vista previa y confirma los cursos nuevos junto con estudiantes y matrículas. Para crear cursos, la persona que confirma necesita permiso para agregar cursos. Si un registro cambió en la web mientras trabajabas sin conexión, resuelve el conflicto eligiendo qué versión conservar.
 6. Después de sincronizar, importa el archivo canónico descargado desde la web y selecciona la misma base SQLite de esa sede. Desktop pide confirmación antes de reemplazar sus datos locales y verifica que el paquete corresponda a esa sede.
@@ -43,17 +45,27 @@ uv run edutrack-desktop
 ```
 
 La base de datos local se crea en la carpeta de datos de la aplicación del usuario. Mantén respaldado el archivo de sede y el archivo SQLite si necesitas conservar el trabajo local.
-La interfaz principal está en `edutrack_desktop/Main.qml`; el tema global está separado en `edutrack_desktop/components/AppTheme.qml`, y los asistentes de estudiantes, cursos y matrículas en componentes QML dentro de `edutrack_desktop/components/`. La navegación y las acciones principales usan iconos SVG propios, con modo claro/oscuro. La fuente Roboto se incluye en `edutrack_desktop/fonts/` y se distribuye bajo la licencia SIL Open Font License incluida junto a ella. El comando `edutrack-desktop` inicia la interfaz. `main.py` en la raíz también funciona como punto de entrada para PyInstaller.
+La interfaz principal está en `edutrack_desktop/Main.qml`; el tema global está separado en `edutrack_desktop/components/AppTheme.qml`, y los asistentes de cursos y matrículas en componentes QML dentro de `edutrack_desktop/components/`. La navegación usa iconos Material Symbols Outlined de Google Fonts y admite modo claro/oscuro; el logo de EduTrack se conserva como icono de ventana. Los campos de texto convierten la entrada a mayúsculas y las fechas se eligen con un calendario, conservando el formato `AAAA-MM-DD`. La fuente Roboto se incluye bajo SIL Open Font License y Material Symbols junto a su licencia Apache 2.0, ambas en `edutrack_desktop/fonts/`. El comando `edutrack-desktop` inicia la interfaz. `main.py` en la raíz también funciona como punto de entrada para PyInstaller.
 
-## Crear el ejecutable de Windows
+## Crear el instalador de Windows
 
-Con el entorno virtual y las dependencias de desarrollo instaladas:
+En Windows, instala [Inno Setup 6](https://jrsoftware.org/isinfo.php) en el equipo de compilación. No hace falta instalarlo en los equipos donde se usará la aplicación. Después, ejecuta desde PowerShell:
 
 ```powershell
-.\build.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-PyInstaller genera el ejecutable autocontenido en `dist\EduTrackDesktop.exe`. El paquete incluye QML, módulos Qt Quick y las migraciones Alembic; no requiere Python instalado en el equipo de destino.
+El script compila un ejecutable autocontenido con PyInstaller y crea `dist\installer\EduTrackDesktop-Setup-<versión>.exe`. El instalador permite elegir la instalación para el usuario actual, agrega accesos directos y permite desinstalar la app. El paquete incluye Python, Qt/PySide6, los módulos QML, iconos, fuentes, migraciones y los DLL de runtime necesarios; el equipo de destino no necesita instalar Python, uv, Qt ni el redistribuible de Visual C++ por separado. El instalador es para Windows x64 10 o posterior. No incluye ni borra las bases SQLite de las sedes, que permanecen en la ubicación elegida por el usuario.
+
+Para compilar únicamente el ejecutable, sin generar el instalador:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -SkipInstaller
+```
+
+Distribuye el instalador generado, no los archivos de `build\`. Se recomienda probarlo en una PC Windows limpia o una máquina virtual antes de entregarlo a usuarios.
+
+El workflow **EduTrack Desktop Windows Installer** compila el instalador en Windows al cambiar `edutack-desktop/` o al ejecutarlo manualmente. Instala el paquete en el runner, inicia el ejecutable en modo de prueba para comprobar que Qt, QML y sus DLL cargan, y publica el instalador como artefacto de la ejecución.
 
 ## Ejecutar las pruebas
 

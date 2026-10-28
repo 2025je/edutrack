@@ -1,0 +1,91 @@
+name: EduTrack Desktop Windows Installer
+
+on:
+  push:
+    paths:
+      - "edutack-desktop/**"
+      - ".github/workflows/desktop-windows.yml"
+  pull_request:
+    paths:
+      - "edutack-desktop/**"
+      - ".github/workflows/desktop-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke-test:
+    name: Build, install, and smoke-test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: edutack-desktop
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: edutack-desktop/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+
+      - name: Run desktop tests
+        run: uv run --locked pytest
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build executable and installer
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Install and verify the packaged executable
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "dist\installer\EduTrackDesktop-Setup-*.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "No se generó el instalador de EduTrack Desktop."
+          }
+
+          $installDir = Join-Path $env:RUNNER_TEMP "EduTrack Desktop"
+          $arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$installDir`""
+          $setup = Start-Process -FilePath $installer.FullName `
+            -ArgumentList $arguments -Wait -PassThru
+          if ($setup.ExitCode -ne 0) {
+            throw "El instalador terminó con código $($setup.ExitCode)."
+          }
+
+          $executable = Join-Path $installDir "EduTrackDesktop.exe"
+          if (-not (Test-Path $executable)) {
+            throw "El instalador no dejó EduTrackDesktop.exe en $installDir."
+          }
+
+          $smokeTest = Start-Process -FilePath $executable `
+            -ArgumentList "--smoke-test" -Wait -PassThru
+          if ($smokeTest.ExitCode -ne 0) {
+            throw "La app instalada falló al cargar Qt/QML o sus DLL (código $($smokeTest.ExitCode))."
+          }
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: EduTrackDesktop-Windows-Installer
+          path: edutack-desktop/dist/installer/*.exe
+          if-no-files-found: error
+          retention-days: 7

@@ -9,12 +9,15 @@ Dialog {
     required property var desktopBackend
     property int step: 0
     property string errorMessage: ""
+    property bool sessionOpened: false
 
     title: step === 0 ? "Nuevo curso · Paso 1 de 2" : "Nuevo curso · Paso 2 de 2"
     modal: true
     width: Math.min(appWindow.width - 48, 680)
     height: Math.min(appWindow.height - 56, 540)
     anchors.centerIn: parent
+    onOpened: sessionOpened = true
+    onRejected: sessionOpened = false
 
     function openWizard() {
         step = 0
@@ -26,7 +29,44 @@ Dialog {
         courseStartDate.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
         courseEnrollmentFee.text = ""
         courseMonthlyFee.text = ""
+        sessionOpened = true
         open()
+    }
+
+    function cancelWizard() {
+        sessionOpened = false
+        close()
+    }
+
+    function sessionState() {
+        return {
+            opened: sessionOpened,
+            step: step,
+            errorMessage: errorMessage,
+            name: courseName.text,
+            schedule: courseSchedule.text,
+            group: courseGroup.text,
+            capacity: courseCapacity.text,
+            startDate: courseStartDate.text,
+            enrollmentFee: courseEnrollmentFee.text,
+            monthlyFee: courseMonthlyFee.text
+        }
+    }
+
+    function restoreSessionState(state) {
+        if (!state || typeof state !== "object")
+            return
+        courseName.text = state.name || ""
+        courseSchedule.text = state.schedule || ""
+        courseGroup.text = state.group || "1"
+        courseCapacity.text = state.capacity || "20"
+        courseStartDate.text = state.startDate || Qt.formatDate(new Date(), "yyyy-MM-dd")
+        courseEnrollmentFee.text = state.enrollmentFee || ""
+        courseMonthlyFee.text = state.monthlyFee || ""
+        step = state.step === 1 ? 1 : 0
+        errorMessage = state.errorMessage || ""
+        if (state.opened === true)
+            open()
     }
 
     function continueWizard() {
@@ -55,6 +95,7 @@ Dialog {
             return
         }
         errorMessage = ""
+        sessionOpened = false
         close()
         appWindow.currentPage = 2
         desktopBackend.selectCourse(courseId)
@@ -84,17 +125,17 @@ Dialog {
                         color: appWindow.secondaryTextColor
                         wrapMode: Text.Wrap
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: courseName
                         Layout.fillWidth: true
                         placeholderText: "Nombre del curso"
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: courseSchedule
                         Layout.fillWidth: true
                         placeholderText: "Horario"
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: courseGroup
                         Layout.fillWidth: true
                         text: "1"
@@ -120,13 +161,13 @@ Dialog {
                         color: appWindow.secondaryTextColor
                         wrapMode: Text.Wrap
                     }
-                    TextField {
+                    DatePickerField {
                         id: courseStartDate
                         Layout.fillWidth: true
                         text: Qt.formatDate(new Date(), "yyyy-MM-dd")
                         placeholderText: "Fecha de inicio (AAAA-MM-DD)"
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: courseCapacity
                         Layout.fillWidth: true
                         text: "20"
@@ -135,13 +176,13 @@ Dialog {
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        TextField {
+                        UppercaseTextField {
                             id: courseEnrollmentFee
                             Layout.fillWidth: true
                             placeholderText: "Costo de matrícula"
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
                         }
-                        TextField {
+                        UppercaseTextField {
                             id: courseMonthlyFee
                             Layout.fillWidth: true
                             placeholderText: "Mensualidad"
@@ -175,7 +216,7 @@ Dialog {
             Item { Layout.fillWidth: true }
             Button {
                 text: "Cancelar"
-                onClicked: wizard.close()
+                onClicked: wizard.cancelWizard()
             }
             Button {
                 visible: wizard.step === 1

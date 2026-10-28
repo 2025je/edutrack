@@ -473,6 +473,9 @@ def _parse_manifest(value, attachments):
         student_server_id = _positive_id(
             row.get("student_server_id"), "student_server_id", optional=True
         )
+        course_id = _positive_id(row.get("course_id"), "course_id", optional=True)
+        if not student_source_id and course_id is None:
+            raise OfflinePackageError("Una matrícula necesita un estudiante o un curso.")
         raw_date = _string(row.get("enrollment_date"), "Fecha de matrícula", 10)
         try:
             enrollment_date = date.fromisoformat(raw_date).isoformat()
@@ -522,17 +525,22 @@ def _parse_manifest(value, attachments):
         quality = row.get("record_image_quality", 80)
         if type(quality) is not int or quality not in (60, 80, 90):
             raise OfflinePackageError("La calidad de imagen de ficha no es válida.")
+        if course_id is None:
+            enrollment_fee = monthly_fee = "0.00"
+        else:
+            enrollment_fee = _amount(row.get("enrollment_fee"), "Costo de matrícula")
+            monthly_fee = _amount(row.get("monthly_fee"), "Mensualidad")
         enrollment = {
             "id": source_id,
             "server_id": server_id,
             "base_hash": _optional_hash(row.get("base_hash"), "base_hash", server_id),
             "student_id": student_source_id,
             "student_server_id": student_server_id,
-            "course_id": _positive_id(row.get("course_id"), "course_id", optional=True),
+            "course_id": course_id,
             "enrollment_date": enrollment_date,
             "promoter_ids": promoter_ids,
-            "enrollment_fee": _amount(row.get("enrollment_fee"), "Costo de matrícula"),
-            "monthly_fee": _amount(row.get("monthly_fee"), "Mensualidad"),
+            "enrollment_fee": enrollment_fee,
+            "monthly_fee": monthly_fee,
             "record_code": record_code,
             "record_image": image_path,
             "record_image_hash": image_hash,
@@ -640,7 +648,7 @@ def _parse_manifest(value, attachments):
         )
     if is_new_campus:
         for enrollment in enrollments:
-            if enrollment["course_id"] not in course_ids:
+            if enrollment["course_id"] is not None and enrollment["course_id"] not in course_ids:
                 raise OfflinePackageError("Una matrícula apunta a un curso inexistente.")
             if any(pk not in promoter_ids for pk in enrollment["promoter_ids"]):
                 raise OfflinePackageError("Una matrícula apunta a un promotor inexistente.")

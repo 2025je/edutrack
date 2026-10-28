@@ -248,6 +248,69 @@ def test_course_validation_normalizes_identity_and_enforces_web_amount_limit(tmp
     )
 
 
+def test_save_course_updates_validates_and_persists(tmp_path):
+    path = tmp_path / "workspace.sqlite3"
+    backend = DesktopBackend(path)
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    existing_course_id = backend.createCourse(
+        "Pastelería", "Tarde", "2", "2026-01-02", "40.00", "60.00", "15"
+    )
+    course = next(item for item in backend.manifest["courses"] if item["id"] == course_id)
+    course["server_id"] = 25
+    backend.store.save(backend.manifest)
+    backend.selectCourse(course_id)
+
+    assert backend.saveCourse(
+        course_id,
+        "  cocina   avanzada ",
+        " lunes 9:00 ",
+        "1",
+        "2026-02-02",
+        "35",
+        "55.50",
+        "12",
+        False,
+    )
+    assert backend.selectedCourse == {
+        "id": course_id,
+        "server_id": 25,
+        "name": "COCINA AVANZADA",
+        "schedule": "LUNES 9:00",
+        "group": "1",
+        "start_date": "2026-02-02",
+        "enrollment_fee": "35.00",
+        "monthly_fee": "55.50",
+        "capacity": 12,
+        "active": False,
+    }
+
+    assert not backend.saveCourse(
+        course_id,
+        "Pastelería",
+        "Tarde",
+        "2",
+        "2026-02-02",
+        "35",
+        "55.50",
+        "12",
+        True,
+    )
+    assert "Ya existe un curso" in backend.errorMessage
+    assert backend.selectedCourse["name"] == "COCINA AVANZADA"
+    assert existing_course_id != course_id
+
+    reloaded_backend = DesktopBackend(path)
+    persisted_course = next(
+        item for item in reloaded_backend.courses if item["id"] == course_id
+    )
+    assert persisted_course["name"] == "COCINA AVANZADA"
+    assert persisted_course["server_id"] == 25
+    assert persisted_course["active"] is False
+
+
 def test_enrollment_validation_supports_pending_and_reserved_records(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")

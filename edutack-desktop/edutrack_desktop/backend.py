@@ -682,6 +682,69 @@ class DesktopBackend(QObject):
         except (PackageError, OSError, ValueError) as exc:
             self._set_error(str(exc))
 
+    def _normalized_course_fields(
+        self,
+        course_id,
+        name,
+        schedule,
+        group_name,
+        start_date,
+        enrollment_fee,
+        monthly_fee,
+        capacity,
+    ):
+        raw_name = name.strip()
+        raw_schedule = schedule.strip()
+        raw_group = group_name.strip()
+        if (
+            not raw_name
+            or len(raw_name) > 120
+            or not raw_schedule
+            or len(raw_schedule) > 120
+            or len(raw_group) > 50
+        ):
+            raise ValueError("Ingresa un nombre de curso y un horario válidos.")
+        name = " ".join(raw_name.split()).upper()
+        schedule = " ".join(raw_schedule.split()).upper()
+        try:
+            group_name = str(int(raw_group)) if raw_group.isdigit() else ""
+        except ValueError:
+            group_name = ""
+        if not name or not schedule:
+            raise ValueError("Ingresa un nombre de curso y un horario válidos.")
+        if not group_name or int(group_name) < 1 or len(group_name) > 50:
+            raise ValueError("El grupo debe ser un número entero positivo.")
+        try:
+            date_text = start_date.strip()
+            course_date = date.fromisoformat(date_text)
+            if course_date.isoformat() != date_text:
+                raise ValueError("La fecha de inicio no es válida.")
+            course_date = course_date.isoformat()
+            enrollment_fee = self._amount(enrollment_fee, "costo de matrícula")
+            monthly_fee = self._amount(monthly_fee, "mensualidad")
+            capacity = int(capacity)
+            if capacity < 1 or capacity > 2_147_483_647:
+                raise ValueError("La capacidad debe ser un entero positivo.")
+        except (ValueError, InvalidOperation) as exc:
+            raise ValueError(str(exc) or "Revisa los datos del curso.") from exc
+        if any(
+            item["id"] != course_id
+            and item["name"].strip().casefold() == name.casefold()
+            and item["schedule"].strip().casefold() == schedule.casefold()
+            and str(item["group"]).strip() == group_name
+            for item in self.manifest["courses"]
+        ):
+            raise ValueError("Ya existe un curso con el mismo nombre, horario y grupo.")
+        return {
+            "name": name,
+            "schedule": schedule,
+            "group": group_name,
+            "start_date": course_date,
+            "enrollment_fee": enrollment_fee,
+            "monthly_fee": monthly_fee,
+            "capacity": capacity,
+        }
+
     @Slot(str, str, str, str, str, str, str, result=int)
     def createCourse(
         self,
@@ -698,51 +761,19 @@ class DesktopBackend(QObject):
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
             return 0
-        raw_name = name.strip()
-        raw_schedule = schedule.strip()
-        raw_group = group_name.strip()
-        if (
-            not raw_name
-            or len(raw_name) > 120
-            or not raw_schedule
-            or len(raw_schedule) > 120
-            or len(raw_group) > 50
-        ):
-            self._set_error("Ingresa un nombre de curso y un horario válidos.")
-            return 0
-        name = " ".join(raw_name.split()).upper()
-        schedule = " ".join(raw_schedule.split()).upper()
         try:
-            group_name = str(int(raw_group)) if raw_group.isdigit() else ""
-        except ValueError:
-            group_name = ""
-        if not name or not schedule:
-            self._set_error("Ingresa un nombre de curso y un horario válidos.")
-            return 0
-        if not group_name or int(group_name) < 1 or len(group_name) > 50:
-            self._set_error("El grupo debe ser un número entero positivo.")
-            return 0
-        try:
-            date_text = start_date.strip()
-            course_date = date.fromisoformat(date_text)
-            if course_date.isoformat() != date_text:
-                raise ValueError("La fecha de inicio no es válida.")
-            course_date = course_date.isoformat()
-            enrollment_fee = self._amount(enrollment_fee, "costo de matrícula")
-            monthly_fee = self._amount(monthly_fee, "mensualidad")
-            capacity = int(capacity)
-            if capacity < 1 or capacity > 2_147_483_647:
-                raise ValueError("La capacidad debe ser un entero positivo.")
+            fields = self._normalized_course_fields(
+                None,
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+            )
         except (ValueError, InvalidOperation) as exc:
             self._set_error(str(exc) or "Revisa los datos del curso.")
-            return 0
-        if any(
-            item["name"].strip().casefold() == name.casefold()
-            and item["schedule"].strip().casefold() == schedule.casefold()
-            and str(item["group"]).strip() == group_name
-            for item in self.manifest["courses"]
-        ):
-            self._set_error("Ya existe un curso con el mismo nombre, horario y grupo.")
             return 0
         course_id = (
             max((int(item["id"]) for item in self.manifest["courses"]), default=0) + 1
@@ -751,13 +782,7 @@ class DesktopBackend(QObject):
             {
                 "id": course_id,
                 "server_id": None,
-                "name": name,
-                "schedule": schedule,
-                "group": group_name,
-                "start_date": course_date,
-                "enrollment_fee": enrollment_fee,
-                "monthly_fee": monthly_fee,
-                "capacity": capacity,
+                **fields,
                 "active": True,
             }
         )
@@ -767,6 +792,52 @@ class DesktopBackend(QObject):
         self.selectionChanged.emit()
         self._set_error("Curso guardado localmente.")
         return course_id
+
+    @Slot(int, str, str, str, str, str, str, str, bool, result=bool)
+    def saveCourse(
+        self,
+        source_id,
+        name,
+        schedule,
+        group_name,
+        start_date,
+        enrollment_fee,
+        monthly_fee,
+        capacity,
+        active,
+    ):
+        if not self.manifest:
+            self._set_error("Primero abre una sede o crea una nueva en este dispositivo.")
+            return False
+        course = next(
+            (item for item in self.manifest["courses"] if item["id"] == source_id),
+            None,
+        )
+        if course is None:
+            self._set_error("Selecciona un curso válido para editar.")
+            return False
+        try:
+            fields = self._normalized_course_fields(
+                source_id,
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+            )
+        except (ValueError, InvalidOperation) as exc:
+            self._set_error(str(exc) or "Revisa los datos del curso.")
+            return False
+        course.update(fields)
+        course["active"] = active
+        self._selected_course_id = source_id
+        if not self._save():
+            return False
+        self.selectionChanged.emit()
+        self._set_error("Curso actualizado correctamente en este dispositivo.")
+        return True
 
     @Slot(str, result=int)
     def createPromoter(self, name):

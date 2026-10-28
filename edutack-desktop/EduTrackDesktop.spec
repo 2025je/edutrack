@@ -4,95 +4,20 @@ from PyInstaller.utils.hooks import collect_all
 
 
 ROOT = Path(SPECPATH)
+APP_DIR = ROOT / "edutrack_desktop"
 qt_datas, qt_binaries, qt_hiddenimports = collect_all("PySide6")
-datas = qt_datas + [
-    (str(ROOT / "edutrack_desktop" / "Main.qml"), "edutrack_desktop"),
-    (
-        str(ROOT / "edutrack_desktop" / "fonts" / "Roboto[wdth,wght].ttf"),
-        "edutrack_desktop/fonts",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "fonts" / "OFL.txt"),
-        "edutrack_desktop/fonts",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "components" / "AppTheme.qml"),
-        "edutrack_desktop/components",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "components" / "CourseWizardDialog.qml"),
-        "edutrack_desktop/components",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "students.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "enrollments.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "courses.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "logo.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "folder-open.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "moon.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "sun.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "export.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "icons" / "add.svg"),
-        "edutrack_desktop/icons",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "components" / "StudentWizardDialog.qml"),
-        "edutrack_desktop/components",
-    ),
-    (
-        str(ROOT / "edutrack_desktop" / "components" / "EnrollmentWizardDialog.qml"),
-        "edutrack_desktop/components",
-    ),
-    (str(ROOT / "edutrack_desktop" / "alembic.ini"), "edutrack_desktop"),
-    (
-        str(ROOT / "edutrack_desktop" / "migrations" / "env.py"),
-        "edutrack_desktop/migrations",
-    ),
-    (
-        str(
-            ROOT
-            / "edutrack_desktop"
-            / "migrations"
-            / "versions"
-            / "0001_local_workspace.py"
-        ),
-        "edutrack_desktop/migrations/versions",
-    ),
-    (
-        str(
-            ROOT
-            / "edutrack_desktop"
-            / "migrations"
-            / "versions"
-            / "0002_initial_campus.py"
-        ),
-        "edutrack_desktop/migrations/versions",
-    ),
-]
+resource_suffixes = {".ini", ".qml", ".svg", ".ttf", ".txt"}
+app_datas = []
+for path in APP_DIR.rglob("*"):
+    if not path.is_file() or "__pycache__" in path.parts:
+        continue
+    is_migration = (
+        path.suffix == ".py" and APP_DIR / "migrations" in path.parents
+    )
+    if path.suffix in resource_suffixes or is_migration:
+        app_datas.append((str(path), str(path.parent.relative_to(ROOT))))
+
+datas = qt_datas + app_datas
 
 a = Analysis(
     [str(ROOT / "main.py")],

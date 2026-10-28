@@ -1,6 +1,6 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import "components"
@@ -36,8 +36,13 @@ ApplicationWindow {
     property string pendingDatabaseAction: ""
     property var desktopBackend: null
     property int currentPage: 0
+    property bool restoringSession: false
+    property bool sessionTrackingEnabled: false
+    property string sessionSnapshot: sessionTrackingEnabled
+                                         ? JSON.stringify(collectSessionState()) : ""
     property bool creatingCampus: false
     property bool showEnrollmentEditor: false
+    property bool editingCourse: false
     property bool editingEnrollment: Boolean(
         appWindow.showEnrollmentEditor
         && backend.hasWorkspace
@@ -58,6 +63,170 @@ ApplicationWindow {
         return 0
     }
 
+    function activeCampusPath() {
+        var index = backend.activeCampusIndex
+        var campuses = backend.campuses
+        return index >= 0 && index < campuses.length ? campuses[index].path : ""
+    }
+
+    function hasOption(items, value) {
+        if (value === undefined || value === null || value === "")
+            return false
+        for (var index = 0; index < items.length; index++) {
+            if (String(items[index].id) === String(value))
+                return true
+        }
+        return false
+    }
+
+    function restoreSessionState() {
+        var serialized = sessionStore.loadState()
+        var state = {}
+        if (serialized) {
+            try {
+                state = JSON.parse(serialized)
+            } catch (error) {
+                console.error("No se pudo restaurar el estado de sesión:", error)
+            }
+        } else if (sessionStore.errorMessage) {
+            console.error("No se pudo leer el estado de sesión:", sessionStore.errorMessage)
+        }
+        if (!state || state.version !== 1)
+            state = {}
+
+        appWindow.restoringSession = true
+        appWindow.darkMode = state.darkMode === true
+        appWindow.currentPage = Math.max(0, Math.min(2, Number(state.currentPage) || 0))
+        if (state.window && typeof state.window === "object") {
+            if (isFinite(Number(state.window.width)))
+                appWindow.width = Math.max(appWindow.minimumWidth, Number(state.window.width))
+            if (isFinite(Number(state.window.height)))
+                appWindow.height = Math.max(appWindow.minimumHeight, Number(state.window.height))
+            if (isFinite(Number(state.window.x)))
+                appWindow.x = Number(state.window.x)
+            if (isFinite(Number(state.window.y)))
+                appWindow.y = Number(state.window.y)
+        }
+
+        if (state.campusPath === appWindow.activeCampusPath()) {
+            var selection = state.selection || {}
+            if (appWindow.hasOption(backend.students, selection.studentId))
+                backend.selectStudent(String(selection.studentId))
+            if (appWindow.hasOption(backend.enrollments, selection.enrollmentId))
+                backend.selectEnrollment(String(selection.enrollmentId))
+            if (appWindow.hasOption(backend.courses, selection.courseId))
+                backend.selectCourse(Number(selection.courseId))
+
+            var studentForm = state.studentForm || {}
+            lastName.text = studentForm.lastName || ""
+            firstName.text = studentForm.firstName || ""
+            documentNumber.text = studentForm.documentNumber || ""
+            phones.text = studentForm.phones || ""
+
+            var enrollmentForm = state.enrollmentForm || {}
+            studentSelect.currentIndex = appWindow.optionIndex(
+                backend.studentOptions,
+                enrollmentForm.studentId || ""
+            )
+            courseSelect.currentIndex = appWindow.optionIndex(
+                backend.courseOptions,
+                enrollmentForm.courseId || ""
+            )
+            enrollmentDate.text = enrollmentForm.date || ""
+            enrollmentFee.text = enrollmentForm.enrollmentFee || ""
+            monthlyFee.text = enrollmentForm.monthlyFee || ""
+            appWindow.showEnrollmentEditor = state.showEnrollmentEditor === true
+                                              && Boolean(backend.selectedEnrollment.id)
+
+            var courseForm = state.courseForm || {}
+            appWindow.editingCourse = state.editingCourse === true
+                                      && Boolean(backend.selectedCourse.id)
+            appWindow.loadCourseForm()
+            if (appWindow.editingCourse) {
+                courseNameEdit.text = courseForm.name || courseNameEdit.text
+                courseScheduleEdit.text = courseForm.schedule || courseScheduleEdit.text
+                courseGroupEdit.text = courseForm.group || courseGroupEdit.text
+                courseCapacityEdit.text = courseForm.capacity || courseCapacityEdit.text
+                courseStartDateEdit.text = courseForm.startDate || courseStartDateEdit.text
+                courseEnrollmentFeeEdit.text = courseForm.enrollmentFee
+                                              || courseEnrollmentFeeEdit.text
+                courseMonthlyFeeEdit.text = courseForm.monthlyFee
+                                           || courseMonthlyFeeEdit.text
+                courseActiveEdit.checked = courseForm.active !== undefined
+                                           ? courseForm.active
+                                           : courseActiveEdit.checked
+            }
+
+            var campusForm = state.campusForm || {}
+            newCampusNameInput.text = campusForm.name || ""
+            newCampusAddressInput.text = campusForm.address || ""
+            appWindow.creatingCampus = state.creatingCampus === true
+
+            courseWizardDialog.restoreSessionState(state.courseWizard)
+            enrollmentWizardDialog.restoreSessionState(state.enrollmentWizard)
+        }
+
+        appWindow.restoringSession = false
+        appWindow.sessionTrackingEnabled = true
+    }
+
+    function collectSessionState() {
+        return {
+            version: 1,
+            campusPath: appWindow.activeCampusPath(),
+            currentPage: appWindow.currentPage,
+            darkMode: appWindow.darkMode,
+            window: {
+                x: appWindow.x,
+                y: appWindow.y,
+                width: appWindow.width,
+                height: appWindow.height
+            },
+            creatingCampus: appWindow.creatingCampus,
+            showEnrollmentEditor: appWindow.showEnrollmentEditor,
+            editingCourse: appWindow.editingCourse,
+            selection: {
+                studentId: backend.selectedStudent.id || "",
+                enrollmentId: backend.selectedEnrollment.id || "",
+                courseId: backend.selectedCourse.id || ""
+            },
+            campusForm: {
+                name: newCampusNameInput.text,
+                address: newCampusAddressInput.text
+            },
+            studentForm: {
+                lastName: lastName.text,
+                firstName: firstName.text,
+                documentNumber: documentNumber.text,
+                phones: phones.text
+            },
+            enrollmentForm: {
+                studentId: studentSelect.currentValue,
+                courseId: courseSelect.currentValue,
+                date: enrollmentDate.text,
+                enrollmentFee: enrollmentFee.text,
+                monthlyFee: monthlyFee.text
+            },
+            courseForm: {
+                name: courseNameEdit.text,
+                schedule: courseScheduleEdit.text,
+                group: courseGroupEdit.text,
+                capacity: courseCapacityEdit.text,
+                startDate: courseStartDateEdit.text,
+                enrollmentFee: courseEnrollmentFeeEdit.text,
+                monthlyFee: courseMonthlyFeeEdit.text,
+                active: courseActiveEdit.checked
+            },
+            courseWizard: courseWizardDialog.sessionState(),
+            enrollmentWizard: enrollmentWizardDialog.sessionState()
+        }
+    }
+
+    function persistSessionState() {
+        if (!sessionStore.saveState(JSON.stringify(appWindow.collectSessionState())))
+            console.error("No se pudo guardar el estado de sesión:", sessionStore.errorMessage)
+    }
+
     function loadStudentForm() {
         var student = backend.selectedStudent
         lastName.text = student.last_name || ""
@@ -75,6 +244,46 @@ ApplicationWindow {
         monthlyFee.text = enrollment.monthly_fee || ""
     }
 
+    function loadCourseForm() {
+        var course = backend.selectedCourse
+        courseNameEdit.text = course.name || ""
+        courseScheduleEdit.text = course.schedule || ""
+        courseGroupEdit.text = course.group || ""
+        courseCapacityEdit.text = course.capacity ? String(course.capacity) : ""
+        courseStartDateEdit.text = course.start_date || ""
+        courseEnrollmentFeeEdit.text = course.enrollment_fee || ""
+        courseMonthlyFeeEdit.text = course.monthly_fee || ""
+        courseActiveEdit.checked = course.active !== false
+    }
+
+    function beginCourseEdit() {
+        if (!backend.selectedCourse.id)
+            return
+        appWindow.loadCourseForm()
+        appWindow.editingCourse = true
+    }
+
+    function cancelCourseEdit() {
+        appWindow.editingCourse = false
+        appWindow.loadCourseForm()
+    }
+
+    function saveCourseEdit() {
+        if (!backend.saveCourse(
+                Number(backend.selectedCourse.id),
+                courseNameEdit.text,
+                courseScheduleEdit.text,
+                courseGroupEdit.text,
+                courseStartDateEdit.text,
+                courseEnrollmentFeeEdit.text,
+                courseMonthlyFeeEdit.text,
+                courseCapacityEdit.text,
+                courseActiveEdit.checked
+            ))
+            return
+        appWindow.editingCourse = false
+    }
+
     function saveEnrollment() {
         backend.saveEnrollment(backend.selectedEnrollment.id || "", {
             student_id: studentSelect.currentValue,
@@ -89,12 +298,23 @@ ApplicationWindow {
         courseWizardDialog.openWizard()
     }
 
-    function openStudentWizard() {
-        studentWizardDialog.openWizard()
-    }
-
     function openEnrollmentWizard() {
         enrollmentWizardDialog.openWizard()
+    }
+
+    Component.onCompleted: Qt.callLater(appWindow.restoreSessionState)
+    onClosing: appWindow.persistSessionState()
+    onSessionSnapshotChanged: {
+        if (appWindow.sessionTrackingEnabled && !appWindow.restoringSession)
+            sessionSaveTimer.restart()
+    }
+
+    Timer {
+        id: sessionSaveTimer
+        objectName: "sessionSaveTimer"
+        interval: 300
+        repeat: false
+        onTriggered: appWindow.persistSessionState()
     }
 
     FileDialog {
@@ -230,13 +450,6 @@ ApplicationWindow {
         desktopBackend: backend
     }
 
-    StudentWizardDialog {
-        id: studentWizardDialog
-        objectName: "studentWizardDialog"
-        appWindow: appWindow
-        desktopBackend: backend
-    }
-
     EnrollmentWizardDialog {
         id: enrollmentWizardDialog
         objectName: "enrollmentWizardDialog"
@@ -249,6 +462,7 @@ ApplicationWindow {
         function onSelectionChanged() {
             appWindow.loadStudentForm()
             appWindow.loadEnrollmentForm()
+            appWindow.loadCourseForm()
         }
     }
 
@@ -284,13 +498,11 @@ ApplicationWindow {
                         elide: Text.ElideRight
                     }
                 }
-                Button {
+                IconTextButton {
                     text: "Importar paquete"
+                    symbolName: "folder_open"
+                    symbolColor: appTheme.headerText
                     flat: true
-                    icon.source: Qt.resolvedUrl("icons/folder-open.svg")
-                    icon.width: 18
-                    icon.height: 18
-                    icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     onClicked: openDialog.open()
                 }
@@ -306,14 +518,12 @@ ApplicationWindow {
                             appWindow.currentPage = 0
                     }
                 }
-                Button {
+                IconTextButton {
                     text: "Nueva sede"
+                    symbolName: "add"
+                    symbolColor: appTheme.headerText
                     flat: true
                     visible: backend.hasWorkspace
-                    icon.source: Qt.resolvedUrl("icons/add.svg")
-                    icon.width: 18
-                    icon.height: 18
-                    icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     onClicked: {
                         appWindow.creatingCampus = true
@@ -321,14 +531,12 @@ ApplicationWindow {
                         newCampusAddressInput.text = ""
                     }
                 }
-                Button {
+                IconTextButton {
                     text: "Abrir base"
+                    symbolName: "folder_open"
+                    symbolColor: appTheme.headerText
                     flat: true
                     visible: backend.hasWorkspace
-                    icon.source: Qt.resolvedUrl("icons/folder-open.svg")
-                    icon.width: 18
-                    icon.height: 18
-                    icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     onClicked: localDatabaseDialog.open()
                 }
@@ -339,27 +547,21 @@ ApplicationWindow {
                     Material.foreground: appTheme.headerText
                     onClicked: closeCampusDialog.open()
                 }
-                Button {
+                IconTextButton {
                     text: appWindow.darkMode ? "Modo claro" : "Modo nocturno"
+                    symbolName: appWindow.darkMode ? "light_mode" : "dark_mode"
+                    symbolColor: appTheme.headerText
                     flat: true
-                    icon.source: appWindow.darkMode
-                                  ? Qt.resolvedUrl("icons/sun.svg")
-                                  : Qt.resolvedUrl("icons/moon.svg")
-                    icon.width: 18
-                    icon.height: 18
-                    icon.color: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     onClicked: appWindow.darkMode = !appWindow.darkMode
                 }
-                Button {
+                IconTextButton {
                     id: exportButton
                     text: backend.isNewCampus
                           ? "Exportar sede inicial"
                           : "Exportar sincronización"
-                    icon.source: Qt.resolvedUrl("icons/export.svg")
-                    icon.width: 18
-                    icon.height: 18
-                    icon.color: appTheme.headerText
+                    symbolName: "ios_share"
+                    symbolColor: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     highlighted: true
                     visible: backend.hasWorkspace
@@ -436,24 +638,24 @@ ApplicationWindow {
                     font.pixelSize: 15
                     wrapMode: Text.Wrap
                 }
-                TextField {
+                UppercaseTextField {
                     id: newCampusNameInput
                     Layout.fillWidth: true
                     placeholderText: "Nombre de la sede"
                     maximumLength: 120
                 }
-                TextField {
+                UppercaseTextField {
                     id: newCampusAddressInput
                     Layout.fillWidth: true
                     placeholderText: "Dirección (opcional)"
                     maximumLength: 200
                 }
-                Button {
+                IconTextButton {
                     id: createWorkspaceButton
                     Layout.alignment: Qt.AlignHCenter
                     text: "Elegir ubicación y crear sede"
-                    icon.source: Qt.resolvedUrl("icons/add.svg")
-                    icon.color: appTheme.headerText
+                    symbolName: "add"
+                    symbolColor: appTheme.headerText
                     Material.foreground: appTheme.headerText
                     highlighted: true
                     background: Rectangle {
@@ -497,55 +699,150 @@ ApplicationWindow {
             visible: backend.hasWorkspace && !appWindow.creatingCampus
 
             Rectangle {
-                Layout.preferredWidth: 190
+                Layout.preferredWidth: 214
                 Layout.fillHeight: true
                 radius: 14
                 color: appWindow.surfaceColor
                 border.color: appWindow.borderColor
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 8
+                    anchors.margins: 12
+                    spacing: 10
                     Label {
-                        Layout.leftMargin: 8
-                        Layout.bottomMargin: 6
+                        Layout.leftMargin: 4
+                        Layout.bottomMargin: 2
                         text: "GESTIÓN"
                         color: appWindow.secondaryTextColor
                         font.pixelSize: 11
                         font.bold: true
                     }
-                    Button {
+                    GridLayout {
                         Layout.fillWidth: true
-                        text: "Estudiantes"
-                        icon.source: Qt.resolvedUrl("icons/students.svg")
-                        icon.width: 20
-                        icon.height: 20
-                        icon.color: checked ? appTheme.headerText : appTheme.primaryTextColor
-                        checkable: true
-                        checked: appWindow.currentPage === 0
-                        onClicked: appWindow.currentPage = 0
-                    }
-                    Button {
-                        Layout.fillWidth: true
-                        text: "Matrículas"
-                        icon.source: Qt.resolvedUrl("icons/enrollments.svg")
-                        icon.width: 20
-                        icon.height: 20
-                        icon.color: checked ? appTheme.headerText : appTheme.primaryTextColor
-                        checkable: true
-                        checked: appWindow.currentPage === 1
-                        onClicked: appWindow.currentPage = 1
-                    }
-                    Button {
-                        Layout.fillWidth: true
-                        text: "Cursos"
-                        icon.source: Qt.resolvedUrl("icons/courses.svg")
-                        icon.width: 20
-                        icon.height: 20
-                        icon.color: checked ? appTheme.headerText : appTheme.primaryTextColor
-                        checkable: true
-                        checked: appWindow.currentPage === 2
-                        onClicked: appWindow.currentPage = 2
+                        columns: 1
+                        rowSpacing: 8
+                        Button {
+                            id: studentsNavigationButton
+                            objectName: "studentsNavigationButton"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 84
+                            text: "Estudiantes"
+                            font.pixelSize: 11
+                            padding: 4
+                            spacing: 5
+                            property bool selected: appWindow.currentPage === 0
+                            contentItem: ColumnLayout {
+                                spacing: studentsNavigationButton.spacing
+                                MaterialSymbol {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    symbolName: "groups"
+                                    symbolSize: 38
+                                    symbolColor: studentsNavigationButton.selected
+                                                 ? appTheme.headerText
+                                                 : appWindow.primaryTextColor
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: studentsNavigationButton.text
+                                    font: studentsNavigationButton.font
+                                    color: studentsNavigationButton.Material.foreground
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: studentsNavigationButton.selected
+                                       ? appTheme.primary : appWindow.nestedSurfaceColor
+                                border.color: studentsNavigationButton.selected
+                                             ? appTheme.primary : appWindow.borderColor
+                            }
+                            Material.foreground: studentsNavigationButton.selected
+                                                  ? appTheme.headerText : appTheme.primaryTextColor
+                            onClicked: appWindow.currentPage = 0
+                        }
+                        Button {
+                            id: enrollmentsNavigationButton
+                            objectName: "enrollmentsNavigationButton"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 84
+                            text: "Matrículas"
+                            font.pixelSize: 11
+                            padding: 4
+                            spacing: 5
+                            property bool selected: appWindow.currentPage === 1
+                            contentItem: ColumnLayout {
+                                spacing: enrollmentsNavigationButton.spacing
+                                MaterialSymbol {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    symbolName: "assignment"
+                                    symbolSize: 38
+                                    symbolColor: enrollmentsNavigationButton.selected
+                                                 ? appTheme.headerText
+                                                 : appWindow.primaryTextColor
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: enrollmentsNavigationButton.text
+                                    font: enrollmentsNavigationButton.font
+                                    color: enrollmentsNavigationButton.Material.foreground
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: enrollmentsNavigationButton.selected
+                                       ? appTheme.primary : appWindow.nestedSurfaceColor
+                                border.color: enrollmentsNavigationButton.selected
+                                             ? appTheme.primary : appWindow.borderColor
+                            }
+                            Material.foreground: enrollmentsNavigationButton.selected
+                                                  ? appTheme.headerText : appTheme.primaryTextColor
+                            onClicked: appWindow.currentPage = 1
+                        }
+                        Button {
+                            id: coursesNavigationButton
+                            objectName: "coursesNavigationButton"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 84
+                            text: "Cursos"
+                            font.pixelSize: 11
+                            padding: 4
+                            spacing: 5
+                            property bool selected: appWindow.currentPage === 2
+                            contentItem: ColumnLayout {
+                                spacing: coursesNavigationButton.spacing
+                                MaterialSymbol {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    symbolName: "menu_book"
+                                    symbolSize: 38
+                                    symbolColor: coursesNavigationButton.selected
+                                                 ? appTheme.headerText
+                                                 : appWindow.primaryTextColor
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: coursesNavigationButton.text
+                                    font: coursesNavigationButton.font
+                                    color: coursesNavigationButton.Material.foreground
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: coursesNavigationButton.selected
+                                       ? appTheme.primary : appWindow.nestedSurfaceColor
+                                border.color: coursesNavigationButton.selected
+                                             ? appTheme.primary : appWindow.borderColor
+                            }
+                            Material.foreground: coursesNavigationButton.selected
+                                                  ? appTheme.headerText : appTheme.primaryTextColor
+                            onClicked: appWindow.currentPage = 2
+                        }
                     }
                     Item { Layout.fillHeight: true }
                     Label {
@@ -571,6 +868,7 @@ ApplicationWindow {
                     spacing: 12
                     ScrollView {
                         id: studentScroll
+                        objectName: "studentScroll"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -583,25 +881,18 @@ ApplicationWindow {
                                 font.pixelSize: 18
                                 font.bold: true
                             }
-                            RowLayout {
+                            Label {
                                 Layout.fillWidth: true
-                                Button {
-                                    text: "Nuevo estudiante"
-                                    icon.source: Qt.resolvedUrl("icons/add.svg")
-                                    icon.color: appTheme.primaryTextColor
-                                    enabled: backend.hasWorkspace
-                                    onClicked: appWindow.openStudentWizard()
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    horizontalAlignment: Text.AlignRight
-                                    text: backend.students.length + " registros"
-                                    color: appWindow.secondaryTextColor
-                                }
+                                horizontalAlignment: Text.AlignRight
+                                text: backend.students.length + " registros"
+                                color: appWindow.secondaryTextColor
                             }
                             ListView {
+                                objectName: "studentList"
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 170
+                                Layout.preferredHeight: backend.selectedStudent.id
+                                                             ? 170
+                                                             : Math.max(170, studentScroll.availableHeight - 50)
                                 clip: true
                                 model: backend.students
                                 delegate: ItemDelegate {
@@ -617,46 +908,53 @@ ApplicationWindow {
                                 }
                             }
                             GridLayout {
+                                objectName: "studentEditor"
+                                visible: Boolean(backend.selectedStudent.id)
                                 Layout.fillWidth: true
                                 columns: 2
                                 columnSpacing: 10
                                 Label { text: "Apellidos" }
-                                TextField {
+                                UppercaseTextField {
                                     id: lastName
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
+                                             && Boolean(backend.selectedStudent.id)
                                     placeholderText: "Apellidos"
                                 }
                                 Label { text: "Nombres" }
-                                TextField {
+                                UppercaseTextField {
                                     id: firstName
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
+                                             && Boolean(backend.selectedStudent.id)
                                     placeholderText: "Nombres"
                                 }
                                 Label { text: "DNI" }
-                                TextField {
+                                UppercaseTextField {
                                     id: documentNumber
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
+                                             && Boolean(backend.selectedStudent.id)
                                     placeholderText: "Opcional"
                                 }
                                 Label { text: "Celulares" }
-                                TextField {
+                                UppercaseTextField {
                                     id: phones
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
+                                             && Boolean(backend.selectedStudent.id)
                                     placeholderText: "9 dígitos, separados por coma"
                                 }
                             }
                         }
                     }
                     Button {
-                        text: "Guardar estudiante"
+                        objectName: "studentSaveButton"
+                        visible: Boolean(backend.selectedStudent.id)
+                        text: "Guardar cambios"
                         enabled: backend.hasWorkspace
-                                 && Boolean(backend.selectedStudent.id)
                         onClicked: backend.saveStudent(
-                            backend.selectedStudent.id || "",
+                            backend.selectedStudent.id,
                             lastName.text,
                             firstName.text,
                             documentNumber.text,
@@ -693,27 +991,27 @@ ApplicationWindow {
                             }
                             RowLayout {
                                 Layout.fillWidth: true
-                                Button {
+                                IconTextButton {
                                     text: "Nueva matrícula guiada"
-                                    icon.source: Qt.resolvedUrl("icons/enrollments.svg")
-                                    icon.color: appTheme.primaryTextColor
+                                    symbolName: "assignment"
+                                    symbolColor: appWindow.primaryTextColor
                                     enabled: backend.hasWorkspace
                                     onClicked: appWindow.openEnrollmentWizard()
                                 }
-                                Button {
+                                IconTextButton {
                                     text: "Nuevo curso"
-                                    icon.source: Qt.resolvedUrl("icons/add.svg")
-                                    icon.color: appTheme.primaryTextColor
+                                    symbolName: "add"
+                                    symbolColor: appWindow.primaryTextColor
                                     enabled: backend.hasWorkspace
                                     onClicked: appWindow.openCourseDialog()
                                 }
-                                Button {
+                                IconTextButton {
                                     visible: backend.hasWorkspace
                                              && Boolean(backend.selectedEnrollment.id)
                                     text: appWindow.showEnrollmentEditor
                                           ? "Ocultar edición" : "Editar seleccionada"
-                                    icon.source: Qt.resolvedUrl("icons/enrollments.svg")
-                                    icon.color: appTheme.primaryTextColor
+                                    symbolName: "assignment"
+                                    symbolColor: appWindow.primaryTextColor
                                     onClicked: appWindow.showEnrollmentEditor =
                                                !appWindow.showEnrollmentEditor
                                 }
@@ -784,21 +1082,21 @@ ApplicationWindow {
                                     valueRole: "id"
                                 }
                                 Label { text: "Fecha" }
-                                TextField {
+                                DatePickerField {
                                     id: enrollmentDate
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
                                     placeholderText: "AAAA-MM-DD"
                                 }
                                 Label { text: "Costo matrícula" }
-                                TextField {
+                                UppercaseTextField {
                                     id: enrollmentFee
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                 }
                                 Label { text: "Mensualidad" }
-                                TextField {
+                                UppercaseTextField {
                                     id: monthlyFee
                                     Layout.fillWidth: true
                                     enabled: backend.hasWorkspace
@@ -842,10 +1140,10 @@ ApplicationWindow {
                                                     wrapMode: Text.Wrap
                                                 }
                                             }
-                                            Button {
+                                            IconTextButton {
                                                 text: "Nuevo curso"
-                                                icon.source: Qt.resolvedUrl("icons/add.svg")
-                                                icon.color: appTheme.headerText
+                                                symbolName: "add"
+                                                symbolColor: appTheme.headerText
                                                 highlighted: true
                                                 enabled: backend.hasWorkspace
                                                 onClicked: appWindow.openCourseDialog()
@@ -881,7 +1179,10 @@ ApplicationWindow {
                                                                   + (modelData.active ? "" : " · inactivo")
                                                                   + " · " + modelData.student_count + " estudiantes"
                                                             highlighted: backend.selectedCourse.id === modelData.id
-                                                            onClicked: backend.selectCourse(modelData.id)
+                                                            onClicked: {
+                                                                appWindow.editingCourse = false
+                                                                backend.selectCourse(modelData.id)
+                                                            }
                                                         }
                                                     }
                                                     Label {
@@ -904,19 +1205,30 @@ ApplicationWindow {
                                                     anchors.fill: parent
                                                     anchors.margins: 16
                                                     spacing: 8
-                                                    Label {
+                                                    RowLayout {
                                                         Layout.fillWidth: true
-                                                        text: backend.selectedCourse.id
-                                                              ? backend.selectedCourse.name
-                                                              : "Selecciona un curso"
-                                                        color: appWindow.primaryTextColor
-                                                        font.pixelSize: 18
-                                                        font.bold: true
-                                                        wrapMode: Text.Wrap
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: backend.selectedCourse.id
+                                                                  ? backend.selectedCourse.name
+                                                                  : "Selecciona un curso"
+                                                            color: appWindow.primaryTextColor
+                                                            font.pixelSize: 18
+                                                            font.bold: true
+                                                            wrapMode: Text.Wrap
+                                                        }
+                                                        Button {
+                                                            objectName: "editCourseButton"
+                                                            visible: Boolean(backend.selectedCourse.id)
+                                                                     && !appWindow.editingCourse
+                                                            text: "Editar curso"
+                                                            onClicked: appWindow.beginCourseEdit()
+                                                        }
                                                     }
                                                     Label {
                                                         Layout.fillWidth: true
                                                         visible: Boolean(backend.selectedCourse.id)
+                                                                 && !appWindow.editingCourse
                                                         text: backend.selectedCourse.id
                                                               ? backend.selectedCourse.schedule
                                                                 + " · Grupo " + backend.selectedCourse.group
@@ -924,6 +1236,90 @@ ApplicationWindow {
                                                               : ""
                                                         color: appWindow.secondaryTextColor
                                                         wrapMode: Text.Wrap
+                                                    }
+                                                    GridLayout {
+                                                        objectName: "courseEditor"
+                                                        visible: appWindow.editingCourse
+                                                                 && Boolean(backend.selectedCourse.id)
+                                                        Layout.fillWidth: true
+                                                        columns: 2
+                                                        columnSpacing: 10
+                                                        rowSpacing: 6
+                                                        Label { text: "Nombre" }
+                                                        UppercaseTextField {
+                                                            id: courseNameEdit
+                                                            objectName: "courseNameEdit"
+                                                            Layout.fillWidth: true
+                                                            placeholderText: "Nombre del curso"
+                                                        }
+                                                        Label { text: "Horario" }
+                                                        UppercaseTextField {
+                                                            id: courseScheduleEdit
+                                                            objectName: "courseScheduleEdit"
+                                                            Layout.fillWidth: true
+                                                            placeholderText: "Horario"
+                                                        }
+                                                        Label { text: "Grupo" }
+                                                        UppercaseTextField {
+                                                            id: courseGroupEdit
+                                                            objectName: "courseGroupEdit"
+                                                            Layout.fillWidth: true
+                                                            inputMethodHints: Qt.ImhDigitsOnly
+                                                            placeholderText: "Grupo"
+                                                        }
+                                                        Label { text: "Capacidad" }
+                                                        UppercaseTextField {
+                                                            id: courseCapacityEdit
+                                                            objectName: "courseCapacityEdit"
+                                                            Layout.fillWidth: true
+                                                            inputMethodHints: Qt.ImhDigitsOnly
+                                                            placeholderText: "Capacidad"
+                                                        }
+                                                        Label { text: "Fecha de inicio" }
+                                                        DatePickerField {
+                                                            id: courseStartDateEdit
+                                                            objectName: "courseStartDateEdit"
+                                                            Layout.fillWidth: true
+                                                            placeholderText: "AAAA-MM-DD"
+                                                        }
+                                                        Label { text: "Costo de matrícula" }
+                                                        UppercaseTextField {
+                                                            id: courseEnrollmentFeeEdit
+                                                            objectName: "courseEnrollmentFeeEdit"
+                                                            Layout.fillWidth: true
+                                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                            placeholderText: "Costo de matrícula"
+                                                        }
+                                                        Label { text: "Mensualidad" }
+                                                        UppercaseTextField {
+                                                            id: courseMonthlyFeeEdit
+                                                            objectName: "courseMonthlyFeeEdit"
+                                                            Layout.fillWidth: true
+                                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                            placeholderText: "Mensualidad"
+                                                        }
+                                                        CheckBox {
+                                                            id: courseActiveEdit
+                                                            objectName: "courseActiveEdit"
+                                                            Layout.columnSpan: 2
+                                                            text: "Curso activo"
+                                                        }
+                                                    }
+                                                    RowLayout {
+                                                        Layout.fillWidth: true
+                                                        visible: appWindow.editingCourse
+                                                                 && Boolean(backend.selectedCourse.id)
+                                                        Button {
+                                                            objectName: "saveCourseButton"
+                                                            text: "Guardar cambios"
+                                                            enabled: backend.hasWorkspace
+                                                            onClicked: appWindow.saveCourseEdit()
+                                                        }
+                                                        Button {
+                                                            objectName: "cancelCourseButton"
+                                                            text: "Cancelar"
+                                                            onClicked: appWindow.cancelCourseEdit()
+                                                        }
                                                     }
                                                     Rectangle {
                                                         Layout.fillWidth: true

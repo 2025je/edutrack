@@ -14,6 +14,7 @@ Dialog {
     property bool withoutStudent: false
     property bool creatingStudent: false
     property string errorMessage: ""
+    property bool sessionOpened: false
 
     title: step === 0 ? "Nueva matrícula · Paso 1 de 2"
                       : "Nueva matrícula · Paso 2 de 2"
@@ -21,6 +22,8 @@ Dialog {
     width: Math.min(appWindow.width - 48, 760)
     height: Math.min(appWindow.height - 56, 590)
     anchors.centerIn: parent
+    onOpened: sessionOpened = true
+    onRejected: sessionOpened = false
 
     function openWizard(reserveSeat) {
         appWindow.showEnrollmentEditor = false
@@ -43,7 +46,63 @@ Dialog {
         updateCourseFees()
         if (!withoutStudent)
             searchStudents("")
+        sessionOpened = true
         open()
+    }
+
+    function cancelWizard() {
+        sessionOpened = false
+        close()
+    }
+
+    function sessionState() {
+        return {
+            opened: sessionOpened,
+            step: step,
+            studentId: studentId,
+            studentLabel: studentLabel,
+            studentSearch: studentSearch.text,
+            withoutStudent: withoutStudent,
+            creatingStudent: creatingStudent,
+            errorMessage: errorMessage,
+            newStudentLastName: newStudentLastName.text,
+            newStudentFirstName: newStudentFirstName.text,
+            newStudentDocument: newStudentDocument.text,
+            newStudentPhones: newStudentPhones.text,
+            courseId: course.currentValue,
+            enrollmentDate: enrollmentDate.text,
+            enrollmentFee: enrollmentFee.text,
+            monthlyFee: monthlyFee.text
+        }
+    }
+
+    function restoreSessionState(state) {
+        if (!state || typeof state !== "object")
+            return
+        studentSearch.text = state.studentSearch || ""
+        searchStudents(studentSearch.text)
+        newStudentLastName.text = state.newStudentLastName || ""
+        newStudentFirstName.text = state.newStudentFirstName || ""
+        newStudentDocument.text = state.newStudentDocument || ""
+        newStudentPhones.text = state.newStudentPhones || ""
+        withoutStudent = state.withoutStudent === true
+        creatingStudent = state.creatingStudent === true
+        studentId = state.studentId || ""
+        studentLabel = state.studentLabel || ""
+        for (var index = 0; index < course.count; index++) {
+            if (String(course.model[index].id) === String(state.courseId)) {
+                course.currentIndex = index
+                break
+            }
+        }
+        enrollmentDate.text = state.enrollmentDate
+                                     || Qt.formatDate(new Date(), "yyyy-MM-dd")
+        enrollmentFee.text = state.enrollmentFee || ""
+        monthlyFee.text = state.monthlyFee || ""
+        step = state.step === 1 ? 1 : 0
+        errorMessage = state.errorMessage || ""
+        if (state.opened === true)
+            open()
     }
 
     function updateCourseFees() {
@@ -140,6 +199,7 @@ Dialog {
             return
         }
         errorMessage = ""
+        sessionOpened = false
         close()
         appWindow.showEnrollmentEditor = false
         appWindow.currentPage = 1
@@ -167,7 +227,7 @@ Dialog {
                         wrapMode: Text.Wrap
                         color: appWindow.secondaryTextColor
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: studentSearch
                         objectName: "studentSearchField"
                         Layout.fillWidth: true
@@ -305,25 +365,25 @@ Dialog {
                         columns: 2
                         columnSpacing: 10
                         Label { text: "Apellidos" }
-                        TextField {
+                        UppercaseTextField {
                             id: newStudentLastName
                             Layout.fillWidth: true
                             placeholderText: "Apellidos"
                         }
                         Label { text: "Nombres" }
-                        TextField {
+                        UppercaseTextField {
                             id: newStudentFirstName
                             Layout.fillWidth: true
                             placeholderText: "Nombres"
                         }
                         Label { text: "DNI" }
-                        TextField {
+                        UppercaseTextField {
                             id: newStudentDocument
                             Layout.fillWidth: true
                             placeholderText: "Opcional"
                         }
                         Label { text: "Celular(es)" }
-                        TextField {
+                        UppercaseTextField {
                             id: newStudentPhones
                             Layout.fillWidth: true
                             placeholderText: "9 dígitos, separados por coma"
@@ -372,20 +432,20 @@ Dialog {
                             onActivated: wizard.updateCourseFees()
                         }
                         Label { text: "Fecha de matrícula" }
-                        TextField {
+                        DatePickerField {
                             id: enrollmentDate
                             Layout.fillWidth: true
                             placeholderText: "AAAA-MM-DD"
                         }
                         Label { text: "Costo matrícula" }
-                        TextField {
+                        UppercaseTextField {
                             id: enrollmentFee
                             Layout.fillWidth: true
                             readOnly: !Boolean(course.currentValue)
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
                         }
                         Label { text: "Mensualidad" }
-                        TextField {
+                        UppercaseTextField {
                             id: monthlyFee
                             Layout.fillWidth: true
                             readOnly: !Boolean(course.currentValue)
@@ -422,7 +482,7 @@ Dialog {
             Item { Layout.fillWidth: true }
             Button {
                 text: "Cancelar"
-                onClicked: wizard.close()
+                onClicked: wizard.cancelWizard()
             }
             Button {
                 visible: wizard.step === 1

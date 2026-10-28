@@ -9,6 +9,7 @@ Dialog {
     required property var desktopBackend
     property int step: 0
     property string errorMessage: ""
+    property bool sessionOpened: false
 
     title: step === 0 ? "Nuevo estudiante · Paso 1 de 2"
                       : "Nuevo estudiante · Paso 2 de 2"
@@ -16,6 +17,8 @@ Dialog {
     width: Math.min(appWindow.width - 48, 680)
     height: Math.min(appWindow.height - 56, 540)
     anchors.centerIn: parent
+    onOpened: sessionOpened = true
+    onRejected: sessionOpened = false
 
     function openWizard() {
         step = 0
@@ -24,7 +27,40 @@ Dialog {
         studentFirstName.text = ""
         studentDocument.text = ""
         studentPhones.text = ""
+        sessionOpened = true
         open()
+    }
+
+    function cancelWizard() {
+        sessionOpened = false
+        close()
+    }
+
+    function sessionState() {
+        return {
+            opened: sessionOpened,
+            step: step,
+            errorMessage: errorMessage,
+            lastName: studentLastName.text,
+            firstName: studentFirstName.text,
+            document: studentDocument.text,
+            phones: studentPhones.text
+        }
+    }
+
+    function restoreSessionState(state) {
+        if (!state || typeof state !== "object")
+            return
+        studentLastName.text = state.lastName || ""
+        studentFirstName.text = state.firstName || ""
+        studentDocument.text = state.document || ""
+        studentPhones.text = state.phones || ""
+        step = state.step === 1 ? 1 : 0
+        errorMessage = state.errorMessage || ""
+        if (state.opened === true)
+            sessionOpened = true
+        if (state.opened === true)
+            open()
     }
 
     function continueWizard() {
@@ -50,6 +86,7 @@ Dialog {
             return
         }
         errorMessage = ""
+        sessionOpened = false
         close()
         appWindow.currentPage = 0
     }
@@ -75,17 +112,18 @@ Dialog {
                         color: appWindow.secondaryTextColor
                         wrapMode: Text.Wrap
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: studentLastName
+                        objectName: "studentWizardLastNameField"
                         Layout.fillWidth: true
                         placeholderText: "Apellidos"
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: studentFirstName
                         Layout.fillWidth: true
                         placeholderText: "Nombres"
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: studentDocument
                         Layout.fillWidth: true
                         placeholderText: "DNI (opcional)"
@@ -112,7 +150,7 @@ Dialog {
                         font.bold: true
                         wrapMode: Text.Wrap
                     }
-                    TextField {
+                    UppercaseTextField {
                         id: studentPhones
                         Layout.fillWidth: true
                         placeholderText: "Celular(es), separados por coma"
@@ -143,7 +181,7 @@ Dialog {
             Item { Layout.fillWidth: true }
             Button {
                 text: "Cancelar"
-                onClicked: wizard.close()
+                onClicked: wizard.cancelWizard()
             }
             Button {
                 visible: wizard.step === 1

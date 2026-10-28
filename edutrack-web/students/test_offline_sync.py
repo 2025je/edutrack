@@ -148,10 +148,62 @@ class OfflineSynchronizationTests(TestCase):
         self.assertTrue(Course.objects.filter(campus=campus, name="MATEMÁTICAS").exists())
         self.assertEqual(Student.objects.filter(campus=campus).count(), 1)
         self.assertEqual(Enrollment.objects.filter(campus=campus).count(), 1)
-
         with self.assertRaisesMessage(OfflinePackageError, "ya fue importado"):
             import_initial_package(package, request)
         self.assertEqual(Campus.objects.filter(desktop_bundle_id=package["bundle_id"]).count(), 1)
+
+    def test_initial_package_accepts_pending_enrollment_and_reserved_seat(self):
+        manifest = self.initial_manifest()
+        existing = manifest["enrollments"][0]
+        pending = {
+            **existing,
+            "id": str(uuid.uuid4()),
+            "course_id": None,
+            "enrollment_fee": "9.00",
+            "monthly_fee": "8.00",
+        }
+        reserved_seat = {
+            **existing,
+            "id": str(uuid.uuid4()),
+            "student_id": None,
+            "student_server_id": None,
+        }
+        manifest["enrollments"].extend((pending, reserved_seat))
+        package = self.package_from(manifest)
+        user = create_user(
+            username="pending-importer",
+            password="test-pass-123",
+            manage_students=True,
+            manage_campuses=True,
+        )
+        request = SimpleNamespace(method="POST", user=user, session={})
+
+        with patch("core.activity.record"):
+            campus, _ = import_initial_package(package, request)
+
+        enrollments = list(Enrollment.objects.filter(campus=campus))
+        self.assertEqual(len(enrollments), 3)
+        self.assertTrue(
+            any(
+                item.student_id is not None
+                and item.course_id is None
+                and item.enrollment_fee == 0
+                and item.monthly_fee == 0
+                for item in enrollments
+            )
+        )
+        self.assertTrue(
+            any(item.student_id is None and item.course_id is not None for item in enrollments)
+        )
+
+    def test_package_rejects_enrollment_without_student_and_course(self):
+        manifest = self.initial_manifest()
+        manifest["enrollments"][0]["student_id"] = None
+        manifest["enrollments"][0]["student_server_id"] = None
+        manifest["enrollments"][0]["course_id"] = None
+
+        with self.assertRaisesRegex(OfflinePackageError, "necesita un estudiante o un curso"):
+            self.package_from(manifest)
 
     def test_invalid_initial_catalog_rolls_back_campus_and_restores_selection(self):
         manifest = self.initial_manifest()
