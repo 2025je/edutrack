@@ -1,6 +1,10 @@
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from .schemas import CampusCatalogHeader, CampusCatalogRecord
+
 
 class CampusCatalogError(RuntimeError):
     pass
@@ -54,36 +58,35 @@ class CampusCatalog:
             raise CampusCatalogError(
                 f"No se pudo leer el catálogo local de sedes: {exc}"
             ) from exc
-        if (
-            not isinstance(data, dict)
-            or data.get("version") != 1
-            or not isinstance(data.get("campuses"), list)
-        ):
+        try:
+            header = CampusCatalogHeader.model_validate(data)
+        except ValidationError as exc:
             raise CampusCatalogError(
                 "El catálogo local de sedes tiene un formato no válido."
-            )
+            ) from exc
 
         records = []
         paths = set()
-        for item in data["campuses"]:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("path"), str)
-                or not item["path"]
-                or not isinstance(item.get("campus_name"), str)
-            ):
+        for item in header.campuses:
+            try:
+                record = CampusCatalogRecord.model_validate(item)
+            except ValidationError as exc:
+                raise CampusCatalogError(
+                    "El catálogo local contiene una sede no válida."
+                ) from exc
+            if not record.path:
                 raise CampusCatalogError(
                     "El catálogo local contiene una sede no válida."
                 )
-            path = str(Path(item["path"]).expanduser().resolve())
+            path = str(Path(record.path).expanduser().resolve())
             if path in paths:
                 raise CampusCatalogError(
                     "El catálogo local contiene bases de datos repetidas."
                 )
             paths.add(path)
-            records.append({"path": path, "campus_name": item["campus_name"]})
+            records.append({"path": path, "campus_name": record.campus_name})
 
-        active_path = data.get("active_path", "")
+        active_path = header.active_path
         if not isinstance(active_path, str):
             raise CampusCatalogError(
                 "El catálogo local contiene una sede activa no válida."

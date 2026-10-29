@@ -1,7 +1,9 @@
-import json
 from pathlib import Path
 
+from pydantic import ValidationError
 from PySide6.QtCore import QObject, Property, QSettings, Signal, Slot
+
+from .schemas import SessionState
 
 
 class SessionSettings(QObject):
@@ -12,7 +14,7 @@ class SessionSettings(QObject):
         self._settings = (
             QSettings()
             if path is None
-            else QSettings(str(Path(path)), QSettings.IniFormat)
+            else QSettings(str(Path(path)), QSettings.Format.IniFormat)
         )
         self._error_message = ""
 
@@ -23,7 +25,7 @@ class SessionSettings(QObject):
     @Slot(result=str)
     def loadState(self):
         self._settings.sync()
-        if self._settings.status() != QSettings.NoError:
+        if self._settings.status() != QSettings.Status.NoError:
             self._set_error("No se pudo leer el estado guardado de EduTrack Desktop.")
             return ""
         state = self._settings.value("desktop/session-state", "{}")
@@ -36,16 +38,13 @@ class SessionSettings(QObject):
     @Slot(str, result=bool)
     def saveState(self, serialized_state):
         try:
-            state = json.loads(serialized_state)
-        except json.JSONDecodeError as exc:
+            SessionState.model_validate_json(serialized_state)
+        except ValidationError as exc:
             self._set_error(f"No se pudo guardar el estado de la sesión: {exc}")
-            return False
-        if not isinstance(state, dict) or state.get("version") != 1:
-            self._set_error("El estado de sesión tiene un formato no válido.")
             return False
         self._settings.setValue("desktop/session-state", serialized_state)
         self._settings.sync()
-        if self._settings.status() != QSettings.NoError:
+        if self._settings.status() != QSettings.Status.NoError:
             self._set_error("No se pudo guardar el estado de EduTrack Desktop.")
             return False
         self._set_error("")

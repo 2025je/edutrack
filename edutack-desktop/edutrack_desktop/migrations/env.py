@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 def load_metadata():
-    from edutrack_desktop.models import Base
+    from edutrack_desktop.app.models import Base
 
     return Base.metadata
 

@@ -27,7 +27,7 @@ class LocalStore:
         event.listen(self.engine, "connect", self._enable_foreign_keys)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
 
-        config_path = Path(__file__).parent / "alembic.ini"
+        config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
         config = Config(str(config_path))
         config.set_main_option("sqlalchemy.url", self.engine.url.render_as_string().replace("%", "%%"))
         with self.engine.begin() as connection:

@@ -45,7 +45,8 @@ uv run edutrack-desktop
 ```
 
 La base de datos local se crea en la carpeta de datos de la aplicación del usuario. Mantén respaldado el archivo de sede y el archivo SQLite si necesitas conservar el trabajo local.
-La interfaz principal está en `edutrack_desktop/Main.qml`; el tema global está separado en `edutrack_desktop/components/AppTheme.qml`, y los asistentes de cursos y matrículas en componentes QML dentro de `edutrack_desktop/components/`. La navegación usa iconos Material Symbols Outlined de Google Fonts y admite modo claro/oscuro; el logo de EduTrack se conserva como icono de ventana. Los campos de texto convierten la entrada a mayúsculas y las fechas se eligen con un calendario, conservando el formato `AAAA-MM-DD`. La fuente Roboto se incluye bajo SIL Open Font License y Material Symbols junto a su licencia Apache 2.0, ambas en `edutrack_desktop/fonts/`. El comando `edutrack-desktop` inicia la interfaz. `main.py` en la raíz también funciona como punto de entrada para PyInstaller.
+La configuración puede sobrescribirse con las variables de entorno `EDUTRACK_DESKTOP_DATA_DIR`, `EDUTRACK_DESKTOP_DATABASE_PATH`, `EDUTRACK_DESKTOP_CAMPUS_CATALOG_PATH`, `EDUTRACK_DESKTOP_QT_MATERIAL_VARIANT` (`Dense` o `Normal`) y `EDUTRACK_DESKTOP_LOG_LEVEL`. Las rutas de base de datos y catálogo, si se definen, tienen prioridad sobre las ubicaciones predeterminadas. Los eventos se registran en formato JSON; en el ejecutable de Windows se guardan en `logs\edutrack-desktop.jsonl` dentro de la carpeta de datos de la aplicación.
+La interfaz principal está en `edutrack_desktop/qml/Main.qml`; el tema global está separado en `edutrack_desktop/qml/components/AppTheme.qml`, y los asistentes de cursos y matrículas en componentes QML dentro de `edutrack_desktop/qml/components/`. La navegación usa iconos Material Symbols Outlined de Google Fonts y admite modo claro/oscuro; el logo de EduTrack se conserva como icono de ventana. Los campos de texto convierten la entrada a mayúsculas y las fechas se eligen con un calendario, conservando el formato `AAAA-MM-DD`. La fuente Roboto se incluye bajo SIL Open Font License y Material Symbols junto a su licencia Apache 2.0, ambas en `edutrack_desktop/qml/fonts/`. El backend QObject conecta QML con `RecordService` para las reglas y operaciones de registros; `presenters.py` prepara los datos de vista y los puertos de `ports.py` permiten sustituir los adaptadores de almacenamiento. `main.py` inicializa el registro estructurado con structlog. El comando `edutrack-desktop` inicia la interfaz. `main.py` en la raíz también funciona como punto de entrada para PyInstaller.
 
 ## Crear el instalador de Windows
 
@@ -71,4 +72,5 @@ El workflow **EduTrack Desktop Windows Installer** compila el instalador en Wind
 
 ```powershell
 uv run pytest
+uv run mypy
 ```

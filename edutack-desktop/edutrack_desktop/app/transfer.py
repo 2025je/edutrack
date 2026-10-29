@@ -9,6 +9,14 @@ import zipfile
 from pathlib import Path
 from pathlib import PurePosixPath
 
+from pydantic import ValidationError
+
+from .schemas import (
+    EnrollmentManifestRecord,
+    ManifestEnvelope,
+    StudentManifestRecord,
+)
+
 PACKAGE_FORMAT = "edutrack-offline"
 SCHEMA_VERSION = 2
 INITIAL_CAMPUS_VERSION = 3
@@ -114,6 +122,10 @@ def validate_manifest(manifest):
             raise PackageError(f"El manifiesto no contiene una lista {key} válida.")
     if len(manifest["students"]) > 2000 or len(manifest["enrollments"]) > 2000:
         raise PackageError("El paquete supera el límite de registros admitidos.")
+    try:
+        ManifestEnvelope.model_validate(manifest)
+    except ValidationError as exc:
+        raise PackageError("El manifiesto tiene un formato no válido.") from exc
 
     student_ids = set()
     for student in manifest["students"]:
@@ -121,9 +133,13 @@ def validate_manifest(manifest):
             raise PackageError("El archivo contiene un estudiante inválido.")
         if student["id"] in student_ids:
             raise PackageError("El archivo repite identificadores de estudiantes.")
-        student_ids.add(student["id"])
         if not isinstance(student.get("phone_numbers"), list):
             raise PackageError("El archivo contiene teléfonos inválidos.")
+        try:
+            StudentManifestRecord.model_validate(student)
+        except ValidationError:
+            raise PackageError("El archivo contiene un estudiante inválido.")
+        student_ids.add(student["id"])
         if is_new_campus and (
             student.get("server_id") is not None or student.get("base_hash") is not None
         ):
@@ -131,10 +147,16 @@ def validate_manifest(manifest):
 
     enrollment_ids = set()
     for enrollment in manifest["enrollments"]:
-        if not isinstance(enrollment, dict) or not isinstance(enrollment.get("id"), str):
+        if not isinstance(enrollment, dict) or not isinstance(
+            enrollment.get("id"), str
+        ):
             raise PackageError("El archivo contiene una matrícula inválida.")
         if enrollment["id"] in enrollment_ids:
             raise PackageError("El archivo repite identificadores de matrículas.")
+        try:
+            EnrollmentManifestRecord.model_validate(enrollment)
+        except ValidationError:
+            raise PackageError("El archivo contiene una matrícula inválida.")
         enrollment_ids.add(enrollment["id"])
         if enrollment.get("student_id") and enrollment["student_id"] not in student_ids:
             raise PackageError("Una matrícula apunta a un estudiante inexistente.")

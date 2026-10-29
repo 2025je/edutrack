@@ -4,14 +4,32 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QUrl, Qt
 from PySide6.QtGui import QImage
 
-from edutrack_desktop.backend import DesktopBackend
-from edutrack_desktop.store import LocalStore
-from edutrack_desktop.transfer import read_package
+from edutrack_desktop.app.app_settings import DesktopSettings
+from edutrack_desktop.app.backend import DesktopBackend
+from edutrack_desktop.app.store import LocalStore
+from edutrack_desktop.app.transfer import read_package
 
 
 @pytest.fixture(scope="module", autouse=True)
 def qcore_application():
     return QCoreApplication.instance() or QCoreApplication([])
+
+
+def test_desktop_settings_configure_default_storage_paths(tmp_path):
+    created_paths = []
+
+    def store_factory(path):
+        created_paths.append(path)
+        return LocalStore(path)
+
+    backend = DesktopBackend(
+        settings=DesktopSettings(data_dir=tmp_path),
+        store_factory=store_factory,
+    )
+
+    assert backend.store.path == (tmp_path / "edutrack-desktop.sqlite3").resolve()
+    assert backend.catalog.path == (tmp_path / "campuses.json").resolve()
+    assert created_paths == [backend.store.path]
 
 
 def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
