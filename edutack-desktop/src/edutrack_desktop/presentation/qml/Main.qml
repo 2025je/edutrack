@@ -12,7 +12,7 @@ ApplicationWindow {
     height: 740
     minimumWidth: 980
     minimumHeight: 620
-    visible: true
+    visible: false
     title: "EduTrack Desktop"
     flags: Qt.Window | Qt.FramelessWindowHint
     property bool darkMode: false
