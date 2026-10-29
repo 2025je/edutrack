@@ -217,6 +217,17 @@ class RecordService:
         )
         return row["id"]
 
+    def set_student_active(
+        self, manifest: dict[str, Any], student_id: str, active: bool
+    ) -> None:
+        student = next(
+            (item for item in manifest["students"] if item["id"] == student_id),
+            None,
+        )
+        if student is None:
+            raise ValueError("Selecciona un estudiante válido.")
+        student["active"] = active
+
     def save_enrollment(
         self, manifest: dict[str, Any], source_id: str, fields: dict[str, Any]
     ) -> str:

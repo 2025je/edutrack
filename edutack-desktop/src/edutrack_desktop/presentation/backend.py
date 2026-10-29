@@ -21,6 +21,7 @@ from ..application.presenters import (
     course_rows,
     course_students,
     enrollment_rows,
+    filter_student_rows,
     student_rows,
 )
 from ..domain.record_service import RecordService
@@ -103,6 +104,9 @@ class DesktopBackend(QObject):
         )
         self.store: WorkspaceStore | None = None
         self.manifest: dict[str, Any] | None = None
+        self._student_rows_cache: list[dict[str, Any]] | None = None
+        self._student_filter_cache_query: str | None = None
+        self._student_filter_cache_rows: list[dict[str, Any]] = []
         if self.catalog and self.catalog.records and not closed_on_start:
             candidates = [self.catalog.active_path] + [
                 record["path"]
@@ -204,7 +208,40 @@ class DesktopBackend(QObject):
 
     @Property("QVariantList", notify=dataChanged)
     def students(self):
-        return student_rows(self.manifest)
+        return self._all_student_rows()
+
+    def _all_student_rows(self) -> list[dict[str, Any]]:
+        if self._student_rows_cache is None:
+            self._student_rows_cache = student_rows(self.manifest)
+        return self._student_rows_cache
+
+    def _matching_student_rows(self, query: str) -> list[dict[str, Any]]:
+        normalized_query = query.strip().casefold()
+        if normalized_query != self._student_filter_cache_query:
+            self._student_filter_cache_query = normalized_query
+            self._student_filter_cache_rows = filter_student_rows(
+                self._all_student_rows(),
+                normalized_query,
+            )
+        return self._student_filter_cache_rows
+
+    def _invalidate_student_rows(self) -> None:
+        self._student_rows_cache = None
+        self._student_filter_cache_query = None
+        self._student_filter_cache_rows = []
+
+    @Slot(str, result=int)
+    def matchingStudentCount(self, query):
+        return len(self._matching_student_rows(query))
+
+    @Slot(str, int, int, result="QVariantList")
+    def studentPage(self, query, page, page_size):
+        if page < 0 or page_size < 1 or page_size > 100:
+            self._set_error("La página de estudiantes solicitada no es válida.")
+            return []
+        rows = self._matching_student_rows(query)
+        start = page * page_size
+        return rows[start : start + page_size]
 
     @Property("QVariantList", notify=dataChanged)
     def enrollments(self):
@@ -323,6 +360,7 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudieron guardar los cambios localmente: {exc}")
             return False
+        self._invalidate_student_rows()
         self.dataChanged.emit()
         return True
 
@@ -604,6 +642,7 @@ class DesktopBackend(QObject):
         previous_store = self.store
         self.store = None
         self.manifest = None
+        self._invalidate_student_rows()
         self._selected_student_id = ""
         self._selected_enrollment_id = ""
         self._selected_course_id = None
@@ -629,6 +668,7 @@ class DesktopBackend(QObject):
         previous_store = self.store
         self.store = store
         self.manifest = manifest
+        self._invalidate_student_rows()
         self._selected_student_id = ""
         self._selected_enrollment_id = ""
         courses = manifest.get("courses", [])
@@ -860,6 +900,26 @@ class DesktopBackend(QObject):
             return
         self.selectionChanged.emit()
         self._set_error("Estudiante guardado en este dispositivo.")
+
+    @Slot(str, bool, result=bool)
+    def setStudentActive(self, source_id, active):
+        if not self.manifest:
+            self._set_error("Primero abre el archivo de una sede.")
+            return False
+        try:
+            self._record_service.set_student_active(
+                self.manifest,
+                source_id,
+                active,
+            )
+        except ValueError as exc:
+            self._set_error(str(exc))
+            return False
+        if not self._save():
+            return False
+        state = "activado" if active else "desactivado"
+        self._set_error(f"Estudiante {state} correctamente en este dispositivo.")
+        return True
 
     @Slot(str, "QVariantMap", result=bool)
     def saveEnrollment(self, source_id, fields):

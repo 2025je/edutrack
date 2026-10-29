@@ -76,14 +76,14 @@ def main():
         engine.addImportPath(str(qml_import_path))
     qml_path = resource_dir / "Main.qml"
     engine.load(QUrl.fromLocalFile(str(qml_path)))
-    if not engine.rootObjects():
+    """if not engine.rootObjects():
         logger.error("desktop.qml_load_failed", qml_path=str(qml_path))
         return 1
     if not engine.rootObjects()[0].setProperty("desktopBackend", backend):
-        raise RuntimeError("No se pudo conectar el backend con la interfaz.")
-    if smoke_test:
+        raise RuntimeError("No se pudo conectar el backend con la interfaz.")"""
+    """if smoke_test:
         engine.rootObjects()[0].setProperty("visible", False)
-        QTimer.singleShot(500, app.quit)
+        QTimer.singleShot(500, app.quit)"""
     exit_code = app.exec()
     logger.info("desktop.stopped", exit_code=exit_code)
     return exit_code

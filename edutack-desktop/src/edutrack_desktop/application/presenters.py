@@ -4,9 +4,25 @@ from typing import Any
 def student_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not manifest:
         return []
+    courses = {course["id"]: course for course in manifest["courses"]}
+    enrolled_courses: dict[str, list[str]] = {}
+    for enrollment in manifest["enrollments"]:
+        if not enrollment.get("active", True):
+            continue
+        student_id = enrollment.get("student_id")
+        if not student_id:
+            continue
+        course = courses.get(enrollment.get("course_id"))
+        course_label = (
+            f"{course['name']} · {course['schedule']} · Grupo {course['group']}"
+            if course
+            else "Pendiente de curso"
+        )
+        enrolled_courses.setdefault(student_id, []).append(course_label)
     rows = [
         {
             **student,
+            "courses": enrolled_courses.get(student["id"], []),
             "label": " ".join(
                 part
                 for part in (student["last_name"], student["first_name"])
@@ -16,6 +32,27 @@ def student_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
         for student in manifest["students"]
     ]
     return sorted(rows, key=lambda row: row["label"].casefold())
+
+
+def filter_student_rows(
+    rows: list[dict[str, Any]], query: str
+) -> list[dict[str, Any]]:
+    normalized_query = query.strip().casefold()
+    if not normalized_query:
+        return rows
+    return [
+        row
+        for row in rows
+        if normalized_query
+        in " ".join(
+            (
+                str(row.get("label", "")),
+                str(row.get("document_number", "")),
+                " ".join(row.get("courses", [])),
+                "activo" if row.get("active", True) else "inactivo",
+            )
+        ).casefold()
+    ]
 
 
 def enrollment_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:

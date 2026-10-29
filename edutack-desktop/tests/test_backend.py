@@ -219,6 +219,47 @@ def test_student_validation_matches_web_name_and_phone_rules(tmp_path):
     assert "No repitas un teléfono" in backend.errorMessage
 
 
+def test_student_can_be_deactivated_and_activated(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    student_id = backend.selectedStudent["id"]
+
+    assert backend.setStudentActive(student_id, False)
+    assert backend.students[0]["active"] is False
+    assert "desactivado correctamente" in backend.errorMessage
+
+    assert backend.setStudentActive(student_id, True)
+    assert backend.students[0]["active"] is True
+    assert "activado correctamente" in backend.errorMessage
+
+    assert not backend.setStudentActive("missing-student", True)
+    assert "Selecciona un estudiante válido" in backend.errorMessage
+
+
+def test_student_pages_filter_and_refresh_after_saving(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.saveStudent("", "ROJAS", "LUIS", "11111111", "987654321")
+    backend.saveStudent("", "PEREZ", "ANA", "22222222", "912345678")
+    backend.saveStudent("", "GOMEZ", "MARIO", "33333333", "923456789")
+
+    assert backend.matchingStudentCount("") == 3
+    assert [row["label"] for row in backend.studentPage("", 0, 2)] == [
+        "GOMEZ MARIO",
+        "PEREZ ANA",
+    ]
+    assert [row["label"] for row in backend.studentPage("", 1, 2)] == [
+        "ROJAS LUIS"
+    ]
+    assert backend.matchingStudentCount("2222") == 1
+    assert backend.studentPage("2222", 0, 50)[0]["label"] == "PEREZ ANA"
+
+    backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
+    assert backend.matchingStudentCount("") == 4
+    assert not backend.studentPage("", 0, 101)
+
+
 def test_course_validation_normalizes_identity_and_enforces_web_amount_limit(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
