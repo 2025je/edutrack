@@ -315,6 +315,12 @@ class RecordService:
             if quality_text not in ("60", "80", "90"):
                 raise ValueError("La calidad de imagen de ficha no es válida.")
             record_image_quality = int(quality_text)
+            enrollment_active = fields.get(
+                "active",
+                row.get("active", True) if row else True,
+            )
+            if not isinstance(enrollment_active, bool):
+                raise ValueError("El estado de la matrícula no es válido.")
         except (ValueError, InvalidOperation, TypeError) as exc:
             raise ValueError(str(exc) or "Revisa los datos de la matrícula.") from exc
 
@@ -391,6 +397,7 @@ class RecordService:
                 "monthly_fee": monthly_fee,
                 "record_code": record_code,
                 "record_image_quality": record_image_quality,
+                "active": enrollment_active,
             }
         )
         return row["id"]

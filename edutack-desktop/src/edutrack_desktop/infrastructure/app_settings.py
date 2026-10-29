@@ -14,4 +14,4 @@ class DesktopSettings(BaseSettings):
     database_path: Path | None = None
     campus_catalog_path: Path | None = None
     qt_material_variant: Literal["Dense", "Normal"] = "Dense"
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

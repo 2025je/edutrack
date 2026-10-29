@@ -31,7 +31,7 @@ def student_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
         }
         for student in manifest["students"]
     ]
-    return sorted(rows, key=lambda row: row["label"].casefold())
+    return list(reversed(rows))
 
 
 def filter_student_rows(
@@ -81,10 +81,26 @@ def enrollment_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
         rows.append(
             {
                 **enrollment,
+                "student_label": (
+                    " ".join(
+                        part
+                        for part in (student["last_name"], student["first_name"])
+                        if part
+                    )
+                    if student
+                    else "Pendiente de estudiante"
+                ),
+                "course_label": course_name,
+                "pending_student": student is None,
+                "pending_course": course is None,
                 "label": f"{student_name} — {course_name}",
             }
         )
-    return sorted(rows, key=lambda row: row["label"].casefold())
+    return sorted(
+        reversed(rows),
+        key=lambda row: str(row.get("enrollment_date", "")),
+        reverse=True,
+    )
 
 
 def course_students(
@@ -108,7 +124,15 @@ def course_students(
                 if part
             ),
         }
-    return sorted(roster.values(), key=lambda row: row["label"].casefold())
+    student_order = {
+        student["id"]: index
+        for index, student in enumerate(manifest["students"])
+    }
+    return sorted(
+        roster.values(),
+        key=lambda row: student_order.get(row["id"], -1),
+        reverse=True,
+    )
 
 
 def course_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -125,10 +149,7 @@ def course_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
         for course in manifest["courses"]
     ]
     return sorted(
-        rows,
-        key=lambda row: (
-            row["name"].casefold(),
-            row["schedule"].casefold(),
-            str(row["group"]).casefold(),
-        ),
+        reversed(rows),
+        key=lambda row: str(row.get("start_date", "")),
+        reverse=True,
     )

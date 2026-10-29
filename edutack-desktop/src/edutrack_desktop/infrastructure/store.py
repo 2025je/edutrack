@@ -6,6 +6,7 @@ from alembic.config import Config
 from sqlalchemy import MetaData, Table, URL, create_engine, delete, event, inspect, select
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
+import structlog
 
 from .models import (
     CourseRecord,
@@ -14,6 +15,8 @@ from .models import (
     StudentRecord,
     Workspace,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class LocalStore:
@@ -24,6 +27,7 @@ class LocalStore:
             URL.create("sqlite", database=str(self.path)),
             poolclass=NullPool,
         )
+        event.listen(self.engine, "before_cursor_execute", self._log_statement)
         event.listen(self.engine, "connect", self._enable_foreign_keys)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
 
@@ -35,6 +39,16 @@ class LocalStore:
             command.upgrade(config, "head")
 
         self._migrate_legacy_workspace()
+
+    def _log_statement(
+        self, connection, cursor, statement, parameters, context, executemany
+    ):
+        logger.debug(
+            "database.statement",
+            database_path=str(self.path),
+            sql=statement,
+            executemany=executemany,
+        )
 
     @staticmethod
     def _enable_foreign_keys(connection, _):

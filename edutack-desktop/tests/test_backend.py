@@ -1,7 +1,8 @@
+import time
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, QUrl, Qt
 from PySide6.QtGui import QImage
 
 from edutrack_desktop.infrastructure.app_settings import DesktopSettings
@@ -201,6 +202,32 @@ def test_edit_existing_and_add_student_and_enrollment(tmp_path):
     assert "correctamente" in backend.errorMessage
 
 
+def test_database_saves_expose_global_saving_state(tmp_path):
+    def store_factory(path):
+        store = LocalStore(path)
+        store_save = store.save
+
+        def slow_save(manifest):
+            time.sleep(0.1)
+            store_save(manifest)
+
+        store.save = slow_save
+        return store
+
+    backend = DesktopBackend(
+        tmp_path / "workspace.sqlite3", store_factory=store_factory
+    )
+    saving_states = []
+    backend.savingStateChanged.connect(
+        lambda: saving_states.append(backend.isSaving)
+    )
+    assert backend.createWorkspace("Sede de prueba", "")
+    assert saving_states == [True, False]
+
+    assert backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+    assert saving_states == [True, False, True, False]
+
+
 def test_student_validation_matches_web_name_and_phone_rules(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
@@ -370,6 +397,96 @@ def test_save_course_updates_validates_and_persists(tmp_path):
     assert persisted_course["active"] is False
 
 
+def test_save_course_async_persists_and_signals_completion(tmp_path):
+    path = tmp_path / "workspace.sqlite3"
+    backend = DesktopBackend(path)
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    loop = QEventLoop()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    completed = []
+
+    def on_finished(saved):
+        completed.append(saved)
+        loop.quit()
+
+    backend.courseSaveFinished.connect(on_finished)
+    assert backend.saveCourseAsync(
+        course_id,
+        "Cocina avanzada",
+        "Lunes 9:00",
+        "1",
+        "2026-02-02",
+        "35.00",
+        "55.50",
+        "12",
+        True,
+    )
+    assert backend.courseSaveInProgress
+    timeout.start(5000)
+    if not completed:
+        loop.exec()
+    timeout.stop()
+
+    assert completed == [True]
+    assert not backend.courseSaveInProgress
+    assert backend.selectedCourse["name"] == "COCINA AVANZADA"
+    reloaded_backend = DesktopBackend(path)
+    persisted_course = next(
+        item for item in reloaded_backend.courses if item["id"] == course_id
+    )
+    assert persisted_course["name"] == "COCINA AVANZADA"
+
+
+def test_save_course_async_reports_persistence_errors(tmp_path, monkeypatch):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    backend.selectCourse(course_id)
+
+    def fail_save(_manifest):
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(backend.store, "save", fail_save)
+    loop = QEventLoop()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    completed = []
+
+    def on_finished(saved):
+        completed.append(saved)
+        loop.quit()
+
+    backend.courseSaveFinished.connect(on_finished)
+    assert backend.saveCourseAsync(
+        course_id,
+        "Cocina avanzada",
+        "Lunes 9:00",
+        "1",
+        "2026-02-02",
+        "35.00",
+        "55.50",
+        "12",
+        True,
+    )
+    timeout.start(5000)
+    if not completed:
+        loop.exec()
+    timeout.stop()
+
+    assert completed == [False]
+    assert not backend.courseSaveInProgress
+    assert "disco lleno" in backend.errorMessage
+    assert backend.selectedCourse["name"] == "COCINA"
+
+
 def test_enrollment_validation_supports_pending_and_reserved_records(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
@@ -522,11 +639,23 @@ def test_saving_enrollment_without_ficha_or_promoter_fields_preserves_existing_v
             "monthly_fee": "80.00",
         },
     )
+    assert backend.saveEnrollment(
+        enrollment_id,
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "enrollment_date": "2026-01-02",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "active": False,
+        },
+    )
 
     enrollment = backend.selectedEnrollment
     assert enrollment["record_code"] == 42
     assert enrollment["record_image_quality"] == 60
     assert enrollment["promoter_ids"] == [promoter_id]
+    assert enrollment["active"] is False
 
 
 def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
@@ -554,7 +683,29 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
     assert backend.courses == []
     assert backend.activeCampusIndex == 1
 
+    original_store_factory = backend._store_factory
+
+    def slow_store_factory(path):
+        store = original_store_factory(path)
+        store_load = store.load
+
+        def slow_load():
+            time.sleep(0.1)
+            return store_load()
+
+        store.load = slow_load
+        return store
+
+    backend._store_factory = slow_store_factory
+    activity_states = []
+    backend.activityStateChanged.connect(
+        lambda: activity_states.append((backend.isBusy, backend.activityMessage))
+    )
     assert backend.switchCampus(str(first_path))
+    assert activity_states == [
+        (True, "Cargando los datos de la sede..."),
+        (False, ""),
+    ]
     assert backend.campusName == "Sede Norte"
     assert len(backend.courses) == 1
     assert backend.activeCampusIndex == 0
