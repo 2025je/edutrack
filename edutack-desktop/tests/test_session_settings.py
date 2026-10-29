@@ -1,6 +1,6 @@
 import json
 
-from edutrack_desktop.app.session_settings import SessionSettings
+from edutrack_desktop.presentation.session_settings import SessionSettings
 
 
 def test_session_settings_round_trip(tmp_path):

@@ -4,10 +4,10 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QUrl, Qt
 from PySide6.QtGui import QImage
 
-from edutrack_desktop.app.app_settings import DesktopSettings
-from edutrack_desktop.app.backend import DesktopBackend
-from edutrack_desktop.app.store import LocalStore
-from edutrack_desktop.app.transfer import read_package
+from edutrack_desktop.infrastructure.app_settings import DesktopSettings
+from edutrack_desktop.infrastructure.store import LocalStore
+from edutrack_desktop.infrastructure.transfer import read_package
+from edutrack_desktop.presentation.backend import DesktopBackend
 
 
 @pytest.fixture(scope="module", autouse=True)

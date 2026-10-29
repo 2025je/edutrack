@@ -4,7 +4,8 @@ from PyInstaller.utils.hooks import collect_all
 
 
 ROOT = Path(SPECPATH)
-APP_DIR = ROOT / "edutrack_desktop"
+SRC_DIR = ROOT / "src"
+APP_DIR = SRC_DIR / "edutrack_desktop"
 qt_datas, qt_binaries, qt_hiddenimports = collect_all("PySide6")
 resource_suffixes = {".ini", ".qml", ".svg", ".ttf", ".txt"}
 app_datas = []
@@ -12,16 +13,17 @@ for path in APP_DIR.rglob("*"):
     if not path.is_file() or "__pycache__" in path.parts:
         continue
     is_migration = (
-        path.suffix == ".py" and APP_DIR / "migrations" in path.parents
+        path.suffix == ".py"
+        and APP_DIR / "infrastructure" / "migrations" in path.parents
     )
     if path.suffix in resource_suffixes or is_migration:
-        app_datas.append((str(path), str(path.parent.relative_to(ROOT))))
+        app_datas.append((str(path), str(path.parent.relative_to(SRC_DIR))))
 
 datas = qt_datas + app_datas
 
 a = Analysis(
     [str(ROOT / "main.py")],
-    pathex=[str(ROOT)],
+    pathex=[str(SRC_DIR), str(ROOT)],
     binaries=qt_binaries,
     datas=datas,
     hiddenimports=qt_hiddenimports,

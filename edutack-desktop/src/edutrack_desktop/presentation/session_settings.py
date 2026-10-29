@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from PySide6.QtCore import QObject, Property, QSettings, Signal, Slot
 
-from .schemas import SessionState
+from ..infrastructure.schemas import SessionState
 
 
 class SessionSettings(QObject):

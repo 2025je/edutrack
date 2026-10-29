@@ -10,19 +10,24 @@ from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal, Slot
 from sqlalchemy.exc import SQLAlchemyError
 import structlog
 
-from .app_settings import DesktopSettings
-from .campus_catalog import CampusCatalog, CampusCatalogError
-from .ports import (
+from ..application.ports import (
     CampusCatalogFactory,
     CampusCatalogPort,
     RecordServicePort,
     StoreFactory,
     WorkspaceStore,
 )
-from .presenters import course_rows, course_students, enrollment_rows, student_rows
-from .record_service import RecordService
-from .store import LocalStore
-from .transfer import (
+from ..application.presenters import (
+    course_rows,
+    course_students,
+    enrollment_rows,
+    student_rows,
+)
+from ..domain.record_service import RecordService
+from ..infrastructure.app_settings import DesktopSettings
+from ..infrastructure.campus_catalog import CampusCatalog, CampusCatalogError
+from ..infrastructure.store import LocalStore
+from ..infrastructure.transfer import (
     INITIAL_CAMPUS_VERSION,
     PACKAGE_FORMAT,
     PackageError,

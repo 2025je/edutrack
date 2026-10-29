@@ -4,11 +4,11 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 
 def load_metadata():
-    from edutrack_desktop.app.models import Base
+    from edutrack_desktop.infrastructure.models import Base
 
     return Base.metadata
 

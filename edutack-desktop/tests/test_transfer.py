@@ -6,9 +6,9 @@ from contextlib import closing
 import pytest
 from sqlalchemy import inspect
 
-from edutrack_desktop.app.models import StudentRecord
-from edutrack_desktop.app.store import LocalStore
-from edutrack_desktop.app.transfer import (
+from edutrack_desktop.infrastructure.models import StudentRecord
+from edutrack_desktop.infrastructure.store import LocalStore
+from edutrack_desktop.infrastructure.transfer import (
     PackageError,
     read_package,
     write_package,

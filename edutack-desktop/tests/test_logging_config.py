@@ -2,7 +2,7 @@ import logging
 
 import structlog
 
-from edutrack_desktop.app.logging_config import configure_logging
+from edutrack_desktop.infrastructure.logging_config import configure_logging
 
 
 def test_structlog_emits_json_events(caplog, tmp_path):

@@ -10,10 +10,10 @@ from PySide6.QtQuickControls2 import QQuickStyle
 
 import structlog
 
-from .app.app_settings import DesktopSettings
-from .app.backend import DesktopBackend
-from .app.logging_config import configure_logging
-from .app.session_settings import SessionSettings
+from ..infrastructure.app_settings import DesktopSettings
+from ..infrastructure.logging_config import configure_logging
+from .backend import DesktopBackend
+from .session_settings import SessionSettings
 
 logger = structlog.get_logger(__name__)
 

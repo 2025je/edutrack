@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 import pytest
 
-from edutrack_desktop.app.app_settings import DesktopSettings
+from edutrack_desktop.infrastructure.app_settings import DesktopSettings
 
 
 def test_desktop_settings_reads_environment(monkeypatch, tmp_path):

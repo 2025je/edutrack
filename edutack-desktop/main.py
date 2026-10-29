@@ -1,6 +1,6 @@
 import sys
 
-from edutrack_desktop.main import main
+from edutrack_desktop.presentation.main import main
 
 
 if __name__ == "__main__":
