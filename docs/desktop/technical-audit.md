@@ -556,3 +556,40 @@ Las pruebas validan la búsqueda de cursos sin acentos, búsqueda por fecha,
 recuento de estudiantes activos, paginación, orden semanal, límites de año y
 fechas inválidas. La prueba QML verifica también que el botón de edición no se
 desborde en la ventana mínima. No se modificó el formato `.edutrack`.
+
+## 18. Matrículas, consultas asíncronas y cambios sin guardar
+
+`LocalStore.enrollment_page()` filtra, cuenta, ordena y pagina matrículas en
+SQLite, incluyendo búsqueda y filtros de estado/curso. El listado QML ya no
+necesita materializar todas las matrículas para mostrar una página. El benchmark
+optativo `enrollment-list-page` valida la paginación y mide la consulta con
+1.000, 10.000 y 50.000 matrículas. En esta máquina, las medianas de búsqueda
+fueron 20,14 ms, 39,78 ms y 155,40 ms respectivamente; son mediciones
+comparativas, no garantías de latencia.
+
+Los listados paginados y las búsquedas de estudiantes usadas en el asistente y
+el editor ejecutan sus consultas fuera del hilo de UI mediante workers
+compartidos de `QThreadPool`. Cada consulta comunica resultado o error a su
+modelo; las respuestas obsoletas se descartan mediante generaciones/IDs de
+solicitud. Los listados muestran un estado de carga cuando todavía no tienen
+filas que mostrar. Se conserva `NullPool` para el motor async: los workers
+ejecutan operaciones con `asyncio.Runner` y un `SelectorEventLoop` dedicado.
+Esto evita que un worker seleccione el loop de Qt cuando la aplicación ya está
+ejecutando `QtAsyncio.run()`; el mismo store puede seguir utilizándose desde
+loops diferentes gracias a `NullPool`.
+
+Los formularios de estudiante, curso y matrícula, el asistente y el cierre de
+la ventana advierten antes de descartar cambios sin guardar. La vista previa
+manual de sincronización expone diferencias por campo entre Desktop y Web,
+incluidas relaciones de matrícula e imágenes descritas por presencia/hash. No
+se altera el formato `.edutrack` ni se incorpora sincronización automática.
+La lista de respaldos conserva las fechas ISO para orden y almacenamiento, y
+las presenta en hora local con el formato `dd/MM/yyyy HH:mm`.
+
+La validación anterior pasó 54 pruebas de almacenamiento/backend/sincronización,
+12 pruebas QML de asistente y editor y tres casos del benchmark de matrículas.
+La regresión del loop se reprodujo en un `QRunnable` bajo `QtAsyncio` y se
+verificó corregida con el loop selector. El fixture de pruebas mantiene activa
+la aplicación Qt al cerrar y reabrir ventanas; la prueba QML de matrículas
+espera también a que el modelo y su delegado estén listos. La última suite
+completa pasó: 115 pruebas, con 20 benchmarks optativos excluidos.
