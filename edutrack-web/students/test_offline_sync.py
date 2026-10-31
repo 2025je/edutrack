@@ -159,9 +159,7 @@ class OfflineSynchronizationTests(TestCase):
         round_trip = self.package_from(exported, attachments)
         self.assertEqual(exported["desktop_bundle_id"], package["bundle_id"])
         self.assertEqual(round_trip["students"][0]["id"], package["students"][0]["id"])
-        self.assertEqual(
-            round_trip["enrollments"][0]["id"], package["enrollments"][0]["id"]
-        )
+        self.assertEqual(round_trip["enrollments"][0]["id"], package["enrollments"][0]["id"])
         self.assertEqual(round_trip["courses"][0]["id"], package["courses"][0]["id"])
         self.assertEqual(
             {item["id"] for item in round_trip["promoters"]},
@@ -404,14 +402,14 @@ class OfflineSynchronizationTests(TestCase):
         round_trip = self.package_from(exported, attachments)
         self.assertEqual(
             next(
-                item for item in round_trip["students"]
-                if item["server_id"] == created_student.pk
+                item for item in round_trip["students"] if item["server_id"] == created_student.pk
             )["id"],
             new_student_id,
         )
         self.assertEqual(
             next(
-                item for item in round_trip["enrollments"]
+                item
+                for item in round_trip["enrollments"]
                 if item["server_id"] == created_enrollment.pk
             )["id"],
             new_enrollment_id,

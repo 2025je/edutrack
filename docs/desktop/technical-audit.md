@@ -322,10 +322,10 @@ no se reportan errores nuevos en los cambios de FASE 2.
 | Tarea | Cambios |
 |---|---|
 | Guardado incremental general | `LocalStore.save()` se conserva, pero `_save()` ahora sincroniza por ID en una transacción: inserta/cambia solo filas distintas y elimina únicamente IDs ausentes del manifiesto confirmado. Preserva IDs, posiciones, relaciones, `server_id`, `base_hash` y comportamiento de versiones 2/3. Valida referencias antes de aplicar y hace rollback ante referencias inválidas. |
-| Operaciones comunes específicas | Nuevo `LocalStore.save_records(manifest, changes)` para upsert de estudiantes, matrículas, cursos y promotores concretos. Los slots CRUD de `DesktopBackend` y el worker de guardado de curso lo usan; el alta conjunta de estudiante y matrícula persiste ambas en una sola transacción. Los flujos de importación completa conservan `save()` como ruta de compatibilidad. |
-| Búsqueda/indexación | Migración Alembic `0003_search_indexes`: claves normalizadas (casefold + eliminación de diacríticos) para apellidos, nombres y documento, retrocompatibles con backfill; índices en esas claves, IDs de estudiante/curso y estado de matrícula, nombre/estado de curso y nombre de promotor. Los IDs ya cubiertos por PK no reciben índices redundantes. |
+| Operaciones comunes específicas | `LocalStore.save_records()` recibe snapshots de los registros modificados junto con su posición, evitando recorrer todo el manifiesto para localizarlos. Upserts y validaciones de referencias se agrupan por tipo de registro dentro de una transacción; el alta conjunta de estudiante y matrícula se conserva. Los flujos de importación completa siguen usando `save()` como ruta de compatibilidad. |
+| Búsqueda/indexación | Migración Alembic `0003_search_indexes`: claves normalizadas (casefold + eliminación de diacríticos) para apellidos, nombres y documento, retrocompatibles con backfill. `0005_course_search` añade y rellena el texto normalizado del curso; `student_page()` lo consulta con `EXISTS` en SQLite, sin transferir todos los cursos a Python. |
 | Búsqueda SQL | Nuevo `LocalStore.search_students()` consulta SQLite por prefijo y palabras, ordena por posición reciente, limita a 100 y carga solo las matrículas activas de los estudiantes seleccionados. `DesktopBackend.searchStudents` delega en el store (no filtra `backend.students`); mantiene forma de resultados para el asistente y admite búsqueda insensible a mayúsculas y acentos. |
-| Compatibilidad probada | Tests verifican que un cambio unitario no elimina filas de otras tablas, una eliminación deliberada solo borra las filas ausentes, rollback, uso de la ruta específica, índices y uso del índice en el plan SQLite, búsqueda normalizada y upgrade con backfill desde `0002_initial_campus`. El round-trip del manifiesto y la migración JSON legada siguen pasando. |
+| Compatibilidad probada | Tests verifican que un cambio unitario no elimina filas de otras tablas, una eliminación deliberada solo borra las filas ausentes, rollback, validaciones de referencias agrupadas, mapeo compartido, índices y uso del índice en el plan SQLite, búsqueda normalizada y upgrade con backfill desde `0002_initial_campus`. El round-trip del manifiesto y la migración JSON legada siguen pasando. |
 
 ### Evaluación de operaciones en segundo plano
 
@@ -353,7 +353,7 @@ Verificación final: `uv run pytest tests -q` → **53 pruebas pasan**;
 |---|---|
 | Dashboard local | `application.presenters.dashboard_summary()` reúne métricas, ocupación y seis matrículas recientes en una sola proyección. `DesktopBackend.dashboardSummary` cachea el resultado hasta que cambian los datos; el dashboard solicita una actualización diaria sin recorrer registros en cada evaluación visual. |
 | Actualización | `DesktopBackend.refreshWorkspace()` vuelve a cargar la sede activa desde SQLite, conserva selecciones válidas y emite errores visibles cuando no puede completar la operación. F5 invoca esta ruta. |
-| Listados | Los presenters de cursos y matrículas se cachean con la misma invalidación de los estudiantes. Cursos incorpora búsqueda local con debounce por nombre, horario, grupo y fecha; estudiantes ya tenía paginación y búsqueda del backend, y matrículas ya tenía paginación y filtros. |
+| Listados | Estudiantes y cursos consultan SQLite mediante modelos `QAbstractListModel` paginados; cursos filtra en SQL por texto normalizado y fecha, y el recuento de estudiantes activos se agrega en la consulta. `course_week_groups()` agrupa las fechas fuera de QML. Matrículas mantiene su paginación y filtros. |
 | Matrícula de estudiantes | Se habilita crear desde Estudiantes, reutilizando `saveStudent` y sus validaciones; el mismo editor admite alta y edición. Ctrl+N abre el alta y Ctrl+M inicia el asistente de matrícula. |
 | Accesibilidad/atajos | Ctrl+F enfoca la búsqueda contextual; Ctrl+S guarda los formularios activos; Ctrl+E abre la exportación; Esc cancela/cierra editores, asistente y detalles. |
 | Alcance de navegación | Se conservan las cuatro secciones funcionales existentes (Resumen, Estudiantes, Matrículas y Cursos). No se añadieron entradas vacías para promotores, sincronización, base de datos o configuración: las funciones de sincronización/respaldos se incorporarán en sus fases y no existe aún una página funcional de administración de promotores. |
@@ -472,13 +472,16 @@ no se incluyen datos personales ni archivos de benchmark en el repositorio.
 
 ### Límites de cobertura
 
-- `pytest-qt` e Hypothesis no están instalados. Las pruebas usan las APIs `QGuiApplication`
-  y `QtTest` incluidas con PySide6, sin dependencia adicional; no se añadieron pruebas
-  property-based porque los invariantes clave tienen casos de regresión explícitos.
+- `pytest-qt` no está instalado. Las pruebas QML usan las APIs `QGuiApplication` y
+  `QtTest` incluidas con PySide6. Hypothesis está en el grupo de desarrollo y prueba
+  propiedades de normalización y backfill de migraciones.
 - `test_qml_enrollment_wizard.py` carga el QML real en modo offscreen y comprueba búsqueda
   con debounce, selección, pasos, validación, advertencia de duplicados, alta de estudiante,
   guardado con Ctrl+S, cancelación con Esc y el atajo global Ctrl+M con carga diferida de
   `Main.qml`. No cubre visualmente todos los tamaños/temas ni todos los atajos globales.
+- `Main.qml` carga con `Loader` las pantallas de sede y espacio de trabajo, y crea los
+  diálogos globales y editores de estudiantes/cursos solo cuando se solicitan. Las
+  pruebas verifican la carga diferida desde el flujo real de la ventana.
 - `test_qml_enrollment_editor.py` activa **Editar** en la lista real y espera al editor
   del `Loader` asíncrono. Verifica que abrirlo no materializa todos los estudiantes y que
   el selector consulta por búsqueda con un límite inicial de 20.
@@ -513,3 +516,43 @@ pasos de PyInstaller e Inno Setup y ambos terminaron correctamente. PyInstaller
 reportó módulos opcionales ausentes de Qt y la herramienta de despliegue de PySide6;
 no impidieron construir, iniciar ni instalar la aplicación. Conviene repetir la
 prueba en una máquina virtual Windows limpia antes de distribuir el instalador.
+
+## 17. Búsqueda y paginación del listado de estudiantes
+
+El listado de estudiantes consulta SQLite por página y aplica en la consulta los
+filtros de texto, estado y curso. Solo las filas visibles se proyectan al
+`QAbstractListModel`; cambiar de página, buscar o filtrar no necesita reconstruir
+la lista completa desde el manifiesto. La búsqueda QML espera 250 ms desde la
+última pulsación. La presentación cambia a tarjetas compactas cuando el ancho del
+listado es inferior a 820 px.
+La lista limita su ancho al contenedor para evitar que las acciones queden fuera
+del área visible en la ventana mínima; la prueba QML verifica mediante clic real
+que Editar abre el formulario.
+`CourseListModel` consulta `LocalStore.course_page()` por páginas de 50 cursos.
+SQLite busca en `search_text` normalizado (nombre, horario y grupo) y en la fecha;
+cada término puede coincidir con cualquiera de esos campos. La consulta calcula
+el número de estudiantes activos por curso, sin reconstruir todas las filas desde
+el manifiesto. La migración `0005_course_search` rellena el campo normalizado en
+bases existentes. El modelo agrupa semanas con `course_week_groups()` usando
+fechas `date` de Python; valores ISO inválidos quedan en "Semana no definida".
+Las tarjetas toman su punto de corte compacto del ancho del área visible, no del
+ancho implícito de su contenido, y la prueba QML comprueba que Editar quede dentro
+del listado en la ventana mínima.
+
+Se amplió `tests/benchmark_desktop.py` para medir la consulta paginada con los
+mismos conjuntos de 1.000, 10.000 y 50.000 estudiantes. En Windows 11 / Python
+3.14.4, con cinco repeticiones, las medianas de búsqueda SQL paginada fueron
+14,39 ms, 23,30 ms y 70,48 ms; las medianas de carga completa fueron 27,57 ms,
+193,10 ms y 1.107,48 ms. El guardado incremental de un estudiante tuvo medianas
+de 15,18 ms, 13,01 ms y 14,34 ms. La búsqueda por curso midió 10,06 ms, 11,66 ms
+y 10,54 ms con 1.000, 10.000 y 50.000 cursos respectivamente. Son mediciones
+locales comparativas, no garantías de latencia.
+El benchmark optativo de `course_page()` mide además la búsqueda SQL paginada
+para los mismos tamaños de listado. En esta ejecución, sus medianas fueron
+8,46 ms, 12,55 ms y 35,17 ms para 1.000, 10.000 y 50.000 cursos.
+
+La suite Desktop pasa con 111 pruebas (17 benchmarks optativos excluidos).
+Las pruebas validan la búsqueda de cursos sin acentos, búsqueda por fecha,
+recuento de estudiantes activos, paginación, orden semanal, límites de año y
+fechas inválidas. La prueba QML verifica también que el botón de edición no se
+desborde en la ventana mínima. No se modificó el formato `.edutrack`.

@@ -62,10 +62,7 @@ class OfflinePackageError(ValueError):
 
 
 def _desktop_identity_maps(campus):
-    maps = {
-        record_type: {}
-        for record_type in DesktopRecordIdentity.RecordType.values
-    }
+    maps = {record_type: {} for record_type in DesktopRecordIdentity.RecordType.values}
     for identity in DesktopRecordIdentity.objects.filter(campus=campus):
         maps[identity.record_type][identity.server_id] = identity.local_id
     return maps
@@ -109,11 +106,7 @@ def _package_promoter_server_ids(package, campus):
         )
     }
     return {
-        item["id"]: (
-            item.get("server_id")
-            or stored_ids.get(str(item["id"]))
-            or item["id"]
-        )
+        item["id"]: (item.get("server_id") or stored_ids.get(str(item["id"])) or item["id"])
         for item in package["promoters"]
     }
 
@@ -305,28 +298,20 @@ def export_campus(campus):
         values = _enrollment_values(enrollment, attachments)
         enrollment_rows.append(
             {
-                "id": (
-                    identity_maps["enrollment"].get(enrollment.pk)
-                    or str(uuid.uuid4())
-                ),
+                "id": (identity_maps["enrollment"].get(enrollment.pk) or str(uuid.uuid4())),
                 "server_id": enrollment.pk,
                 "base_hash": enrollment_fingerprint(values),
                 "student_id": student_ids.get(enrollment.student_id),
                 **{
                     **values,
                     "course_id": (
-                        _desktop_numeric_id(
-                            identity_maps["course"].get(values["course_id"])
-                        )
+                        _desktop_numeric_id(identity_maps["course"].get(values["course_id"]))
                         if values["course_id"] is not None
-                        and identity_maps["course"].get(values["course_id"])
-                        is not None
+                        and identity_maps["course"].get(values["course_id"]) is not None
                         else values["course_id"]
                     ),
                     "promoter_ids": sorted(
-                        _desktop_numeric_id(
-                            identity_maps["promoter"].get(promoter_id, promoter_id)
-                        )
+                        _desktop_numeric_id(identity_maps["promoter"].get(promoter_id, promoter_id))
                         for promoter_id in values["promoter_ids"]
                     ),
                 },
@@ -344,18 +329,14 @@ def export_campus(campus):
         "version": SCHEMA_VERSION,
         "bundle_id": str(uuid.uuid4()),
         "campus_id": campus.pk,
-        "desktop_bundle_id": (
-            str(campus.desktop_bundle_id) if campus.desktop_bundle_id else None
-        ),
+        "desktop_bundle_id": (str(campus.desktop_bundle_id) if campus.desktop_bundle_id else None),
         "campus_name": campus.name,
         "campus_address": campus.address,
         "students": student_rows,
         "enrollments": enrollment_rows,
         "courses": [
             {
-                "id": _desktop_numeric_id(
-                    identity_maps["course"].get(course.pk, course.pk)
-                ),
+                "id": _desktop_numeric_id(identity_maps["course"].get(course.pk, course.pk)),
                 "server_id": course.pk,
                 "name": course.name,
                 "schedule": course.schedule,
@@ -370,9 +351,7 @@ def export_campus(campus):
         ],
         "promoters": [
             {
-                "id": _desktop_numeric_id(
-                    identity_maps["promoter"].get(promoter.pk, promoter.pk)
-                ),
+                "id": _desktop_numeric_id(identity_maps["promoter"].get(promoter.pk, promoter.pk)),
                 "server_id": promoter.pk,
                 "name": promoter.name,
                 "active": promoter.active,
@@ -1126,9 +1105,7 @@ def review_package(package, campus, resolutions=None):
                     current.student_id if current and not linked_student else None
                 )
                 duplicate_pair = (
-                    Enrollment.objects.filter(
-                        student_id=linked_id, course_id=server_course_id
-                    )
+                    Enrollment.objects.filter(student_id=linked_id, course_id=server_course_id)
                     .exclude(pk=current.pk if current else None)
                     .exists()
                     if linked_id and enrollment["course_id"]
@@ -1255,8 +1232,7 @@ def import_initial_package(package, request):
                     {**item, "server_id": course_map[item["id"]]} for item in package["courses"]
                 ],
                 "promoters": [
-                    {**item, "server_id": promoter_map[item["id"]]}
-                    for item in package["promoters"]
+                    {**item, "server_id": promoter_map[item["id"]]} for item in package["promoters"]
                 ],
             }
             request.session["selected_campus_id"] = campus.pk
@@ -1413,11 +1389,7 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 model.monthly_fee = Decimal(enrollment["monthly_fee"])
                 model.active = enrollment["active"]
                 model.full_clean(
-                    exclude=(
-                        ["enrollment_fee", "monthly_fee"]
-                        if model.course_id is None
-                        else None
-                    )
+                    exclude=(["enrollment_fee", "monthly_fee"] if model.course_id is None else None)
                 )
                 model.save()
                 model.promoter.set(
