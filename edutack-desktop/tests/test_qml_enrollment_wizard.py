@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, QPoint, QPointF, QUrl, Qt
+from PySide6.QtCore import QMetaObject, QObject, QPoint, QPointF, QUrl, Qt
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
@@ -400,6 +400,30 @@ def test_main_restores_and_persists_selected_workspace_section(
         QTest.qWait(350)
         assert _find_visual_item(second_root, "studentRow_" + student_id)
 
+        students_page = _find_visual_item(second_root, "studentsPage")
+        student_search = _find_visual_item(second_root, "studentSearch")
+        status_filter = _find_visual_item(second_root, "studentStatusFilter")
+        course_filter = _find_visual_item(second_root, "studentCourseFilter")
+        student_search.setProperty("text", "sin coincidencia")
+        QTest.qWait(80)
+        assert backend.studentListModel.matchingCount == 1
+        QTest.qWait(250)
+        assert backend.studentListModel.matchingCount == 0
+
+        student_search.setProperty("text", "")
+        status_filter.setProperty("currentIndex", 2)
+        assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        assert backend.studentListModel.matchingCount == 0
+
+        status_filter.setProperty("currentIndex", 1)
+        course_filter.setProperty("currentIndex", 1)
+        assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        assert backend.studentListModel.matchingCount == 1
+
+        status_filter.setProperty("currentIndex", 0)
+        course_filter.setProperty("currentIndex", 0)
+        assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+
         enrollments_button = _find_visual_item(
             second_root,
             "workspaceSectionButton_Matrículas",
@@ -429,12 +453,18 @@ def test_main_restores_and_persists_selected_workspace_section(
         )
         _click(second_root, students_button)
         QTest.qWait(350)
-        edit_student_button = _find_visual_item(
-            second_root,
-            "editStudentButton",
+        students_list = _find_visual_item(second_root, "studentsList")
+        assert students_list.property("compactLayout") is True
+        edit_button_name = (
+            "editStudentButtonCompact"
+            if students_list.property("compactLayout")
+            else "editStudentButton"
         )
+        edit_student_button = _find_visual_item(second_root, edit_button_name)
         _click(second_root, edit_student_button)
         QTest.qWait(100)
+        students_page = _find_visual_item(second_root, "studentsPage")
+        assert students_page.property("currentView") == "edit"
         student_last_name = _find_visual_item(
             second_root,
             "studentLastNameField",

@@ -237,6 +237,98 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
     asyncio.run(verify_specific_save())
 
 
+def test_student_page_searches_filters_and_paginates_in_sqlite(
+    manifest, tmp_path
+):
+    data = deepcopy(manifest)
+    inactive_student_id = str(uuid.uuid4())
+    data["students"].append(
+        {
+            "id": inactive_student_id,
+            "server_id": None,
+            "base_hash": None,
+            "last_name": "Gómez",
+            "first_name": "Luis",
+            "document_number": "87654321",
+            "phone_numbers": [],
+            "active": False,
+        }
+    )
+    data["courses"].append(
+        {
+            "id": 31,
+            "server_id": 31,
+            "name": "Historia",
+            "schedule": "Tarde",
+            "group": "2",
+            "start_date": "2026-01-01",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "capacity": 20,
+            "active": True,
+        }
+    )
+    data["enrollments"].append(
+        {
+            "id": str(uuid.uuid4()),
+            "server_id": None,
+            "base_hash": None,
+            "student_id": inactive_student_id,
+            "student_server_id": None,
+            "course_id": 31,
+            "enrollment_date": "2026-01-03",
+            "promoter_ids": [],
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "record_code": None,
+            "active": True,
+            "record_image": None,
+            "record_image_hash": "",
+            "record_image_quality": 80,
+        }
+    )
+    store = LocalStore(tmp_path / "student-page.sqlite3")
+
+    async def verify_page():
+        await store.save(data)
+
+        first_page, total, matching = await store.student_page("", 0, 0, 0, 1)
+        second_page, _, _ = await store.student_page("", 0, 0, 1, 1)
+        assert total == matching == 2
+        assert first_page[0]["label"] == "Gómez Luis"
+        assert second_page[0]["label"] == "Pérez Ana"
+
+        inactive_page, _, inactive_count = await store.student_page(
+            "", 2, 0, 0, 50
+        )
+        assert inactive_count == 1
+        assert inactive_page[0]["id"] == inactive_student_id
+
+        course_page, _, course_count = await store.student_page(
+            "", 0, 30, 0, 50
+        )
+        assert course_count == 1
+        assert course_page[0]["label"] == "Pérez Ana"
+
+        search_page, _, search_count = await store.student_page(
+            "historia", 0, 0, 0, 50
+        )
+        assert search_count == 1
+        assert search_page[0]["id"] == inactive_student_id
+        assert search_page[0]["courses"] == ["Historia · Tarde · Grupo 2"]
+
+        accented_page, _, accented_count = await store.student_page(
+            "gomez", 0, 0, 0, 50
+        )
+        assert accented_count == 1
+        assert accented_page[0]["id"] == inactive_student_id
+
+    try:
+        asyncio.run(verify_page())
+    finally:
+        asyncio.run(store.dispose())
+
+
 def test_search_indexes_backfill_and_return_normalized_limited_results(
     manifest, tmp_path
 ):

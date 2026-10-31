@@ -8,15 +8,18 @@ from PySide6.QtCore import (
     QModelIndex,
     QObject,
     Property,
+    QPersistentModelIndex,
     Qt,
     Signal,
     Slot,
 )
 
-from ..application.presenters import filter_student_rows
-
 Row = dict[str, Any]
 RowsProvider = Callable[[], list[Row]]
+StudentPageProvider = Callable[
+    [str, int, int, int, int],
+    tuple[list[Row], int, int] | None,
+]
 
 
 class PagedListModel(QAbstractListModel):
@@ -24,7 +27,7 @@ class PagedListModel(QAbstractListModel):
 
     def __init__(
         self,
-        rows_provider: RowsProvider,
+        rows_provider: RowsProvider | None,
         roles: dict[str, str],
         page_size: int = 50,
         parent: QObject | None = None,
@@ -47,14 +50,17 @@ class PagedListModel(QAbstractListModel):
         self._loaded = False
         self._stale = True
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(
+        self,
+        parent: QModelIndex | QPersistentModelIndex = QModelIndex(),
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self._visible_rows)
 
     def data(
         self,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> Any:
         if not index.isValid() or index.row() < 0 or index.column() != 0:
@@ -114,16 +120,33 @@ class PagedListModel(QAbstractListModel):
 
     @Slot()
     def refresh(self) -> None:
+        if self._rows_provider is None:
+            return
         rows = self._rows_provider()
         filtered_rows = self._filter_rows(rows)
-        total_count = len(rows)
-        matching_count = len(filtered_rows)
+        self._replace_page(
+            filtered_rows,
+            len(rows),
+            len(filtered_rows),
+        )
+
+    def _replace_page(
+        self,
+        rows: list[Row],
+        total_count: int,
+        matching_count: int,
+        *,
+        already_paged: bool = False,
+    ) -> None:
         page_count = max(1, ceil(matching_count / self._page_size))
         page_index = min(self._page_index, page_count - 1)
         start = page_index * self._page_size
-
         self.beginResetModel()
-        self._visible_rows = filtered_rows[start : start + self._page_size]
+        self._visible_rows = (
+            rows[: self._page_size]
+            if already_paged
+            else rows[start : start + self._page_size]
+        )
         self._total_count = total_count
         self._matching_count = matching_count
         self._page_count = page_count
@@ -145,13 +168,16 @@ class PagedListModel(QAbstractListModel):
 class StudentListModel(PagedListModel):
     def __init__(
         self,
-        rows_provider: RowsProvider,
+        page_provider: StudentPageProvider,
         page_size: int = 50,
         parent: QObject | None = None,
     ):
+        self._page_provider = page_provider
         self._query = ""
+        self._status_filter_index = 0
+        self._course_filter_id = 0
         super().__init__(
-            rows_provider,
+            None,
             {
                 "studentId": "id",
                 "label": "label",
@@ -162,18 +188,69 @@ class StudentListModel(PagedListModel):
             parent,
         )
 
-    @Slot(str)
-    def setQuery(self, query: str) -> None:
-        if query == self._query:
+    def refresh(self) -> None:
+        page = self._page_provider(
+            self._query,
+            self._status_filter_index,
+            self._course_filter_id,
+            self._page_index,
+            self._page_size,
+        )
+        if page is None:
+            return
+        rows, total_count, matching_count = page
+        page_count = max(1, ceil(matching_count / self._page_size))
+        page_index = min(self._page_index, page_count - 1)
+        if page_index != self._page_index:
+            self._page_index = page_index
+            page = self._page_provider(
+                self._query,
+                self._status_filter_index,
+                self._course_filter_id,
+                self._page_index,
+                self._page_size,
+            )
+            if page is None:
+                return
+            rows, total_count, matching_count = page
+        self._replace_page(
+            rows,
+            total_count,
+            matching_count,
+            already_paged=True,
+        )
+
+    @Slot(str, int, int)
+    def setFilters(
+        self,
+        query: str,
+        status_filter_index: int,
+        course_filter_id: int,
+    ) -> None:
+        query = query.strip()
+        status_filter_index = max(0, min(status_filter_index, 2))
+        course_filter_id = max(0, course_filter_id)
+        if (
+            query == self._query
+            and status_filter_index == self._status_filter_index
+            and course_filter_id == self._course_filter_id
+        ):
             self.activate()
             return
         self._query = query
+        self._status_filter_index = status_filter_index
+        self._course_filter_id = course_filter_id
         self._page_index = 0
         if self._loaded:
             self.refresh()
 
-    def _filter_rows(self, rows: list[Row]) -> list[Row]:
-        return filter_student_rows(rows, self._query)
+    @Slot(str)
+    def setQuery(self, query: str) -> None:
+        self.setFilters(
+            query,
+            self._status_filter_index,
+            self._course_filter_id,
+        )
 
     @Slot(int, result="QVariantMap")
     def rowAt(self, index: int) -> Row:

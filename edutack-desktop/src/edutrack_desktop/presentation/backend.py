@@ -333,7 +333,7 @@ class DesktopBackend(QObject):
         self._selected_enrollment_id = ""
         self._selected_course_id: int | None = None
         self._student_list_model = StudentListModel(
-            self._all_student_rows,
+            self._student_page_rows,
             parent=self,
         )
         self._enrollment_list_model = EnrollmentListModel(
@@ -464,6 +464,43 @@ class DesktopBackend(QObject):
         if self._student_rows_cache is None:
             self._student_rows_cache = student_rows(self.manifest)
         return self._student_rows_cache
+
+    def _student_page_rows(
+        self,
+        query: str,
+        status_filter_index: int,
+        course_filter_id: int,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int] | None:
+        if not self.manifest or self.store is None:
+            return [], 0, 0
+        try:
+            return self._run_async(
+                self.store.student_page(
+                    query,
+                    status_filter_index,
+                    course_filter_id,
+                    page_index,
+                    page_size,
+                )
+            )
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            logger.error(
+                "workspace.student_page_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(
+                "No se pudo cargar la lista de estudiantes desde la base local."
+            )
+            return None
 
     def _matching_student_rows(self, query: str) -> list[dict[str, Any]]:
         normalized_query = query.strip().casefold()

@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
@@ -28,6 +30,15 @@ Rectangle {
         studentSearch.forceActiveFocus()
     }
 
+    function applyStudentFilters() {
+        studentSearchDebounce.stop()
+        backendObject.studentListModel.setFilters(
+            studentSearch.text,
+            studentStatusFilter.currentIndex,
+            Number(studentCourseFilter.currentValue) || 0
+        )
+    }
+
     function closeStudentEditor() {
         selectedStudent = null
         currentView = "list"
@@ -35,11 +46,18 @@ Rectangle {
 
     Layout.fillWidth: true
     Layout.fillHeight: true
-    visible: windowController.selectedWorkspaceSection === "Estudiantes"
+    visible: studentsPage.windowController.selectedWorkspaceSection === "Estudiantes"
     radius: 0
-    color: windowController.surfaceColor
-    border.color: windowController.borderColor
+    color: studentsPage.windowController.surfaceColor
+    border.color: studentsPage.windowController.borderColor
     Component.onCompleted: backendObject.studentListModel.activate()
+
+    Timer {
+        id: studentSearchDebounce
+        interval: 250
+        repeat: false
+        onTriggered: studentsPage.applyStudentFilters()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -52,7 +70,7 @@ Rectangle {
 
             Label {
                 text: "Estudiantes"
-                color: windowController.primaryTextColor
+                color: studentsPage.windowController.primaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 24
                 font.bold: true
@@ -64,8 +82,10 @@ Rectangle {
 
             Label {
                 text: studentsPage.backendObject.studentListModel.matchingCount
+                      + " de "
+                      + studentsPage.backendObject.studentListModel.totalCount
                       + " estudiantes"
-                color: windowController.secondaryTextColor
+                color: studentsPage.windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 14
             }
@@ -78,32 +98,73 @@ Rectangle {
             }
         }
 
-        TextField {
-            id: studentSearch
+        GridLayout {
             Layout.fillWidth: true
-            placeholderText: "Buscar por nombre, documento o curso..."
-            font.family: "Roboto"
-            onTextChanged: {
-                studentsPage.backendObject.studentListModel.setQuery(
-                    studentSearch.text
-                )
+            Layout.minimumWidth: 0
+            columns: width < 700 ? 1 : 3
+            columnSpacing: 8
+            rowSpacing: 8
+
+            TextField {
+                id: studentSearch
+                objectName: "studentSearch"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 180
+                Layout.preferredWidth: 360
+                placeholderText: "Buscar por nombre, documento o curso..."
+                font.family: "Roboto"
+                onTextChanged: studentSearchDebounce.restart()
+            }
+
+            ComboBox {
+                id: studentStatusFilter
+                objectName: "studentStatusFilter"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 120
+                Layout.preferredWidth: 150
+                model: ["Todos", "Activos", "Inactivos"]
+                font.family: "Roboto"
+                onActivated: studentsPage.applyStudentFilters()
+            }
+
+            ComboBox {
+                id: studentCourseFilter
+                objectName: "studentCourseFilter"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 160
+                Layout.preferredWidth: 240
+                textRole: "label"
+                valueRole: "id"
+                model: {
+                    var options = [{"id": 0, "label": "Todos los cursos"}]
+                    var availableCourses = studentsPage.backendObject.courses
+                    for (var index = 0; index < availableCourses.length; index++)
+                        options.push({
+                            "id": Number(availableCourses[index].id),
+                            "label": availableCourses[index].label
+                        })
+                    return options
+                }
+                font.family: "Roboto"
+                onActivated: studentsPage.applyStudentFilters()
             }
         }
 
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
-            color: windowController.dividerColor
+            color: studentsPage.windowController.dividerColor
         }
 
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
+            visible: !studentsList.compactLayout
 
             Label {
                 Layout.fillWidth: true
                 text: "ESTUDIANTE"
-                color: windowController.secondaryTextColor
+                color: studentsPage.windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 12
                 font.bold: true
@@ -112,7 +173,7 @@ Rectangle {
             Label {
                 Layout.preferredWidth: 220
                 text: "CURSO(S)"
-                color: windowController.secondaryTextColor
+                color: studentsPage.windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 12
                 font.bold: true
@@ -121,7 +182,7 @@ Rectangle {
             Label {
                 Layout.preferredWidth: 224
                 text: "ACCIONES"
-                color: windowController.secondaryTextColor
+                color: studentsPage.windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 12
                 font.bold: true
@@ -139,7 +200,7 @@ Rectangle {
                   : "No se encontraron estudiantes con ese filtro."
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            color: windowController.secondaryTextColor
+            color: studentsPage.windowController.secondaryTextColor
             font.family: "Roboto"
             font.pixelSize: 16
         }
@@ -147,8 +208,11 @@ Rectangle {
         ListView {
             id: studentsList
             objectName: "studentsList"
+            readonly property bool compactLayout: width < 820
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumWidth: 0
+            Layout.maximumWidth: parent.width
             visible: studentsPage.backendObject.studentListModel.matchingCount > 0
             clip: true
             spacing: 8
@@ -167,12 +231,13 @@ Rectangle {
                 required property var courses
                 required property bool active
                 width: studentsList.width
-                height: 72
+                height: studentsList.compactLayout ? 104 : 72
                 radius: 10
-                color: windowController.nestedSurfaceColor
-                border.color: windowController.borderColor
+                color: studentsPage.windowController.nestedSurfaceColor
+                border.color: studentsPage.windowController.borderColor
 
                 RowLayout {
+                    visible: !studentsList.compactLayout
                     anchors.fill: parent
                     anchors.leftMargin: 16
                     anchors.rightMargin: 12
@@ -181,8 +246,8 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        text: label
-                        color: windowController.primaryTextColor
+                        text: studentRow.label
+                        color: studentsPage.windowController.primaryTextColor
                         font.family: "Roboto"
                         font.pixelSize: 15
                         font.bold: true
@@ -193,8 +258,8 @@ Rectangle {
                         Layout.preferredWidth: 220
                         Layout.minimumWidth: 220
                         Layout.maximumWidth: 220
-                        text: (courses || []).join(", ")
-                        color: windowController.secondaryTextColor
+                        text: (studentRow.courses || []).join(", ")
+                        color: studentsPage.windowController.secondaryTextColor
                         font.family: "Roboto"
                         font.pixelSize: 13
                         elide: Text.ElideRight
@@ -215,7 +280,7 @@ Rectangle {
                             theme: studentsPage.theme
                             onStateChangeRequested: function(isActive) {
                                 studentsPage.backendObject.setStudentActive(
-                                    studentId,
+                                    studentRow.studentId,
                                     isActive
                                 )
                             }
@@ -240,6 +305,68 @@ Rectangle {
                     }
                 }
 
+                ColumnLayout {
+                    visible: studentsList.compactLayout
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            text: studentRow.label
+                            color: studentsPage.windowController.primaryTextColor
+                            font.family: "Roboto"
+                            font.pixelSize: 15
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+
+                        StudentStatusButton {
+                            active: studentRow.active
+                            theme: studentsPage.theme
+                            onStateChangeRequested: function(isActive) {
+                                studentsPage.backendObject.setStudentActive(
+                                    studentRow.studentId,
+                                    isActive
+                                )
+                            }
+                        }
+
+                        Button {
+                            objectName: "editStudentButtonCompact"
+                            Layout.preferredWidth: 84
+                            Layout.minimumWidth: 84
+                            Layout.maximumWidth: 84
+                            text: "Editar"
+                            font.family: "Roboto"
+                            font.pixelSize: 12
+                            onClicked: studentsPage.openStudentEditor(
+                                studentsPage.backendObject.studentListModel.rowAt(
+                                    studentRow.index
+                                )
+                            )
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: (studentRow.courses || []).length
+                              ? (studentRow.courses || []).join(", ")
+                              : "Sin matrículas activas"
+                        color: studentsPage.windowController.secondaryTextColor
+                        font.family: "Roboto"
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                    }
+                }
             }
         }
 
@@ -265,7 +392,7 @@ Rectangle {
                       + (studentsPage.backendObject.studentListModel.pageIndex + 1)
                       + " de "
                       + studentsPage.backendObject.studentListModel.pageCount
-                color: windowController.secondaryTextColor
+                color: studentsPage.windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 13
             }

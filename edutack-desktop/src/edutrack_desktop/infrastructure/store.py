@@ -1,12 +1,14 @@
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import MetaData, Table, URL, event, inspect, or_, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import MetaData, Table, URL, event, exists, func, inspect, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+from sqlalchemy.sql.elements import ColumnElement
 import structlog
 
 from .models import (
@@ -208,6 +210,177 @@ class LocalStore:
                 }
                 for student in students
             ]
+
+    async def student_page(
+        self,
+        query: str,
+        status_filter_index: int,
+        course_filter_id: int,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        await self.initialize()
+        if status_filter_index not in (0, 1, 2):
+            raise ValueError("El filtro de estado de estudiantes no es válido.")
+        if course_filter_id < 0 or page_index < 0 or not 1 <= page_size <= 100:
+            raise ValueError("La página de estudiantes solicitada no es válida.")
+
+        conditions: list[ColumnElement[bool]] = []
+        if status_filter_index == 1:
+            conditions.append(StudentRecord.active.is_(True))
+        elif status_filter_index == 2:
+            conditions.append(StudentRecord.active.is_(False))
+
+        if course_filter_id:
+            conditions.append(
+                exists(
+                    select(EnrollmentRecord.id).where(
+                        EnrollmentRecord.student_id == StudentRecord.id,
+                        EnrollmentRecord.course_id == course_filter_id,
+                        EnrollmentRecord.active.is_(True),
+                    )
+                )
+            )
+
+        query = query.strip()
+        async with self.session_factory() as session:
+            if query:
+                normalized_query = normalize_search_text(query)
+                escaped_query = (
+                    normalized_query.replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                )
+                pattern = f"%{escaped_query}%"
+                searchable_columns = (
+                    StudentRecord.last_name_search,
+                    StudentRecord.first_name_search,
+                    StudentRecord.document_number_search,
+                    StudentRecord.last_name_search
+                    + " "
+                    + StudentRecord.first_name_search,
+                )
+                search_conditions: list[ColumnElement[bool]] = [
+                    column.like(pattern, escape="\\")
+                    for column in searchable_columns
+                ]
+                folded_query = query.casefold()
+                course_rows = (
+                    await session.execute(
+                        select(
+                            CourseRecord.id,
+                            CourseRecord.name,
+                            CourseRecord.schedule,
+                            CourseRecord.group_name,
+                        )
+                    )
+                ).all()
+                matching_course_ids = [
+                    course_id
+                    for course_id, name, schedule, group_name in course_rows
+                    if folded_query
+                    in f"{name} · {schedule} · Grupo {group_name}".casefold()
+                ]
+
+                if matching_course_ids:
+                    search_conditions.append(
+                        exists(
+                            select(EnrollmentRecord.id)
+                            .join(
+                                CourseRecord,
+                                EnrollmentRecord.course_id == CourseRecord.id,
+                            )
+                            .where(
+                                EnrollmentRecord.student_id == StudentRecord.id,
+                                EnrollmentRecord.active.is_(True),
+                                EnrollmentRecord.course_id.in_(matching_course_ids),
+                            )
+                        )
+                    )
+                conditions.append(or_(*search_conditions))
+
+            total_count = await session.scalar(
+                select(func.count()).select_from(StudentRecord)
+            )
+            matching_count = await session.scalar(
+                select(func.count())
+                .select_from(StudentRecord)
+                .where(*conditions)
+            )
+            students = (
+                await session.scalars(
+                    select(StudentRecord)
+                    .where(*conditions)
+                    .order_by(StudentRecord.position.desc())
+                    .offset(page_index * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+            return await self._student_page_rows(
+                session, students, total_count, matching_count
+            )
+
+    @staticmethod
+    async def _student_page_rows(
+        session: AsyncSession,
+        students: Sequence[StudentRecord],
+        total_count: int | None,
+        matching_count: int | None,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        if not students:
+            return [], int(total_count or 0), int(matching_count or 0)
+
+        student_ids = [student.id for student in students]
+        enrollment_rows = (
+            await session.execute(
+                select(
+                    EnrollmentRecord.student_id,
+                    CourseRecord.name,
+                    CourseRecord.schedule,
+                    CourseRecord.group_name,
+                )
+                .outerjoin(
+                    CourseRecord,
+                    EnrollmentRecord.course_id == CourseRecord.id,
+                )
+                .where(
+                    EnrollmentRecord.active.is_(True),
+                    EnrollmentRecord.student_id.in_(student_ids),
+                )
+                .order_by(EnrollmentRecord.position.desc())
+            )
+        ).all()
+        active_courses: dict[str, list[str]] = {}
+        for student_id, name, schedule, group_name in enrollment_rows:
+            if student_id is None:
+                continue
+            course_label = (
+                f"{name} · {schedule} · Grupo {group_name}"
+                if name is not None
+                else "Pendiente de curso"
+            )
+            active_courses.setdefault(student_id, []).append(course_label)
+
+        rows = [
+            {
+                "id": student.id,
+                "server_id": student.server_id,
+                "base_hash": student.base_hash,
+                "last_name": student.last_name,
+                "first_name": student.first_name,
+                "document_number": student.document_number,
+                "phone_numbers": student.phone_numbers,
+                "active": student.active,
+                "courses": active_courses.get(student.id, []),
+                "label": " ".join(
+                    part
+                    for part in (student.last_name, student.first_name)
+                    if part
+                ),
+            }
+            for student in students
+        ]
+        return rows, int(total_count or 0), int(matching_count or 0)
 
     async def _load(self):
         async with self.session_factory() as session:

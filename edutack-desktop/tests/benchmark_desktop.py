@@ -85,6 +85,23 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
                     f"La búsqueda de prueba devolvió {len(results)} resultados."
                 )
 
+        await store.student_page(query, 0, 0, 0, 50)
+        student_page_samples = []
+        for _ in range(ITERATIONS):
+            started = time.perf_counter()
+            rows, total_count, matching_count = await store.student_page(
+                query,
+                0,
+                0,
+                0,
+                50,
+            )
+            student_page_samples.append(time.perf_counter() - started)
+            if len(rows) != 1 or total_count != size or matching_count != 1:
+                raise RuntimeError(
+                    "La página SQL de estudiantes devolvió resultados inesperados."
+                )
+
         student = manifest["students"][-1]
         incremental_save_samples = []
         for iteration in range(ITERATIONS):
@@ -102,6 +119,9 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             "open_and_load_ms": open_and_load_ms,
             "full_load_median_ms": median_milliseconds(load_samples),
             "indexed_search_median_ms": median_milliseconds(search_samples),
+            "student_page_search_median_ms": median_milliseconds(
+                student_page_samples
+            ),
             "one_record_incremental_save_median_ms": median_milliseconds(
                 incremental_save_samples
             ),

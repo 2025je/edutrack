@@ -22,6 +22,15 @@ class WorkspaceStore(Protocol):
         self, query: str, limit: int = 20
     ) -> list[dict[str, Any]]: ...
 
+    async def student_page(
+        self,
+        query: str,
+        status_filter_index: int,
+        course_filter_id: int,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int]: ...
+
     async def record_sync_history(self, history_event: dict[str, Any]) -> None: ...
 
     async def list_sync_history(self, limit: int = 50) -> list[dict[str, Any]]: ...
