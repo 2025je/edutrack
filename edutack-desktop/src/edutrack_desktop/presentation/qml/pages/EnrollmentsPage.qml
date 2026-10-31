@@ -23,7 +23,8 @@ Rectangle {
     })
     property bool filtersUpdating: false
     property bool resettingFilters: false
-    readonly property int totalEnrollments: backendObject.enrollments.length
+    readonly property var allEnrollmentRows: backendObject.enrollments
+    readonly property int totalEnrollments: allEnrollmentRows.length
     readonly property var courseFilterOptions: [{
         id: 0,
         label: "Todos los cursos"
@@ -36,7 +37,7 @@ Rectangle {
     readonly property var filteredEnrollmentRows: {
         var filters = root.appliedFilters
         var query = filters.searchQuery
-        return backendObject.enrollments.filter(function(enrollment) {
+        return root.allEnrollmentRows.filter(function(enrollment) {
             if (query) {
                 var searchableText = [
                     enrollment.student_label,
@@ -79,6 +80,10 @@ Rectangle {
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Matrículas"
     onPageCountChanged: pageIndex = Math.min(pageIndex, pageCount - 1)
+    onCurrentViewChanged: {
+        if (currentView !== "editor")
+            enrollmentEditorLoader.source = ""
+    }
 
     function scheduleFilterUpdate() {
         root.filtersUpdating = true
@@ -86,17 +91,19 @@ Rectangle {
         filterApplyTimer.restart()
     }
 
+    function focusSearch() {
+        enrollmentSearch.forceActiveFocus()
+    }
+
     function openEnrollmentWizard() {
         root.pendingEnrollment = null
         root.editingEnrollment = null
-        enrollmentWizard.begin()
         root.currentView = "wizard"
     }
 
     function openEnrollmentEditor(enrollment) {
         root.pendingEnrollment = enrollment
         root.editorLoading = true
-        editorOpenFinishTimer.stop()
         editorOpenTimer.restart()
     }
 
@@ -105,15 +112,16 @@ Rectangle {
         interval: 100
         onTriggered: {
             root.editingEnrollment = root.pendingEnrollment
+            enrollmentEditorLoader.setSource(
+                Qt.resolvedUrl("EnrollmentEditorPage.qml"),
+                {
+                    backendObject: root.backendObject,
+                    enrollment: root.editingEnrollment,
+                    theme: root.theme
+                }
+            )
             root.currentView = "editor"
-            editorOpenFinishTimer.restart()
         }
-    }
-
-    Timer {
-        id: editorOpenFinishTimer
-        interval: 300
-        onTriggered: root.editorLoading = false
     }
 
     Timer {
@@ -433,29 +441,52 @@ Rectangle {
         }
     }
 
-    EnrollmentWizardPage {
-        id: enrollmentWizard
+    Loader {
+        id: enrollmentWizardLoader
         anchors.fill: parent
-        visible: root.currentView === "wizard"
-        backendObject: root.backendObject
-        theme: root.theme
-        onCancelRequested: root.currentView = "list"
-        onEnrollmentSaved: root.currentView = "list"
+        active: root.currentView === "wizard"
+        asynchronous: true
+        sourceComponent: Component {
+            EnrollmentWizardPage {
+                anchors.fill: parent
+                backendObject: root.backendObject
+                theme: root.theme
+                onCancelRequested: root.currentView = "list"
+                onEnrollmentSaved: root.currentView = "list"
+            }
+        }
+        onLoaded: item.begin()
     }
 
-    EnrollmentEditorPage {
-        id: enrollmentEditor
+    Loader {
+        id: enrollmentEditorLoader
         anchors.fill: parent
-        visible: root.currentView === "editor"
-        backendObject: root.backendObject
-        enrollment: root.editingEnrollment
-        theme: root.theme
-        onCancelRequested: {
+        active: root.currentView === "editor"
+        asynchronous: true
+        onLoaded: {
+            root.editorLoading = false
+        }
+        onStatusChanged: {
+            if (status === Loader.Error) {
+                root.editorLoading = false
+                console.error("No se pudo cargar el editor de matrículas: "
+                              + errorString())
+                root.currentView = "list"
+            }
+        }
+    }
+
+    Connections {
+        target: enrollmentEditorLoader.item
+        ignoreUnknownSignals: true
+
+        function onCancelRequested() {
             root.pendingEnrollment = null
             root.editingEnrollment = null
             root.currentView = "list"
         }
-        onEnrollmentSaved: {
+
+        function onEnrollmentSaved() {
             root.pendingEnrollment = null
             root.editingEnrollment = null
             root.currentView = "list"

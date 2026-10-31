@@ -1,9 +1,17 @@
+import asyncio
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QStandardPaths, QTimer, QUrl
+from PySide6.QtCore import (
+    QCoreApplication,
+    QRunnable,
+    QStandardPaths,
+    QThreadPool,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -33,9 +41,27 @@ def _initialize_backend(ui_thread):
     logger = structlog.get_logger(__name__)
     logger.info("desktop.starting")
 
-    backend = DesktopBackend(settings=settings)
+    backend = DesktopBackend(settings=settings, defer_initialize=True)
     backend.moveToThread(ui_thread)
     return backend
+
+
+class _BackendInitializationWorker(QRunnable):
+    def __init__(self, ui_thread):
+        super().__init__()
+        self.setAutoDelete(False)
+        self._ui_thread = ui_thread
+        self.backend = None
+        self.error = None
+        self.completed = Event()
+
+    def run(self):
+        try:
+            self.backend = _initialize_backend(self._ui_thread)
+        except Exception as exc:
+            self.error = exc
+        finally:
+            self.completed.set()
 
 
 def main():
@@ -51,43 +77,76 @@ def main():
     import structlog
 
     import PySide6
+    import PySide6.QtAsyncio as QtAsyncio
     from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlIncubator
     from PySide6.QtQuick import QQuickWindow
     from PySide6.QtQuickControls2 import QQuickStyle
 
     from .session_settings import SessionSettings
+    from .startup_splash import StartupSplash
 
     logger = structlog.get_logger(__name__)
+    splash = StartupSplash(icon_path)
+    splash.show()
+    app.processEvents()
+    exit_code = 0
     engine = None
     component = None
     incubator = None
     root_window = None
-    startup_pool = ThreadPoolExecutor(max_workers=1)
-    startup_future = startup_pool.submit(_initialize_backend, app.thread())
+    backend = None
+    backend_ready = False
+    startup_started = False
     startup_timer = QTimer(app)
     startup_timer.setInterval(50)
 
-    def fail_startup(event, message):
+    def fail_startup(event, message, error_type="StartupError"):
+        nonlocal exit_code
+        exit_code = 1
         startup_timer.stop()
-        logger.error(event, error=message)
+        splash.close_splash()
+        logger.error(event, error_type=error_type)
         QMessageBox.critical(None, "No se pudo iniciar EduTrack", message)
         app.exit(1)
 
+    async def initialize_backend():
+        nonlocal backend, backend_ready
+        try:
+            worker = _BackendInitializationWorker(app.thread())
+            QThreadPool.globalInstance().start(worker)
+            while not worker.completed.is_set():
+                await asyncio.sleep(0.05)
+            if worker.error is not None:
+                raise worker.error
+            if worker.backend is None:
+                raise RuntimeError("No se pudo crear el backend de la aplicación.")
+            backend = worker.backend
+            await backend.initialize()
+        except Exception as exc:
+            fail_startup(
+                "desktop.startup_failed",
+                str(exc) or type(exc).__name__,
+                type(exc).__name__,
+            )
+            return
+        backend_ready = True
+
     def finish_startup():
-        nonlocal component, engine, incubator, root_window
+        nonlocal component, engine, incubator, root_window, startup_started
 
         if engine is None:
-            if not startup_future.done():
+            if not startup_started:
+                startup_started = True
+                asyncio.create_task(initialize_backend())
                 return
-            error = startup_future.exception()
-            if error is not None:
+            if not backend_ready:
+                return
+            if backend is None:
                 fail_startup(
                     "desktop.startup_failed",
-                    str(error) or type(error).__name__,
+                    "No se pudo inicializar el backend de la aplicación.",
                 )
                 return
-
-            backend = startup_future.result()
             backend.setParent(app)
 
             app_icon = QIcon(str(icon_path))
@@ -189,14 +248,15 @@ def main():
             return
         if smoke_test:
             root_window.setProperty("visible", False)
+            splash.close_splash()
             QTimer.singleShot(500, app.quit)
         else:
             root_window.setProperty("visible", True)
+            splash.close_splash()
 
     startup_timer.timeout.connect(finish_startup)
     startup_timer.start()
-    exit_code = app.exec()
-    startup_pool.shutdown(wait=False)
+    QtAsyncio.run()
     logger.info("desktop.stopped", exit_code=exit_code)
     return exit_code
 

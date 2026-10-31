@@ -194,7 +194,7 @@ Item {
                      ? "edutrack-sede-inicial.edutrack"
                      : "edutrack-sincronizacion.edutrack"
         nameFilters: ["EduTrack (*.edutrack)"]
-        onAccepted: root.backendObject.exportPackage(selectedFile.toString())
+        onAccepted: root.backendObject.exportPackageAsync(selectedFile.toString())
     }
 
 }

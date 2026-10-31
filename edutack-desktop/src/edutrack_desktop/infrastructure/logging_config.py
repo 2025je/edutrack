@@ -12,25 +12,37 @@ from rich.logging import RichHandler
 def configure_logging(level: str, log_path: Path) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("edutrack_desktop.infrastructure.store").setLevel(
+        logging.WARNING
+    )
     console_output = sys.stderr is not None
     if console_output:
         colorama.just_fix_windows_console()
 
-    if not root_logger.handlers:
-        if not console_output:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            handler: logging.Handler = RotatingFileHandler(
-                log_path,
-                maxBytes=1_000_000,
-                backupCount=3,
-                encoding="utf-8",
-            )
-        else:
-            handler = RichHandler(
-                console=Console(stderr=True),
-                rich_tracebacks=True,
-                show_path=False,
-            )
+    for existing_handler in tuple(root_logger.handlers):
+        if getattr(existing_handler, "_edutrack_desktop_managed", False):
+            root_logger.removeHandler(existing_handler)
+            existing_handler.close()
+
+    if not console_output:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler: logging.Handler = RotatingFileHandler(
+            log_path,
+            maxBytes=1_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        setattr(handler, "_edutrack_desktop_managed", True)
+        root_logger.addHandler(handler)
+    elif not root_logger.handlers:
+        handler = RichHandler(
+            console=Console(stderr=True),
+            rich_tracebacks=True,
+            show_path=False,
+        )
+        setattr(handler, "_edutrack_desktop_managed", True)
         root_logger.addHandler(handler)
 
     if console_output:

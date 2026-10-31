@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../components"
 
 Rectangle {
     id: root
@@ -13,14 +14,16 @@ Rectangle {
     property var selectedCourseId: ""
     property string studentSearchQuery: ""
     property string courseSearchQuery: ""
-    readonly property var monthNames: [
-        "enero", "febrero", "marzo", "abril", "mayo", "junio",
-        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-    ]
+    property int studentSearchLimit: 20
+    property var studentSearchResults: []
     readonly property var studentOptions: {
-        var options = root.backendObject
-                      ? root.backendObject.studentOptions.slice()
-                      : []
+        var options = [{
+            id: "",
+            label: "Sin estudiante",
+            active: true
+        }]
+        for (var index = 0; index < root.studentSearchResults.length; index++)
+            options.push(root.studentSearchResults[index])
         var studentId = root.enrollment ? root.enrollment.student_id : ""
         if (studentId
                 && !options.some(function(option) {
@@ -28,10 +31,11 @@ Rectangle {
                 })) {
             options.push({
                 id: studentId,
-                label: "Estudiante no disponible",
-                active: false,
-                missing: true
-            })
+                    label: root.enrollment.student_label
+                           || "Estudiante no disponible",
+                    active: root.enrollment.student_active === true,
+                    missing: root.enrollment.pending_student === true
+                })
         }
         return options
     }
@@ -62,12 +66,12 @@ Rectangle {
                 && !options.some(function(option) {
                     return String(option.id) === String(courseId)
                 })) {
-            options.push({
-                id: courseId,
-                label: "Curso no disponible",
-                active: false,
-                missing: true
-            })
+                options.push({
+                    id: courseId,
+                    label: "Curso no disponible",
+                    active: false,
+                    missing: true
+                })
         }
         return options
     }
@@ -76,6 +80,13 @@ Rectangle {
 
     color: theme.surface
     border.color: theme.outline
+
+    Timer {
+        id: studentSearchTimer
+        interval: 180
+        repeat: false
+        onTriggered: root.refreshStudentSearch()
+    }
 
     function optionForId(options, id) {
         var desiredId = String(id === undefined || id === null ? "" : id)
@@ -91,43 +102,13 @@ Rectangle {
         return option ? option.label : fallback
     }
 
-    function dateFromIso(value) {
-        var dateText = String(value || "")
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText))
-            return null
-        var parts = dateText.split("-")
-        var parsed = new Date(
-            Number(parts[0]),
-            Number(parts[1]) - 1,
-            Number(parts[2])
+    function refreshStudentSearch() {
+        if (!root.backendObject)
+            return
+        root.studentSearchResults = root.backendObject.searchStudents(
+            root.studentSearchQuery,
+            root.studentSearchLimit
         )
-        if (parsed.getFullYear() !== Number(parts[0])
-                || parsed.getMonth() !== Number(parts[1]) - 1
-                || parsed.getDate() !== Number(parts[2]))
-            return null
-        return parsed
-    }
-
-    function isoDate(value) {
-        var month = ("0" + (value.getMonth() + 1)).slice(-2)
-        var day = ("0" + value.getDate()).slice(-2)
-        return value.getFullYear() + "-" + month + "-" + day
-    }
-
-    function changeCalendarMonth(offset) {
-        var nextMonth = new Date(
-            enrollmentDatePopup.displayedYear,
-            enrollmentDatePopup.displayedMonth + offset,
-            1
-        )
-        enrollmentDatePopup.displayedYear = nextMonth.getFullYear()
-        enrollmentDatePopup.displayedMonth = nextMonth.getMonth()
-    }
-
-    function selectEnrollmentDate(value) {
-        enrollmentDateField.text = root.isoDate(value)
-        root.errorText = ""
-        enrollmentDatePopup.close()
     }
 
     function loadEnrollment() {
@@ -136,7 +117,7 @@ Rectangle {
         root.errorText = ""
         root.selectedStudentId = root.enrollment.student_id || ""
         root.selectedCourseId = root.enrollment.course_id || ""
-        enrollmentDateField.text = root.enrollment.enrollment_date || ""
+        enrollmentDateField.value = root.enrollment.enrollment_date || ""
         enrollmentFeeField.text = String(root.enrollment.enrollment_fee || "0.00")
         monthlyFeeField.text = String(root.enrollment.monthly_fee || "0.00")
         enrollmentActiveField.checked = root.enrollment.active !== false
@@ -179,8 +160,8 @@ Rectangle {
             root.errorText = "Selecciona un curso válido."
             return
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(enrollmentDateField.text.trim())) {
-            root.errorText = "Ingresa la fecha con el formato AAAA-MM-DD."
+        if (!enrollmentDateField.valid) {
+            root.errorText = "Selecciona una fecha válida."
             return
         }
         if (!root.normalizeAmount(enrollmentFeeField)
@@ -192,7 +173,7 @@ Rectangle {
         var saved = root.backendObject.saveEnrollment(root.enrollment.id, {
             student_id: student.id,
             course_id: course.id,
-            enrollment_date: enrollmentDateField.text.trim(),
+            enrollment_date: enrollmentDateField.value,
             enrollment_fee: enrollmentFeeField.text,
             monthly_fee: monthlyFeeField.text,
             active: enrollmentActiveField.checked
@@ -201,6 +182,21 @@ Rectangle {
             root.enrollmentSaved()
         else
             root.errorText = root.backendObject.errorMessage
+    }
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        enabled: root.visible && !root.backendObject.isBusy
+                 && !studentPicker.opened && !coursePicker.opened
+                 && !enrollmentDateField.popupOpen
+        onActivated: root.saveChanges()
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        enabled: root.visible && !studentPicker.opened
+                 && !coursePicker.opened && !enrollmentDateField.popupOpen
+        onActivated: root.cancelRequested()
     }
 
     onEnrollmentChanged: loadEnrollment()
@@ -338,26 +334,16 @@ Rectangle {
                         Layout.fillWidth: true
                         spacing: 4
                         Label {
-                            text: "Fecha de matrícula (AAAA-MM-DD)"
+                            text: "Fecha de matrícula"
                             color: root.theme.secondaryText
                             font.family: "Roboto"
                         }
-                        RowLayout {
+                        DateInput {
+                            id: enrollmentDateField
+                            objectName: "editEnrollmentDate"
                             Layout.fillWidth: true
-
-                            TextField {
-                                id: enrollmentDateField
-                                objectName: "editEnrollmentDate"
-                                Layout.fillWidth: true
-                                readOnly: true
-                                placeholderText: "AAAA-MM-DD"
-                                maximumLength: 10
-                            }
-
-                            Button {
-                                text: "Calendario"
-                                onClicked: enrollmentDatePopup.open()
-                            }
+                            theme: root.theme
+                            onDateSelected: root.errorText = ""
                         }
 
                         Popup {
@@ -372,9 +358,14 @@ Rectangle {
                             closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
                             onOpened: {
+                                studentSearchField.clear()
                                 root.studentSearchQuery = ""
+                                root.studentSearchLimit = 20
+                                studentSearchTimer.stop()
+                                root.refreshStudentSearch()
                                 studentSearchField.forceActiveFocus()
                             }
+                            onClosed: studentSearchTimer.stop()
 
                             contentItem: ColumnLayout {
                                 spacing: 12
@@ -392,7 +383,11 @@ Rectangle {
                                     objectName: "editEnrollmentStudentSearch"
                                     Layout.fillWidth: true
                                     placeholderText: "Buscar por nombre, apellido o documento..."
-                                    onTextChanged: root.studentSearchQuery = text
+                                    onTextChanged: {
+                                        root.studentSearchQuery = text
+                                        root.studentSearchLimit = 20
+                                        studentSearchTimer.restart()
+                                    }
                                 }
 
                                 ListView {
@@ -445,6 +440,22 @@ Rectangle {
                                                 }
                                             }
 
+                                            Button {
+                                                objectName: "editEnrollmentShowMoreStudentsButton"
+                                                Layout.fillWidth: true
+                                                visible: root.studentSearchResults.length
+                                                         >= root.studentSearchLimit
+                                                         && root.studentSearchLimit < 100
+                                                text: "Mostrar más resultados"
+                                                onClicked: {
+                                                    root.studentSearchLimit = Math.min(
+                                                        root.studentSearchLimit + 20,
+                                                        100
+                                                    )
+                                                    root.refreshStudentSearch()
+                                                }
+                                            }
+
                                             Label {
                                                 text: studentResultButton.modelData.missing
                                                       ? "No disponible"
@@ -476,7 +487,8 @@ Rectangle {
 
                                 Label {
                                     Layout.fillWidth: true
-                                    visible: root.filteredStudentOptions.length === 0
+                                    visible: root.studentSearchQuery.trim().length > 0
+                                             && root.studentSearchResults.length === 0
                                     text: "No se encontraron estudiantes."
                                     color: root.theme.secondaryText
                                     font.family: "Roboto"
@@ -600,15 +612,11 @@ Rectangle {
                             color: root.theme.secondaryText
                             font.family: "Roboto"
                         }
-                        TextField {
+                        MoneySpinBox {
                             id: enrollmentFeeField
                             objectName: "editEnrollmentFee"
                             Layout.fillWidth: true
-                            maximumLength: 11
-                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            validator: RegularExpressionValidator {
-                                regularExpression: /^[0-9]+([.,][0-9]{0,2})?$/
-                            }
+                            theme: root.theme
                         }
                     }
 
@@ -620,15 +628,11 @@ Rectangle {
                             color: root.theme.secondaryText
                             font.family: "Roboto"
                         }
-                        TextField {
+                        MoneySpinBox {
                             id: monthlyFeeField
                             objectName: "editEnrollmentMonthlyFee"
                             Layout.fillWidth: true
-                            maximumLength: 11
-                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            validator: RegularExpressionValidator {
-                                regularExpression: /^[0-9]+([.,][0-9]{0,2})?$/
-                            }
+                            theme: root.theme
                         }
                     }
 
@@ -669,92 +673,4 @@ Rectangle {
         }
     }
 
-    Popup {
-        id: enrollmentDatePopup
-        objectName: "enrollmentDatePopup"
-        modal: true
-        focus: true
-        width: 360
-        height: 410
-        padding: 12
-        anchors.centerIn: Overlay.overlay
-        property int displayedYear: new Date().getFullYear()
-        property int displayedMonth: new Date().getMonth()
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        onOpened: {
-            var selectedDate = root.dateFromIso(enrollmentDateField.text)
-            var date = selectedDate || new Date()
-            displayedYear = date.getFullYear()
-            displayedMonth = date.getMonth()
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 8
-
-            RowLayout {
-                Layout.fillWidth: true
-
-                Button {
-                    text: "Anterior"
-                    onClicked: root.changeCalendarMonth(-1)
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.monthNames[enrollmentDatePopup.displayedMonth]
-                          + " " + enrollmentDatePopup.displayedYear
-                    horizontalAlignment: Text.AlignHCenter
-                    color: root.theme.primaryText
-                    font.family: "Roboto"
-                    font.bold: true
-                }
-
-                Button {
-                    text: "Siguiente"
-                    onClicked: root.changeCalendarMonth(1)
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 0
-
-                Repeater {
-                    model: ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-
-                    delegate: Label {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        text: modelData
-                        horizontalAlignment: Text.AlignHCenter
-                        color: root.theme.secondaryText
-                        font.family: "Roboto"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-                }
-            }
-
-            MonthGrid {
-                id: enrollmentDateCalendar
-                Layout.fillWidth: true
-                Layout.preferredHeight: 260
-                month: enrollmentDatePopup.displayedMonth
-                year: enrollmentDatePopup.displayedYear
-                locale: Qt.locale("es_PE")
-
-                delegate: Button {
-                    required property var model
-                    implicitWidth: 40
-                    implicitHeight: 36
-                    text: String(model.day)
-                    enabled: model.month === enrollmentDateCalendar.month
-                    flat: true
-                    highlighted: root.isoDate(model.date) === enrollmentDateField.text
-                    onClicked: root.selectEnrollmentDate(model.date)
-                }
-            }
-        }
-    }
 }

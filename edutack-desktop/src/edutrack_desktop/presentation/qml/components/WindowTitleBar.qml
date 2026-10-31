@@ -176,43 +176,10 @@ Rectangle {
             onClicked: maximizeRequested()
         }
 
-        Button {
-            id: closeWindowButton
-            Layout.preferredWidth: 36
-            Layout.preferredHeight: 36
-            flat: true
-            ToolTip.visible: hovered
-            ToolTip.text: "Cerrar ventana"
-            background: Rectangle {
-                radius: 0
-                color: closeWindowButton.down
-                       ? windowController.errorColor
-                       : closeWindowButton.hovered
-                         ? windowController.errorColor
-                         : "transparent"
-            }
-            contentItem: Item {
-                Rectangle {
-                    width: 15
-                    height: 1.5
-                    anchors.centerIn: parent
-                    rotation: 45
-                    color: closeWindowButton.hovered
-                           ? windowController.darkMode ? theme.background : "#ffffff"
-                           : theme.headerText
-                }
-
-                Rectangle {
-                    width: 15
-                    height: 1.5
-                    anchors.centerIn: parent
-                    rotation: -45
-                    color: closeWindowButton.hovered
-                           ? windowController.darkMode ? theme.background : "#ffffff"
-                           : theme.headerText
-                }
-            }
-            onClicked: closeRequested()
+        WindowCloseButton {
+            windowController: windowTitleBar.windowController
+            theme: windowTitleBar.theme
+            onCloseRequested: windowTitleBar.closeRequested()
         }
     }
 }

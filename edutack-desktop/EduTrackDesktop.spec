@@ -7,6 +7,10 @@ ROOT = Path(SPECPATH)
 SRC_DIR = ROOT / "src"
 APP_DIR = SRC_DIR / "edutrack_desktop"
 qt_datas, qt_binaries, qt_hiddenimports = collect_all("PySide6")
+hiddenimports = qt_hiddenimports + [
+    "aiosqlite",
+    "sqlalchemy.dialects.sqlite.aiosqlite",
+]
 resource_suffixes = {".ini", ".qml", ".svg", ".ttf", ".txt"}
 app_datas = []
 for path in APP_DIR.rglob("*"):
@@ -26,7 +30,7 @@ a = Analysis(
     pathex=[str(SRC_DIR), str(ROOT)],
     binaries=qt_binaries,
     datas=datas,
-    hiddenimports=qt_hiddenimports,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

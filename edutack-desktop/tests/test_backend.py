@@ -1,5 +1,7 @@
+import asyncio
 import time
 import uuid
+from copy import deepcopy
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, QUrl, Qt
@@ -31,6 +33,16 @@ def test_desktop_settings_configure_default_storage_paths(tmp_path):
     assert backend.store.path == (tmp_path / "edutrack-desktop.sqlite3").resolve()
     assert backend.catalog.path == (tmp_path / "campuses.json").resolve()
     assert created_paths == [backend.store.path]
+
+
+def test_backend_can_defer_initialization(tmp_path):
+    backend = DesktopBackend(
+        tmp_path / "workspace.sqlite3",
+        defer_initialize=True,
+    )
+
+    assert backend.store is None
+    assert backend.manifest is None
 
 
 def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
@@ -130,7 +142,7 @@ def test_edit_existing_and_add_student_and_enrollment(tmp_path):
         ],
         "promoters": [],
     }
-    LocalStore(path).save(manifest)
+    asyncio.run(LocalStore(path).save(manifest))
     backend = DesktopBackend(path)
 
     new_course_id = backend.createCourse(
@@ -180,7 +192,7 @@ def test_edit_existing_and_add_student_and_enrollment(tmp_path):
     image.fill(Qt.GlobalColor.blue)
     assert image.save(str(image_path), "PNG")
     backend.attachEnrollmentImage(str(image_path))
-    assert backend.store.load() == backend.manifest
+    assert asyncio.run(backend.store.load()) == backend.manifest
 
     output = tmp_path / "changes.edutrack"
     backend.exportPackage(str(output))
@@ -207,9 +219,9 @@ def test_database_saves_expose_global_saving_state(tmp_path):
         store = LocalStore(path)
         store_save = store.save
 
-        def slow_save(manifest):
+        async def slow_save(manifest):
             time.sleep(0.1)
-            store_save(manifest)
+            await store_save(manifest)
 
         store.save = slow_save
         return store
@@ -287,6 +299,70 @@ def test_student_pages_filter_and_refresh_after_saving(tmp_path):
     assert not backend.studentPage("", 0, 101)
 
 
+def test_dashboard_summary_cache_updates_and_workspace_refresh_reloads(tmp_path):
+    path = tmp_path / "workspace.sqlite3"
+    backend = DesktopBackend(path)
+    backend.createWorkspace("Sede de prueba", "")
+
+    assert backend.dashboardSummary["student_count"] == 0
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    assert backend.dashboardSummary["student_count"] == 1
+
+    external_manifest = deepcopy(backend.manifest)
+    external_manifest["campus_address"] = "Dirección actualizada"
+    asyncio.run(backend.store.save(external_manifest))
+
+    assert backend.manifest["campus_address"] == ""
+    assert backend.refreshWorkspace()
+    assert backend.manifest["campus_address"] == "Dirección actualizada"
+
+
+def test_search_students_normalizes_limits_and_reports_enrollments(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Inglés", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
+    )
+    backend.saveStudent("", "ROJAS", "LUIS", "11111111", "987654321")
+    backend.saveStudent("", "PEREZ", "ANA", "22222222", "912345678")
+    backend.saveStudent("", "PEREYRA", "JOSE", "33333333", "923456789")
+    enrolled = backend.searchStudents("perez ana")[0]
+    backend.saveEnrollment(
+        "",
+        {
+            "student_id": enrolled["id"],
+            "course_id": course_id,
+            "enrollment_date": "2026-01-02",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+        },
+    )
+
+    # Sin consulta devuelve los más recientes primero.
+    assert [row["label"] for row in backend.searchStudents("")] == [
+        "PEREYRA JOSE",
+        "PEREZ ANA",
+        "ROJAS LUIS",
+    ]
+    # Insensible a mayúsculas y busca por apellido o documento.
+    assert [row["label"] for row in backend.searchStudents("pere")] == [
+        "PEREYRA JOSE",
+        "PEREZ ANA",
+    ]
+    assert backend.searchStudents("2222")[0]["label"] == "PEREZ ANA"
+    # Respeta el límite y rechaza límites inválidos sin fallar.
+    assert len(backend.searchStudents("", 2)) == 2
+    assert len(backend.searchStudents("", 0)) == 3
+    assert len(backend.searchStudents("", 500)) == 3
+    # Expone las matrículas activas para advertir en el asistente.
+    match = backend.searchStudents("perez ana")[0]
+    assert len(match["courses"]) == 1
+    assert backend.searchStudents("pereyra")[0]["courses"] == []
+    # Sin sede abierta no devuelve resultados.
+    closed = DesktopBackend(tmp_path / "otra.sqlite3", defer_initialize=True)
+    assert closed.searchStudents("pere") == []
+
+
 def test_course_validation_normalizes_identity_and_enforces_web_amount_limit(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
@@ -346,7 +422,7 @@ def test_save_course_updates_validates_and_persists(tmp_path):
     )
     course = next(item for item in backend.manifest["courses"] if item["id"] == course_id)
     course["server_id"] = 25
-    backend.store.save(backend.manifest)
+    asyncio.run(backend.store.save(backend.manifest))
     backend.selectCourse(course_id)
 
     assert backend.saveCourse(
@@ -450,10 +526,10 @@ def test_save_course_async_reports_persistence_errors(tmp_path, monkeypatch):
     )
     backend.selectCourse(course_id)
 
-    def fail_save(_manifest):
+    async def fail_save_records(_manifest, _record_changes):
         raise OSError("disco lleno")
 
-    monkeypatch.setattr(backend.store, "save", fail_save)
+    monkeypatch.setattr(backend.store, "save_records", fail_save_records)
     loop = QEventLoop()
     timeout = QTimer()
     timeout.setSingleShot(True)
@@ -689,9 +765,9 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
         store = original_store_factory(path)
         store_load = store.load
 
-        def slow_load():
+        async def slow_load():
             time.sleep(0.1)
-            return store_load()
+            return await store_load()
 
         store.load = slow_load
         return store
@@ -722,6 +798,53 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
     )
     assert reopened_backend.campusName == "Sede Externa"
     assert reopened_backend.campuses[-1]["campus_name"] == "Sede Externa"
+
+
+def test_removing_saved_campus_only_removes_catalog_entry(tmp_path):
+    default_path = tmp_path / "default.sqlite3"
+    catalog_path = tmp_path / "campuses.json"
+    saved_path = tmp_path / "sites" / "saved.sqlite3"
+    active_path = tmp_path / "sites" / "active.sqlite3"
+    backend = DesktopBackend(default_path, catalog_path)
+
+    assert backend.createWorkspace("Sede guardada", "", str(saved_path))
+    assert backend.createWorkspace("Sede activa", "", str(active_path))
+    assert not backend.removeCampusFromList(str(active_path))
+    assert "Cierra la sede activa" in backend.errorMessage
+    assert len(backend.campuses) == 2
+
+    assert backend.removeCampusFromList(str(saved_path))
+    assert saved_path.is_file()
+    assert [campus["campus_name"] for campus in backend.campuses] == [
+        "Sede activa"
+    ]
+    assert backend.catalog.active_path == str(active_path.resolve())
+    assert "se conservaron" in backend.errorMessage
+
+    assert backend.closeCampus()
+    reopened_backend = DesktopBackend(default_path, catalog_path)
+    assert [campus["campus_name"] for campus in reopened_backend.campuses] == [
+        "Sede activa"
+    ]
+    assert saved_path.is_file()
+    assert active_path.is_file()
+
+
+def test_removing_last_default_campus_stays_removed_after_restart(tmp_path):
+    database_path = tmp_path / "default.sqlite3"
+    catalog_path = tmp_path / "campuses.json"
+    backend = DesktopBackend(database_path, catalog_path)
+
+    assert backend.createWorkspace("Sede guardada", "", str(database_path))
+    assert backend.closeCampus()
+    assert backend.removeCampusFromList(str(database_path))
+    assert database_path.is_file()
+    assert backend.campuses == []
+
+    reopened_backend = DesktopBackend(database_path, catalog_path)
+    assert not reopened_backend.hasWorkspace
+    assert reopened_backend.campuses == []
+    assert database_path.is_file()
 
 
 def test_imported_campus_uses_its_own_database(tmp_path):
@@ -765,6 +888,15 @@ def test_importing_updated_package_replaces_only_the_confirmed_matching_site(tmp
     assert backend.openPackage(str(package_path), str(database_path), True)
     assert backend.campusName == "Sede Norte"
     assert backend.students == []
+    backups = list((tmp_path / "backups").glob("sede-*.sqlite3"))
+    assert len(backups) == 1
+    history = asyncio.run(backend.store.list_sync_history())
+    imports = [event for event in history if event["operation"] == "import"]
+    assert len(imports) == 1
+    assert imports[0]["status"] == "success"
+    assert "Respaldo:" in backend.errorMessage
+    assert not backend.openPackage(str(package_path), str(database_path), True)
+    assert "ya se importó" in backend.errorMessage
 
 
 def test_closing_campus_keeps_database_registered_and_reopenable(tmp_path):

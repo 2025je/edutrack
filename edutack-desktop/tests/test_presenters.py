@@ -1,6 +1,7 @@
 from edutrack_desktop.application.presenters import (
     course_rows,
     course_students,
+    dashboard_summary,
     enrollment_rows,
     student_rows,
 )
@@ -114,7 +115,9 @@ def test_enrollment_rows_label_missing_students_and_courses():
     assert rows["normal"]["course_label"] == "Matemáticas · Mañana · Grupo 1"
     assert rows["normal"]["pending_student"] is False
     assert rows["normal"]["pending_course"] is False
+    assert rows["normal"]["student_active"] is True
     assert rows["pending-student"]["pending_student"] is True
+    assert rows["pending-student"]["student_active"] is False
     assert rows["pending-course"]["pending_course"] is True
 
 
@@ -178,3 +181,91 @@ def test_course_students_are_ordered_by_registration_recency():
     assert [
         row["id"] for row in course_students(manifest, 1)
     ] == ["student-new", "student-old"]
+
+
+def test_dashboard_summary_reports_local_metrics_and_recent_records():
+    manifest = {
+        "students": [
+            {
+                "id": "student-active",
+                "last_name": "PEREZ",
+                "first_name": "ANA",
+                "active": True,
+            },
+            {
+                "id": "student-inactive",
+                "last_name": "ROJAS",
+                "first_name": "LUIS",
+                "active": False,
+            },
+        ],
+        "courses": [
+            {
+                "id": 1,
+                "name": "Inglés",
+                "schedule": "Mañana",
+                "group": "1",
+                "start_date": "2026-01-01",
+                "capacity": 1,
+                "active": True,
+            },
+            {
+                "id": 2,
+                "name": "Cocina",
+                "schedule": "Tarde",
+                "group": "2",
+                "start_date": "2026-01-02",
+                "capacity": 10,
+                "active": False,
+            },
+        ],
+        "enrollments": [
+            {
+                "id": "enrollment-today",
+                "student_id": "student-active",
+                "course_id": 1,
+                "enrollment_date": "2026-02-03",
+                "active": True,
+            },
+            {
+                "id": "enrollment-inactive",
+                "student_id": "student-inactive",
+                "course_id": 2,
+                "enrollment_date": "2026-02-03",
+                "active": False,
+            },
+            {
+                "id": "enrollment-pending",
+                "student_id": "missing-student",
+                "course_id": 1,
+                "enrollment_date": "2026-02-02",
+                "active": True,
+            },
+        ],
+    }
+
+    summary = dashboard_summary(manifest, today="2026-02-03")
+
+    assert summary["summary_date"] == "2026-02-03"
+    assert summary["student_count"] == 2
+    assert summary["active_students"] == 1
+    assert summary["course_count"] == 2
+    assert summary["active_courses"] == 1
+    assert summary["full_courses"] == 1
+    assert summary["enrollment_count"] == 3
+    assert summary["active_enrollments"] == 1
+    assert summary["today_enrollments"] == 2
+    assert summary["pending_enrollments"] == 1
+    assert summary["course_occupancy_rows"][0]["id"] == 1
+    assert summary["course_occupancy_rows"][0]["student_count"] == 1
+    assert summary["recent_enrollments"][0]["id"] == "enrollment-inactive"
+    assert summary["recent_enrollments"][-1]["pending_student"] is True
+
+
+def test_dashboard_summary_handles_an_empty_workspace():
+    summary = dashboard_summary(None, today="2026-02-03")
+
+    assert summary["summary_date"] == "2026-02-03"
+    assert summary["student_count"] == 0
+    assert summary["course_occupancy_rows"] == []
+    assert summary["recent_enrollments"] == []

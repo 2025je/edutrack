@@ -11,6 +11,25 @@ Rectangle {
     property var theme
     property var selectedCourse: null
     property string currentView: "list"
+    property string appliedCourseSearchText: ""
+    readonly property var filteredCourses: {
+        var query = root.appliedCourseSearchText.trim().toLocaleLowerCase()
+        return root.backendObject.courses.filter(function(course) {
+            if (!query)
+                return true
+            return [
+                course.name,
+                course.schedule,
+                course.group,
+                course.start_date
+            ].join(" ").toLocaleLowerCase().indexOf(query) >= 0
+        })
+    }
+
+    function focusSearch() {
+        courseSearch.forceActiveFocus()
+    }
+
     function parseStartDate(value) {
         var dateText = String(value || "")
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText))
@@ -60,7 +79,7 @@ Rectangle {
         var groupsByDate = {}
         var groups = []
         var ungroupedCourses = []
-        var courses = root.backendObject.courses
+        var courses = root.filteredCourses
 
         courses.forEach(function(course) {
             var courseDate = root.parseStartDate(course.start_date)
@@ -123,6 +142,12 @@ Rectangle {
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Cursos"
 
+    Timer {
+        id: courseSearchTimer
+        interval: 120
+        onTriggered: root.appliedCourseSearchText = courseSearch.text
+    }
+
     ColumnLayout {
         id: coursesListView
         anchors.fill: parent
@@ -146,11 +171,22 @@ Rectangle {
             }
 
             Label {
-                text: root.backendObject.courses.length + " cursos"
+                text: root.filteredCourses.length === root.backendObject.courses.length
+                      ? root.filteredCourses.length + " cursos"
+                      : root.filteredCourses.length + " de "
+                        + root.backendObject.courses.length + " cursos"
                 color: root.theme.secondaryText
                 font.family: "Roboto"
                 font.pixelSize: 14
             }
+        }
+
+        TextField {
+            id: courseSearch
+            objectName: "courseSearchField"
+            Layout.fillWidth: true
+            placeholderText: "Buscar por curso, horario, grupo o fecha..."
+            onTextChanged: courseSearchTimer.restart()
         }
 
         Rectangle {
@@ -162,8 +198,10 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.backendObject.courses.length === 0
-            text: "No hay cursos registrados."
+            visible: root.filteredCourses.length === 0
+            text: root.backendObject.courses.length === 0
+                  ? "No hay cursos registrados."
+                  : "No se encontraron cursos con ese filtro."
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             color: root.theme.secondaryText
@@ -175,7 +213,7 @@ Rectangle {
             id: coursesFlickable
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.backendObject.courses.length > 0
+            visible: root.filteredCourses.length > 0
             clip: true
             contentWidth: width
             contentHeight: coursesContent.implicitHeight
@@ -248,7 +286,6 @@ Rectangle {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
-                                        Layout.preferredWidth: 600
                                         spacing: 4
 
                                         Label {

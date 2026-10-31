@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import "../components"
 
 Rectangle {
     id: root
@@ -10,51 +11,8 @@ Rectangle {
     property var course
     property var theme
     property string errorText: ""
-    readonly property var monthNames: [
-        "enero", "febrero", "marzo", "abril", "mayo", "junio",
-        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-    ]
     signal cancelRequested()
     signal saveSucceeded()
-
-    function dateFromIso(value) {
-        var dateText = String(value || "")
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText))
-            return null
-        var parts = dateText.split("-")
-        var parsed = new Date(
-            Number(parts[0]),
-            Number(parts[1]) - 1,
-            Number(parts[2])
-        )
-        if (parsed.getFullYear() !== Number(parts[0])
-                || parsed.getMonth() !== Number(parts[1]) - 1
-                || parsed.getDate() !== Number(parts[2]))
-            return null
-        return parsed
-    }
-
-    function isoDate(value) {
-        var month = ("0" + (value.getMonth() + 1)).slice(-2)
-        var day = ("0" + value.getDate()).slice(-2)
-        return value.getFullYear() + "-" + month + "-" + day
-    }
-
-    function changeCalendarMonth(offset) {
-        var nextMonth = new Date(
-            startDatePopup.displayedYear,
-            startDatePopup.displayedMonth + offset,
-            1
-        )
-        startDatePopup.displayedYear = nextMonth.getFullYear()
-        startDatePopup.displayedMonth = nextMonth.getMonth()
-    }
-
-    function selectStartDate(value) {
-        startDateField.text = root.isoDate(value)
-        root.errorText = ""
-        startDatePopup.close()
-    }
 
     function normalizeAmount(field) {
         var match = /^([0-9]+)(?:[.,]([0-9]{1,2}))?$/.exec(field.text.trim())
@@ -67,13 +25,35 @@ Rectangle {
         return true
     }
 
+    function saveCourse() {
+        if (!root.normalizeAmount(enrollmentFeeField)
+                || !root.normalizeAmount(monthlyFeeField)) {
+            root.errorText = "Ingresa los importes con hasta 2 decimales."
+            return
+        }
+        root.errorText = ""
+        var started = root.backendObject.saveCourseAsync(
+            root.course.id,
+            nameField.text,
+            scheduleField.text,
+            groupField.text,
+            startDateField.value,
+            enrollmentFeeField.text,
+            monthlyFeeField.text,
+            capacityField.text,
+            activeCheckBox.checked
+        )
+        if (!started)
+            root.errorText = root.backendObject.errorMessage
+    }
+
     function loadCourse() {
         if (!root.course)
             return
         nameField.text = root.course.name
         scheduleField.text = root.course.schedule
         groupField.text = root.course.group
-        startDateField.text = root.course.start_date
+        startDateField.value = root.course.start_date
         enrollmentFeeField.text = root.course.enrollment_fee
         monthlyFeeField.text = root.course.monthly_fee
         capacityField.text = String(root.course.capacity)
@@ -87,6 +67,19 @@ Rectangle {
     radius: 0
     color: theme.surface
     border.color: theme.outline
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        enabled: root.visible && !root.backendObject.courseSaveInProgress
+                 && !startDateField.popupOpen
+        onActivated: root.saveCourse()
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        enabled: root.visible && !startDateField.popupOpen
+        onActivated: root.cancelRequested()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -181,21 +174,12 @@ Rectangle {
                     color: root.theme.secondaryText
                     font.family: "Roboto"
                 }
-                RowLayout {
+                DateInput {
+                    id: startDateField
+                    objectName: "courseStartDate"
                     Layout.fillWidth: true
-
-                    TextField {
-                        id: startDateField
-                        Layout.fillWidth: true
-                        readOnly: true
-                        placeholderText: "AAAA-MM-DD"
-                        maximumLength: 10
-                    }
-
-                    Button {
-                        text: "Calendario"
-                        onClicked: startDatePopup.open()
-                    }
+                    theme: root.theme
+                    onDateSelected: root.errorText = ""
                 }
             }
 
@@ -207,14 +191,11 @@ Rectangle {
                     color: root.theme.secondaryText
                     font.family: "Roboto"
                 }
-                TextField {
+                MoneySpinBox {
                     id: enrollmentFeeField
+                    objectName: "courseEnrollmentFee"
                     Layout.fillWidth: true
-                    maximumLength: 11
-                    inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    validator: RegularExpressionValidator {
-                        regularExpression: /^[0-9]+([.,][0-9]{0,2})?$/
-                    }
+                    theme: root.theme
                     onEditingFinished: {
                         if (text.length > 0 && !root.normalizeAmount(enrollmentFeeField))
                             root.errorText = "El costo de matrícula debe tener hasta 2 decimales."
@@ -230,14 +211,11 @@ Rectangle {
                     color: root.theme.secondaryText
                     font.family: "Roboto"
                 }
-                TextField {
+                MoneySpinBox {
                     id: monthlyFeeField
+                    objectName: "courseMonthlyFee"
                     Layout.fillWidth: true
-                    maximumLength: 11
-                    inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    validator: RegularExpressionValidator {
-                        regularExpression: /^[0-9]+([.,][0-9]{0,2})?$/
-                    }
+                    theme: root.theme
                     onEditingFinished: {
                         if (text.length > 0 && !root.normalizeAmount(monthlyFeeField))
                             root.errorText = "La mensualidad debe tener hasta 2 decimales."
@@ -302,116 +280,7 @@ Rectangle {
                 text: "Guardar cambios"
                 highlighted: true
                 enabled: !root.backendObject.courseSaveInProgress
-                onClicked: {
-                    if (!root.normalizeAmount(enrollmentFeeField)
-                            || !root.normalizeAmount(monthlyFeeField)) {
-                        root.errorText = "Ingresa los importes con hasta 2 decimales."
-                        return
-                    }
-                    root.errorText = ""
-                    var started = root.backendObject.saveCourseAsync(
-                        root.course.id,
-                        nameField.text,
-                        scheduleField.text,
-                        groupField.text,
-                        startDateField.text,
-                        enrollmentFeeField.text,
-                        monthlyFeeField.text,
-                        capacityField.text,
-                        activeCheckBox.checked
-                    )
-                    if (!started)
-                        root.errorText = root.backendObject.errorMessage
-                }
-            }
-        }
-
-        Popup {
-            id: startDatePopup
-            objectName: "startDatePopup"
-            modal: true
-            focus: true
-            width: 360
-            height: 410
-            padding: 12
-            anchors.centerIn: Overlay.overlay
-            property int displayedYear: new Date().getFullYear()
-            property int displayedMonth: new Date().getMonth()
-            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-            onOpened: {
-                var selectedDate = root.dateFromIso(startDateField.text)
-                var date = selectedDate || new Date()
-                displayedYear = date.getFullYear()
-                displayedMonth = date.getMonth()
-            }
-
-            contentItem: ColumnLayout {
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Button {
-                        text: "Anterior"
-                        onClicked: root.changeCalendarMonth(-1)
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: root.monthNames[startDatePopup.displayedMonth]
-                              + " " + startDatePopup.displayedYear
-                        horizontalAlignment: Text.AlignHCenter
-                        color: root.theme.primaryText
-                        font.family: "Roboto"
-                        font.bold: true
-                    }
-
-                    Button {
-                        text: "Siguiente"
-                        onClicked: root.changeCalendarMonth(1)
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 0
-
-                    Repeater {
-                        model: ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-
-                        delegate: Label {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            text: modelData
-                            horizontalAlignment: Text.AlignHCenter
-                            color: root.theme.secondaryText
-                            font.family: "Roboto"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                    }
-                }
-
-                MonthGrid {
-                    id: startDateCalendar
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 260
-                    month: startDatePopup.displayedMonth
-                    year: startDatePopup.displayedYear
-                    locale: Qt.locale("es_PE")
-
-                    delegate: Button {
-                        required property var model
-                        implicitWidth: 40
-                        implicitHeight: 36
-                        text: String(model.day)
-                        enabled: model.month === startDateCalendar.month
-                        flat: true
-                        highlighted: root.isoDate(model.date) === startDateField.text
-                        onClicked: root.selectStartDate(model.date)
-                    }
-                }
+                onClicked: root.saveCourse()
             }
         }
 

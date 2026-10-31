@@ -49,6 +49,26 @@ class CampusCatalog:
         self.active_path = ""
         self._write()
 
+    def remove(self, path):
+        resolved = str(Path(path).expanduser().resolve())
+        if not any(record["path"] == resolved for record in self.records):
+            return False
+
+        previous_records = self.records
+        previous_active_path = self.active_path
+        self.records = [
+            record for record in self.records if record["path"] != resolved
+        ]
+        if self.active_path == resolved:
+            self.active_path = ""
+        try:
+            self._write()
+        except CampusCatalogError:
+            self.records = previous_records
+            self.active_path = previous_active_path
+            raise
+        return True
+
     def _read(self):
         if not self.path.exists():
             return

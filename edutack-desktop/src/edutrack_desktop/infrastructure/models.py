@@ -32,6 +32,15 @@ class StudentRecord(Base):
     last_name: Mapped[str] = mapped_column(String(120), nullable=False)
     first_name: Mapped[str] = mapped_column(String(120), nullable=False)
     document_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    last_name_search: Mapped[str] = mapped_column(
+        String(120, collation="NOCASE"), nullable=False, default="", server_default=""
+    )
+    first_name_search: Mapped[str] = mapped_column(
+        String(120, collation="NOCASE"), nullable=False, default="", server_default=""
+    )
+    document_number_search: Mapped[str] = mapped_column(
+        String(20, collation="NOCASE"), nullable=False, default="", server_default=""
+    )
     phone_numbers: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
@@ -94,3 +103,15 @@ class EnrollmentRecord(Base):
     record_image: Mapped[str | None] = mapped_column(String(100), nullable=True)
     record_image_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     record_image_quality: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SyncHistoryRecord(Base):
+    __tablename__ = "desktop_sync_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    operation: Mapped[str] = mapped_column(String(20), nullable=False)
+    bundle_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    affected_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False, default="")

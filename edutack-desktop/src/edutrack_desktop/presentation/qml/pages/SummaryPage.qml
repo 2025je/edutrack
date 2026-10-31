@@ -9,66 +9,60 @@ Rectangle {
     property var backendObject
     property var windowController
     property var theme
-    readonly property var students: backendObject ? backendObject.students : []
-    readonly property var courses: backendObject ? backendObject.courses : []
-    readonly property var enrollments: backendObject ? backendObject.enrollments : []
-    readonly property int activeStudents: students.filter(function(student) {
-        return student.active
-    }).length
-    readonly property int activeCourses: courses.filter(function(course) {
-        return course.active
-    }).length
-    readonly property int activeEnrollments: enrollments.filter(function(enrollment) {
-        return enrollment.active
-               && !enrollment.pending_student
-               && !enrollment.pending_course
-    }).length
-    readonly property int pendingEnrollments: enrollments.filter(function(enrollment) {
-        return enrollment.pending_student || enrollment.pending_course
-    }).length
-    readonly property int fullCourses: courses.filter(function(course) {
-        return course.capacity > 0 && course.student_count >= course.capacity
-    }).length
+    readonly property var dashboardStats: backendObject
+                                           ? backendObject.dashboardSummary : ({})
+    readonly property int fullCourses: dashboardStats.full_courses || 0
     readonly property var summaryCards: [
         {
             title: "Estudiantes",
-            value: students.length,
-            detail: activeStudents + " activos · "
-                    + (students.length - activeStudents) + " inactivos"
+            value: dashboardStats.student_count || 0,
+            detail: (dashboardStats.active_students || 0) + " activos · "
+                    + ((dashboardStats.student_count || 0)
+                       - (dashboardStats.active_students || 0)) + " inactivos"
         },
         {
-            title: "Cursos",
-            value: courses.length,
-            detail: activeCourses + " activos · " + fullCourses + " completos"
+            title: "Estudiantes activos",
+            value: dashboardStats.active_students || 0,
+            detail: "de " + (dashboardStats.student_count || 0) + " registrados"
         },
         {
-            title: "Matrículas",
-            value: enrollments.length,
-            detail: activeEnrollments + " activas · "
-                    + pendingEnrollments + " pendientes"
+            title: "Matrículas activas",
+            value: dashboardStats.active_enrollments || 0,
+            detail: "de " + (dashboardStats.enrollment_count || 0) + " registradas"
+        },
+        {
+            title: "Registradas hoy",
+            value: dashboardStats.today_enrollments || 0,
+            detail: "matrículas con fecha de hoy"
+        },
+        {
+            title: "Cursos activos",
+            value: dashboardStats.active_courses || 0,
+            detail: (dashboardStats.course_count || 0) + " en total · "
+                    + fullCourses + " completos"
+        },
+        {
+            title: "Matrículas pendientes",
+            value: dashboardStats.pending_enrollments || 0,
+            detail: "de " + (dashboardStats.enrollment_count || 0) + " registradas"
         }
     ]
-    readonly property var courseOccupancyRows: {
-        var rows = courses.slice()
-        rows.sort(function(left, right) {
-            return right.student_count - left.student_count
-        })
-        return rows.slice(0, 6)
-    }
-    readonly property var recentEnrollments: {
-        var rows = enrollments.slice()
-        rows.sort(function(left, right) {
-            return String(right.enrollment_date).localeCompare(
-                String(left.enrollment_date)
-            )
-        })
-        return rows.slice(0, 6)
-    }
+    readonly property var courseOccupancyRows:
+        dashboardStats.course_occupancy_rows || []
+    readonly property var recentEnrollments:
+        dashboardStats.recent_enrollments || []
 
     radius: 0
     color: theme.surface
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Resumen"
+
+    Timer {
+        interval: 60000
+        repeat: true
+        running: root.visible
+        onTriggered: root.backendObject.refreshDashboardSummary()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -117,7 +111,7 @@ Rectangle {
             Layout.fillWidth: true
             columns: 3
             columnSpacing: 12
-            rowSpacing: 12
+            rowSpacing: 8
 
             Repeater {
                 model: root.summaryCards
@@ -126,7 +120,7 @@ Rectangle {
                     id: summaryCard
                     required property var modelData
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 104
+                    Layout.preferredHeight: 92
                     radius: 10
                     color: root.theme.raisedSurface
                     border.color: root.theme.outline

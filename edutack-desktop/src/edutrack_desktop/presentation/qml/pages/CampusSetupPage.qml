@@ -12,6 +12,8 @@ Flickable {
     property real statusBarHeight: 38
     property alias campusName: newCampusNameInput.text
     property alias campusAddress: newCampusAddressInput.text
+    property string pendingCampusPath: ""
+    property string pendingCampusName: ""
     signal importRequested()
     signal openLocalDatabaseRequested()
     signal createDatabaseRequested()
@@ -212,6 +214,7 @@ Flickable {
             }
             GridView {
                 id: savedCampusesGrid
+                objectName: "savedCampusesGrid"
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.ceil(backendObject.campuses.length / 2) * 96
                 visible: !windowController.creatingCampus && backendObject.campuses.length > 0
@@ -219,46 +222,116 @@ Flickable {
                 cellHeight: 96
                 interactive: false
                 model: backendObject.campuses
-                delegate: Button {
+                delegate: Item {
                     id: savedCampusTile
+                    required property var modelData
+                    required property int index
                     width: savedCampusesGrid.cellWidth - 10
                     height: savedCampusesGrid.cellHeight - 8
-                    text: modelData.campus_name
-                    Material.foreground: windowController.primaryTextColor
-                    contentItem: RowLayout {
-                        spacing: 10
-                        MaterialSymbol {
-                            symbolName: "folder_open"
-                            symbolSize: 24
-                            symbolColor: windowController.accentTextColor
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: savedCampusTile.text
-                            color: windowController.primaryTextColor
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-                        MaterialSymbol {
-                            symbolName: "chevron_right"
-                            symbolSize: 20
-                            symbolColor: windowController.secondaryTextColor
-                        }
-                    }
-                    background: Rectangle {
+                    objectName: "savedCampusTile_" + index
+
+                    Rectangle {
+                        anchors.fill: parent
                         radius: 12
-                        color: savedCampusTile.down
+                        color: openCampusButton.down || removeCampusButton.down
                                ? windowController.accentSurfaceColor
-                               : savedCampusTile.hovered
+                               : openCampusButton.hovered
+                                 || removeCampusButton.hovered
                                  ? windowController.nestedSurfaceColor
                                  : windowController.surfaceColor
-                        border.color: savedCampusTile.hovered
-                                     ? windowController.accentTextColor
-                                     : windowController.borderColor
+                        border.color: openCampusButton.visualFocus
+                                      || openCampusButton.hovered
+                                      || removeCampusButton.hovered
+                                      ? windowController.accentTextColor
+                                      : windowController.borderColor
                     }
-                    onClicked: {
-                        if (backendObject.switchCampus(modelData.path))
-                            windowController.creatingCampus = false
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 2
+
+                        Button {
+                            id: openCampusButton
+                            objectName: "savedCampusOpenButton_"
+                                          + savedCampusTile.index
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            text: savedCampusTile.modelData.campus_name
+                            Material.foreground: windowController.primaryTextColor
+                            background: Item {}
+                            contentItem: RowLayout {
+                                spacing: 10
+                                MaterialSymbol {
+                                    symbolName: "folder_open"
+                                    symbolSize: 24
+                                    symbolColor: windowController.accentTextColor
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: openCampusButton.text
+                                    color: windowController.primaryTextColor
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                MaterialSymbol {
+                                    symbolName: "chevron_right"
+                                    symbolSize: 20
+                                    symbolColor: windowController.secondaryTextColor
+                                }
+                            }
+                            onClicked: {
+                                if (backendObject.switchCampus(
+                                        savedCampusTile.modelData.path
+                                    )) {
+                                    windowController.creatingCampus = false
+                                }
+                            }
+                        }
+                        ToolButton {
+                            id: removeCampusButton
+                            objectName: "savedCampusRemoveButton_"
+                                          + savedCampusTile.index
+                            Layout.preferredWidth: 36
+                            Layout.preferredHeight: 36
+                            Accessible.name: "Quitar "
+                                             + savedCampusTile.modelData.campus_name
+                                             + " de la lista"
+                            ToolTip.visible: hovered
+                            ToolTip.text: backendObject.activeDatabasePath
+                                          === savedCampusTile.modelData.path
+                                          ? "Cierra primero la sede activa"
+                                          : "Quitar de la lista"
+                            contentItem: MaterialSymbol {
+                                symbolName: "close"
+                                symbolSize: 18
+                                symbolColor: windowController.secondaryTextColor
+                            }
+                            background: Rectangle {
+                                radius: 8
+                                color: removeCampusButton.down
+                                       ? windowController.accentSurfaceColor
+                                       : removeCampusButton.hovered
+                                         ? windowController.nestedSurfaceColor
+                                         : "transparent"
+                            }
+                            onClicked: {
+                                var campusPath =
+                                        savedCampusTile.modelData.path
+                                if (backendObject.activeDatabasePath
+                                        === campusPath) {
+                                    backendObject.removeCampusFromList(
+                                        campusPath
+                                    )
+                                    return
+                                }
+                                campusSetupFlick.pendingCampusPath =
+                                        campusPath
+                                campusSetupFlick.pendingCampusName =
+                                        savedCampusTile.modelData.campus_name
+                                removeCampusDialog.open()
+                            }
+                        }
                     }
                 }
             }
@@ -309,5 +382,56 @@ Flickable {
                 flat: true
                 onClicked: windowController.creatingCampus = false
             }
+    }
+
+    Dialog {
+        id: removeCampusDialog
+        objectName: "removeCampusDialog"
+        title: "Quitar sede guardada"
+        modal: true
+        standardButtons: Dialog.NoButton
+        anchors.centerIn: parent
+        background: Rectangle {
+            radius: 0
+            color: windowController.surfaceColor
+            border.color: windowController.borderColor
+        }
+        Label {
+            text: "La sede \"%1\" se quitará de la lista. Su base SQLite y sus datos locales se conservarán."
+                  .arg(campusSetupFlick.pendingCampusName)
+            wrapMode: Text.Wrap
+            color: windowController.primaryTextColor
+        }
+        footer: RowLayout {
+            spacing: 8
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                objectName: "cancelRemoveCampusButton"
+                text: "Cancelar"
+                flat: true
+                Material.foreground: windowController.secondaryTextColor
+                onClicked: removeCampusDialog.reject()
+            }
+            Button {
+                objectName: "confirmRemoveCampusButton"
+                text: "Quitar de la lista"
+                highlighted: true
+                Material.foreground: theme.headerText
+                onClicked: removeCampusDialog.accept()
+            }
+        }
+        onAccepted: {
+            backendObject.removeCampusFromList(
+                campusSetupFlick.pendingCampusPath
+            )
+            campusSetupFlick.pendingCampusPath = ""
+            campusSetupFlick.pendingCampusName = ""
+        }
+        onRejected: {
+            campusSetupFlick.pendingCampusPath = ""
+            campusSetupFlick.pendingCampusName = ""
+        }
     }
 }

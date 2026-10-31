@@ -15,6 +15,12 @@ Rectangle {
     color: theme.surface
     border.color: theme.outline
 
+    Shortcut {
+        sequence: "Esc"
+        enabled: root.visible
+        onActivated: root.backRequested()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 24

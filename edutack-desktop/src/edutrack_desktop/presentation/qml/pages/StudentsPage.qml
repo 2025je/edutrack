@@ -19,6 +19,15 @@ Rectangle {
         currentView = "edit"
     }
 
+    function openNewStudent() {
+        backendObject.newStudent()
+        openStudentEditor(null)
+    }
+
+    function focusSearch() {
+        studentSearch.forceActiveFocus()
+    }
+
     function closeStudentEditor() {
         selectedStudent = null
         currentView = "list"
@@ -58,6 +67,13 @@ Rectangle {
                 font.family: "Roboto"
                 font.pixelSize: 14
             }
+
+            Button {
+                objectName: "newStudentButton"
+                text: "Nuevo estudiante"
+                highlighted: true
+                onClicked: studentsPage.openNewStudent()
+            }
         }
 
         TextField {
@@ -67,7 +83,7 @@ Rectangle {
             font.family: "Roboto"
             onTextChanged: {
                 windowController.studentPageIndex = 0
-                windowController.refreshStudentPage()
+                windowController.refreshStudentPage(studentSearch.text)
             }
         }
 

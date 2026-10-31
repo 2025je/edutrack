@@ -41,6 +41,7 @@ ApplicationWindow {
     property bool creatingCampus: false
     property string selectedWorkspaceSection: "Resumen"
     property bool startupComplete: false
+    property bool closeAfterCurrentOperation: false
     property int studentPageIndex: 0
     property int studentPageSize: 50
     property int matchingStudentCount: 0
@@ -50,6 +51,38 @@ ApplicationWindow {
     AppTheme {
         id: appTheme
         darkMode: appWindow.darkMode
+    }
+
+    Shortcut {
+        sequence: "Ctrl+N"
+        enabled: backend.hasWorkspace && !backend.isBusy
+                 && !appWindow.creatingCampus
+        onActivated: workspacePage.openNewStudent()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+M"
+        enabled: backend.hasWorkspace && !backend.isBusy
+                 && !appWindow.creatingCampus
+        onActivated: workspacePage.openNewEnrollment()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: backend.hasWorkspace && !appWindow.creatingCampus
+        onActivated: workspacePage.focusCurrentSearch()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+E"
+        enabled: backend.hasWorkspace && !backend.isBusy
+        onActivated: appDialogs.openExportDialog()
+    }
+
+    Shortcut {
+        sequence: "F5"
+        enabled: backend.hasWorkspace && !backend.isBusy
+        onActivated: backend.refreshWorkspace()
     }
 
     function activeCampusPath() {
@@ -75,6 +108,16 @@ ApplicationWindow {
 
         appWindow.restoringSession = true
         appWindow.darkMode = state.darkMode === true
+        var workspaceSections = [
+            "Resumen",
+            "Estudiantes",
+            "Matrículas",
+            "Cursos",
+            "Sincronización",
+            "Respaldos"
+        ]
+        if (workspaceSections.indexOf(state.selectedWorkspaceSection) >= 0)
+            appWindow.selectedWorkspaceSection = state.selectedWorkspaceSection
         if (state.window && typeof state.window === "object") {
             if (isFinite(Number(state.window.width)))
                 appWindow.width = Math.max(appWindow.minimumWidth, Number(state.window.width))
@@ -93,6 +136,7 @@ ApplicationWindow {
             appWindow.creatingCampus = state.creatingCampus === true
         }
 
+        workspacePage.ensureSectionLoaded(appWindow.selectedWorkspaceSection)
         appWindow.restoringSession = false
         appWindow.sessionTrackingEnabled = true
     }
@@ -102,6 +146,7 @@ ApplicationWindow {
             version: 1,
             campusPath: appWindow.activeCampusPath(),
             darkMode: appWindow.darkMode,
+            selectedWorkspaceSection: appWindow.selectedWorkspaceSection,
             window: {
                 x: appWindow.x,
                 y: appWindow.y,
@@ -129,8 +174,17 @@ ApplicationWindow {
             statusMessageTimer.start()
     }
 
-    function refreshStudentPage() {
-        appWindow.matchingStudentCount = backend.matchingStudentCount(workspacePage.studentSearchText)
+    function requestClose() {
+        if (backend.isBusy) {
+            appWindow.closeAfterCurrentOperation = true
+            return
+        }
+        appWindow.close()
+    }
+
+    function refreshStudentPage(searchText) {
+        var query = searchText === undefined ? workspacePage.studentSearchText : searchText
+        appWindow.matchingStudentCount = backend.matchingStudentCount(query)
         var pageCount = Math.max(
             1,
             Math.ceil(appWindow.matchingStudentCount / appWindow.studentPageSize)
@@ -140,7 +194,7 @@ ApplicationWindow {
             pageCount - 1
         )
         appWindow.visibleStudentRows = backend.studentPage(
-            workspacePage.studentSearchText,
+            query,
             appWindow.studentPageIndex,
             appWindow.studentPageSize
         )
@@ -180,6 +234,16 @@ ApplicationWindow {
         target: backend
         function onDataChanged() {
             appWindow.refreshStudentPage()
+        }
+        function onActivityStateChanged() {
+            if (appWindow.closeAfterCurrentOperation && !backend.isBusy) {
+                Qt.callLater(function() {
+                    if (appWindow.closeAfterCurrentOperation && !backend.isBusy) {
+                        appWindow.closeAfterCurrentOperation = false
+                        appWindow.close()
+                    }
+                })
+            }
         }
         function onErrorChanged() {
             appWindow.showStatusMessage(backend.errorMessage)
@@ -224,7 +288,10 @@ ApplicationWindow {
     StartupOverlay {
         anchors.fill: parent
         theme: appTheme
+        windowController: appWindow
+        closePending: appWindow.closeAfterCurrentOperation
         startupComplete: appWindow.startupComplete
+        onCloseRequested: appWindow.requestClose()
     }
 
     WindowResizeHandles {
@@ -247,7 +314,7 @@ ApplicationWindow {
             onExportRequested: appDialogs.openExportDialog()
             onMinimizeRequested: appWindow.visibility = Window.Minimized
             onMaximizeRequested: appWindow.toggleMaximized()
-            onCloseRequested: appWindow.close()
+            onCloseRequested: appWindow.requestClose()
         }
 
         Rectangle {
@@ -293,5 +360,9 @@ ApplicationWindow {
     DatabaseSavingOverlay {
         backendObject: backend
         theme: appTheme
+        windowController: appWindow
+        allowCloseRequest: true
+        closePending: appWindow.closeAfterCurrentOperation
+        onCloseRequested: appWindow.requestClose()
     }
 }

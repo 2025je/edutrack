@@ -14,13 +14,32 @@ Rectangle {
     signal saveSucceeded()
 
     function loadStudent() {
+        lastNameField.clear()
+        firstNameField.clear()
+        documentField.clear()
+        phonesField.clear()
+        root.errorText = ""
         if (!root.student)
             return
         lastNameField.text = root.student.last_name
         firstNameField.text = root.student.first_name
         documentField.text = root.student.document_number || ""
         phonesField.text = (root.student.phone_numbers || []).join(", ")
+    }
+
+    function saveStudent() {
         root.errorText = ""
+        var saved = root.backendObject.saveStudent(
+            root.student ? root.student.id : "",
+            lastNameField.text,
+            firstNameField.text,
+            documentField.text,
+            phonesField.text
+        )
+        if (saved)
+            root.saveSucceeded()
+        else
+            root.errorText = root.backendObject.errorMessage
     }
 
     onStudentChanged: loadStudent()
@@ -29,6 +48,18 @@ Rectangle {
     radius: 0
     color: theme.surface
     border.color: theme.outline
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        enabled: root.visible
+        onActivated: root.saveStudent()
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        enabled: root.visible
+        onActivated: root.cancelRequested()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -46,7 +77,7 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                text: "Editar estudiante"
+                text: root.student ? "Editar estudiante" : "Nuevo estudiante"
                 color: root.theme.primaryText
                 font.family: "Roboto"
                 font.pixelSize: 22
@@ -159,22 +190,9 @@ Rectangle {
 
             Button {
                 objectName: "studentEditorSaveButton"
-                text: "Guardar cambios"
+                text: root.student ? "Guardar cambios" : "Guardar estudiante"
                 highlighted: true
-                onClicked: {
-                    root.errorText = ""
-                    var saved = root.backendObject.saveStudent(
-                        root.student.id,
-                        lastNameField.text,
-                        firstNameField.text,
-                        documentField.text,
-                        phonesField.text
-                    )
-                    if (saved)
-                        root.saveSucceeded()
-                    else
-                        root.errorText = root.backendObject.errorMessage
-                }
+                onClicked: root.saveStudent()
             }
         }
     }
