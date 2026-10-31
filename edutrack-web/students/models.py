@@ -80,6 +80,35 @@ class Student(models.Model):
         return self.full_name
 
 
+class DesktopRecordIdentity(models.Model):
+    class RecordType(models.TextChoices):
+        STUDENT = "student", "Estudiante"
+        ENROLLMENT = "enrollment", "Matrícula"
+        COURSE = "course", "Curso"
+        PROMOTER = "promoter", "Promotor"
+
+    campus = models.ForeignKey(
+        Campus,
+        on_delete=models.CASCADE,
+        related_name="desktop_record_identities",
+    )
+    record_type = models.CharField(max_length=16, choices=RecordType.choices)
+    local_id = models.CharField(max_length=36)
+    server_id = models.PositiveBigIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campus", "record_type", "local_id"],
+                name="desktop_identity_local",
+            ),
+            models.UniqueConstraint(
+                fields=["campus", "record_type", "server_id"],
+                name="desktop_identity_server",
+            ),
+        ]
+
+
 class StudentPhone(models.Model):
     student = models.ForeignKey(
         Student, on_delete=models.CASCADE, related_name="phones", verbose_name="Estudiante"

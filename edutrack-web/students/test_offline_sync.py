@@ -15,7 +15,14 @@ from PIL import Image
 
 from core.models import Campus, User
 from core.testing import create_user, grant
-from students.models import Course, Enrollment, Ficha, Promoter, Student
+from students.models import (
+    Course,
+    DesktopRecordIdentity,
+    Enrollment,
+    Ficha,
+    Promoter,
+    Student,
+)
 from students.offline_sync import (
     OfflinePackageError,
     export_campus,
@@ -148,6 +155,22 @@ class OfflineSynchronizationTests(TestCase):
         self.assertTrue(Course.objects.filter(campus=campus, name="MATEMÁTICAS").exists())
         self.assertEqual(Student.objects.filter(campus=campus).count(), 1)
         self.assertEqual(Enrollment.objects.filter(campus=campus).count(), 1)
+        exported, attachments = export_campus(campus)
+        round_trip = self.package_from(exported, attachments)
+        self.assertEqual(exported["desktop_bundle_id"], package["bundle_id"])
+        self.assertEqual(round_trip["students"][0]["id"], package["students"][0]["id"])
+        self.assertEqual(
+            round_trip["enrollments"][0]["id"], package["enrollments"][0]["id"]
+        )
+        self.assertEqual(round_trip["courses"][0]["id"], package["courses"][0]["id"])
+        self.assertEqual(
+            {item["id"] for item in round_trip["promoters"]},
+            {item["id"] for item in package["promoters"]},
+        )
+        self.assertEqual(
+            DesktopRecordIdentity.objects.filter(campus=campus).count(),
+            3 + len(package["promoters"]),
+        )
         with self.assertRaisesMessage(OfflinePackageError, "ya fue importado"):
             import_initial_package(package, request)
         self.assertEqual(Campus.objects.filter(desktop_bundle_id=package["bundle_id"]).count(), 1)
@@ -377,6 +400,22 @@ class OfflineSynchronizationTests(TestCase):
         created_enrollment = Enrollment.objects.get(student=created_student)
         self.assertEqual(created_enrollment.course, self.course)
         self.assertEqual(created_enrollment.installments.count(), 2)
+        exported, attachments = export_campus(self.campus)
+        round_trip = self.package_from(exported, attachments)
+        self.assertEqual(
+            next(
+                item for item in round_trip["students"]
+                if item["server_id"] == created_student.pk
+            )["id"],
+            new_student_id,
+        )
+        self.assertEqual(
+            next(
+                item for item in round_trip["enrollments"]
+                if item["server_id"] == created_enrollment.pk
+            )["id"],
+            new_enrollment_id,
+        )
 
     def test_sync_creates_new_course_and_links_new_enrollment(self):
         manifest, _ = export_campus(self.campus)

@@ -15,7 +15,15 @@ from PIL import Image, UnidentifiedImageError
 
 from .duplicates import name_key
 from .installments import fee_conflicts, sync_initial_installments
-from .models import Course, Enrollment, Ficha, Promoter, Student, StudentPhone
+from .models import (
+    Course,
+    DesktopRecordIdentity,
+    Enrollment,
+    Ficha,
+    Promoter,
+    Student,
+    StudentPhone,
+)
 
 PACKAGE_FORMAT = "edutrack-offline"
 SCHEMA_VERSION = 2
@@ -51,6 +59,73 @@ ENROLLMENT_FIELDS = (
 
 class OfflinePackageError(ValueError):
     pass
+
+
+def _desktop_identity_maps(campus):
+    maps = {
+        record_type: {}
+        for record_type in DesktopRecordIdentity.RecordType.values
+    }
+    for identity in DesktopRecordIdentity.objects.filter(campus=campus):
+        maps[identity.record_type][identity.server_id] = identity.local_id
+    return maps
+
+
+def _save_desktop_identity(campus, record_type, local_id, server_id):
+    local_id = str(local_id)
+    existing = DesktopRecordIdentity.objects.filter(
+        campus=campus,
+        record_type=record_type,
+        local_id=local_id,
+    ).first()
+    if existing is not None:
+        if existing.server_id != server_id:
+            raise OfflinePackageError(
+                "La identidad local del paquete ya está vinculada a otro registro web."
+            )
+        return
+    if DesktopRecordIdentity.objects.filter(
+        campus=campus,
+        record_type=record_type,
+        server_id=server_id,
+    ).exists():
+        raise OfflinePackageError(
+            "El registro web ya está vinculado a otra identidad local de Desktop."
+        )
+    DesktopRecordIdentity.objects.create(
+        campus=campus,
+        record_type=record_type,
+        local_id=local_id,
+        server_id=server_id,
+    )
+
+
+def _package_promoter_server_ids(package, campus):
+    stored_ids = {
+        identity.local_id: identity.server_id
+        for identity in DesktopRecordIdentity.objects.filter(
+            campus=campus,
+            record_type=DesktopRecordIdentity.RecordType.PROMOTER,
+        )
+    }
+    return {
+        item["id"]: (
+            item.get("server_id")
+            or stored_ids.get(str(item["id"]))
+            or item["id"]
+        )
+        for item in package["promoters"]
+    }
+
+
+def _desktop_numeric_id(value):
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise OfflinePackageError("Un identificador local numérico no es válido.") from exc
+    if result < 1:
+        raise OfflinePackageError("Un identificador local numérico no es válido.")
+    return result
 
 
 def _object(value, label):
@@ -200,8 +275,12 @@ def _enrollment_values(enrollment, attachments=None):
 
 
 def export_campus(campus):
+    identity_maps = _desktop_identity_maps(campus)
     students = list(Student.objects.filter(campus=campus).prefetch_related("phones").order_by("pk"))
-    student_ids = {student.pk: str(uuid.uuid4()) for student in students}
+    student_ids = {
+        student.pk: identity_maps["student"].get(student.pk) or str(uuid.uuid4())
+        for student in students
+    }
     student_rows = []
     for student in students:
         values = _student_values(student)
@@ -226,11 +305,31 @@ def export_campus(campus):
         values = _enrollment_values(enrollment, attachments)
         enrollment_rows.append(
             {
-                "id": str(uuid.uuid4()),
+                "id": (
+                    identity_maps["enrollment"].get(enrollment.pk)
+                    or str(uuid.uuid4())
+                ),
                 "server_id": enrollment.pk,
                 "base_hash": enrollment_fingerprint(values),
                 "student_id": student_ids.get(enrollment.student_id),
-                **values,
+                **{
+                    **values,
+                    "course_id": (
+                        _desktop_numeric_id(
+                            identity_maps["course"].get(values["course_id"])
+                        )
+                        if values["course_id"] is not None
+                        and identity_maps["course"].get(values["course_id"])
+                        is not None
+                        else values["course_id"]
+                    ),
+                    "promoter_ids": sorted(
+                        _desktop_numeric_id(
+                            identity_maps["promoter"].get(promoter_id, promoter_id)
+                        )
+                        for promoter_id in values["promoter_ids"]
+                    ),
+                },
             }
         )
 
@@ -245,13 +344,18 @@ def export_campus(campus):
         "version": SCHEMA_VERSION,
         "bundle_id": str(uuid.uuid4()),
         "campus_id": campus.pk,
+        "desktop_bundle_id": (
+            str(campus.desktop_bundle_id) if campus.desktop_bundle_id else None
+        ),
         "campus_name": campus.name,
         "campus_address": campus.address,
         "students": student_rows,
         "enrollments": enrollment_rows,
         "courses": [
             {
-                "id": course.pk,
+                "id": _desktop_numeric_id(
+                    identity_maps["course"].get(course.pk, course.pk)
+                ),
                 "server_id": course.pk,
                 "name": course.name,
                 "schedule": course.schedule,
@@ -265,7 +369,14 @@ def export_campus(campus):
             for course in courses
         ],
         "promoters": [
-            {"id": promoter.pk, "name": promoter.name, "active": promoter.active}
+            {
+                "id": _desktop_numeric_id(
+                    identity_maps["promoter"].get(promoter.pk, promoter.pk)
+                ),
+                "server_id": promoter.pk,
+                "name": promoter.name,
+                "active": promoter.active,
+            }
             for promoter in promoters
         ],
     }
@@ -631,6 +742,7 @@ def _parse_manifest(value, attachments):
         )
     promoters = []
     promoter_ids = set()
+    promoter_server_ids = set()
     for raw in raw_promoters:
         row = _object(raw, "promoter")
         promoter_id = _positive_id(row.get("id"), "promoter.id")
@@ -639,9 +751,23 @@ def _parse_manifest(value, attachments):
         promoter_ids.add(promoter_id)
         if is_new_campus and row.get("server_id") is not None:
             raise OfflinePackageError("Un promotor de una sede nueva no puede tener ID web.")
+        server_id = (
+            None
+            if is_new_campus
+            else _positive_id(
+                row.get("server_id", promoter_id),
+                "promoter.server_id",
+                optional=True,
+            )
+        )
+        if server_id is not None and server_id in promoter_server_ids:
+            raise OfflinePackageError("El paquete repite un identificador web de promotor.")
+        if server_id is not None:
+            promoter_server_ids.add(server_id)
         promoters.append(
             {
                 "id": promoter_id,
+                "server_id": server_id,
                 "name": _string(row.get("name"), "promoter.name", 120),
                 "active": _boolean(row.get("active"), "promoter.active"),
             }
@@ -896,6 +1022,7 @@ def review_package(package, campus, resolutions=None):
             Q(campuses=campus) | Q(campuses__isnull=True)
         ).distinct()
     }
+    promoter_server_ids = _package_promoter_server_ids(package, campus)
     enrollments = {
         item.pk: item
         for item in Enrollment.objects.filter(campus=campus)
@@ -914,8 +1041,18 @@ def review_package(package, campus, resolutions=None):
     for enrollment in package["enrollments"]:
         current = enrollments.get(enrollment["server_id"])
         course = courses.get(enrollment["course_id"])
+        server_course_id = course.pk if course else enrollment["course_id"]
+        server_promoter_ids = [
+            promoter_server_ids.get(promoter_id, promoter_id)
+            for promoter_id in enrollment["promoter_ids"]
+        ]
+        fingerprint_record = {
+            **enrollment,
+            "course_id": server_course_id,
+            "promoter_ids": sorted(server_promoter_ids),
+        }
         state, message = _sync_state(
-            enrollment,
+            fingerprint_record,
             _enrollment_values(current) if current else None,
             enrollment_fingerprint,
         )
@@ -962,26 +1099,24 @@ def review_package(package, campus, resolutions=None):
                 state, message = "omitted", "Resuelve primero el conflicto del estudiante."
             elif not linked_student and not enrollment["course_id"]:
                 state, message = "error", "La matrícula necesita un estudiante o un curso."
-            elif not linked_student and enrollment["server_id"] is None:
-                state, message = "error", "Una matrícula nueva debe tener un estudiante."
             elif enrollment["course_id"] and course is None:
                 state, message = "error", "El curso ya no existe o pertenece a otra sede."
             elif enrollment["course_id"] and not course.active:
-                if not current or current.course_id != enrollment["course_id"]:
+                if not current or current.course_id != server_course_id:
                     state, message = (
                         "error",
                         "No se pueden asignar matrículas nuevas a un curso inactivo.",
                     )
-            elif any(pk not in promoters for pk in enrollment["promoter_ids"]):
+            elif any(pk not in promoters for pk in server_promoter_ids):
                 state, message = "error", "Uno o más promotores ya no pertenecen a esta sede."
             elif any(
                 not promoters[pk].active
                 and (not current or pk not in current.promoter.values_list("pk", flat=True))
-                for pk in enrollment["promoter_ids"]
+                for pk in server_promoter_ids
             ):
                 state, message = "error", "No se pueden asignar promotores inactivos."
-            elif len(enrollment["promoter_ids"]) > 1 and any(
-                promoters[pk].name in ("PARTICULAR", "NN") for pk in enrollment["promoter_ids"]
+            elif len(server_promoter_ids) > 1 and any(
+                promoters[pk].name in ("PARTICULAR", "NN") for pk in server_promoter_ids
             ):
                 state, message = "error", "PARTICULAR y NN no se combinan con otros promotores."
             elif enrollment["record_image"] and not enrollment["record_code"]:
@@ -992,7 +1127,7 @@ def review_package(package, campus, resolutions=None):
                 )
                 duplicate_pair = (
                     Enrollment.objects.filter(
-                        student_id=linked_id, course_id=enrollment["course_id"]
+                        student_id=linked_id, course_id=server_course_id
                     )
                     .exclude(pk=current.pk if current else None)
                     .exists()
@@ -1001,14 +1136,14 @@ def review_package(package, campus, resolutions=None):
                 )
                 pair_key = (
                     linked_student["id"] if linked_student else None,
-                    enrollment["course_id"],
+                    server_course_id,
                 )
                 code_key = (
                     date.fromisoformat(enrollment["enrollment_date"]),
                     enrollment["record_code"],
                 )
                 if duplicate_pair or (
-                    enrollment["course_id"]
+                    server_course_id
                     and pair_key in seen_pairs
                     and seen_pairs[pair_key] != enrollment["id"]
                 ):
@@ -1029,7 +1164,7 @@ def review_package(package, campus, resolutions=None):
                     if fee_errors:
                         state, message = "error", "; ".join(error for _, error in fee_errors)
                 if state in ("new", "update"):
-                    if enrollment["course_id"]:
+                    if server_course_id:
                         seen_pairs[pair_key] = enrollment["id"]
                     if enrollment["record_code"]:
                         seen_codes[code_key] = enrollment["id"]
@@ -1119,12 +1254,9 @@ def import_initial_package(package, request):
                 "courses": [
                     {**item, "server_id": course_map[item["id"]]} for item in package["courses"]
                 ],
-                "enrollments": [
-                    {
-                        **item,
-                        "promoter_ids": [promoter_map[pk] for pk in item["promoter_ids"]],
-                    }
-                    for item in package["enrollments"]
+                "promoters": [
+                    {**item, "server_id": promoter_map[item["id"]]}
+                    for item in package["promoters"]
                 ],
             }
             request.session["selected_campus_id"] = campus.pk
@@ -1249,6 +1381,15 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 else:
                     updated_students += 1
 
+            existing_enrollments = {
+                item.pk: item for item in Enrollment.objects.filter(campus=campus)
+            }
+            enrollment_map = {
+                enrollment["id"]: existing_enrollments.get(enrollment["server_id"])
+                for enrollment in package["enrollments"]
+                if enrollment["server_id"]
+            }
+            promoter_server_ids = _package_promoter_server_ids(package, campus)
             for enrollment in package["enrollments"]:
                 state = enrollment_states[enrollment["id"]]
                 if state not in ("new", "update"):
@@ -1271,9 +1412,21 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                 model.enrollment_fee = Decimal(enrollment["enrollment_fee"])
                 model.monthly_fee = Decimal(enrollment["monthly_fee"])
                 model.active = enrollment["active"]
-                model.full_clean()
+                model.full_clean(
+                    exclude=(
+                        ["enrollment_fee", "monthly_fee"]
+                        if model.course_id is None
+                        else None
+                    )
+                )
                 model.save()
-                model.promoter.set(enrollment["promoter_ids"])
+                model.promoter.set(
+                    [
+                        promoter_server_ids.get(promoter_id, promoter_id)
+                        for promoter_id in enrollment["promoter_ids"]
+                    ]
+                )
+                enrollment_map[enrollment["id"]] = model
                 if enrollment["record_code"]:
                     ficha = Ficha.objects.filter(enrollment=model).first()
                     old_image_name = ficha.image.name if ficha and ficha.image else ""
@@ -1345,6 +1498,49 @@ def import_package(package, campus, request, resolutions=None, allowed_changes=N
                     created_enrollments += 1
                 else:
                     updated_enrollments += 1
+
+            for item in package["courses"]:
+                model = course_map.get(item["id"])
+                if model is not None and model.pk is not None:
+                    _save_desktop_identity(
+                        campus,
+                        DesktopRecordIdentity.RecordType.COURSE,
+                        item["id"],
+                        model.pk,
+                    )
+            for item in package["students"]:
+                model = student_map.get(item["id"])
+                if model is not None:
+                    _save_desktop_identity(
+                        campus,
+                        DesktopRecordIdentity.RecordType.STUDENT,
+                        item["id"],
+                        model.pk,
+                    )
+            for item in package["enrollments"]:
+                model = enrollment_map.get(item["id"])
+                if model is not None:
+                    _save_desktop_identity(
+                        campus,
+                        DesktopRecordIdentity.RecordType.ENROLLMENT,
+                        item["id"],
+                        model.pk,
+                    )
+            available_promoters = {
+                promoter.pk: promoter
+                for promoter in Promoter.objects.filter(
+                    Q(campuses=campus) | Q(campuses__isnull=True)
+                ).distinct()
+            }
+            for item in package["promoters"]:
+                server_id = promoter_server_ids.get(item["id"])
+                if server_id in available_promoters:
+                    _save_desktop_identity(
+                        campus,
+                        DesktopRecordIdentity.RecordType.PROMOTER,
+                        item["id"],
+                        server_id,
+                    )
     except (IntegrityError, ValidationError, Course.DoesNotExist) as exc:
         raise OfflinePackageError(
             "No se guardaron cambios porque los datos dejaron de ser válidos. "
