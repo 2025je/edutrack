@@ -17,6 +17,10 @@ NOUNS = {
     "students.promoter": ("promotor", "promotores"),
     "students.enrollment": ("matrícula", "matrículas"),
     "students.ficha": ("ficha", "fichas"),
+    "students.desktoprecordidentity": (
+        "vínculo de identidad local de Desktop",
+        "vínculos de identidad local de Desktop",
+    ),
     "payments.payment": ("pago", "pagos"),
     "payments.cashclosing": ("cierre de caja", "cierres de caja"),
     "payments.installment": ("cuota", "cuotas"),
