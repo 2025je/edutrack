@@ -4,13 +4,21 @@ import uuid
 from copy import deepcopy
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, QUrl, Qt
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QCoreApplication,
+    QEventLoop,
+    QTimer,
+    QUrl,
+    Qt,
+)
 from PySide6.QtGui import QImage
 
 from edutrack_desktop.infrastructure.app_settings import DesktopSettings
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.transfer import read_package
 from edutrack_desktop.presentation.backend import DesktopBackend
+from edutrack_desktop.presentation.list_models import EnrollmentListModel
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -297,6 +305,105 @@ def test_student_pages_filter_and_refresh_after_saving(tmp_path):
     backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
     assert backend.matchingStudentCount("") == 4
     assert not backend.studentPage("", 0, 101)
+
+
+def test_student_list_model_filters_and_refreshes_after_saving(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.saveStudent("", "ROJAS", "LUIS", "11111111", "987654321")
+    backend.saveStudent("", "PEREZ", "ANA", "22222222", "912345678")
+    backend.saveStudent("", "GOMEZ", "MARIO", "33333333", "923456789")
+
+    model = backend.studentListModel
+    assert isinstance(model, QAbstractListModel)
+    model.activate()
+    role_ids = {
+        role_name.data().decode(): role_id
+        for role_id, role_name in model.roleNames().items()
+    }
+
+    assert model.totalCount == 3
+    assert model.matchingCount == 3
+    assert model.rowCount() == 3
+    assert model.data(model.index(0, 0), role_ids["label"]) == "GOMEZ MARIO"
+
+    model.setQuery("2222")
+    assert model.matchingCount == 1
+    assert model.rowCount() == 1
+    assert model.data(model.index(0, 0), role_ids["studentId"])
+    assert model.rowAt(0)["label"] == "PEREZ ANA"
+
+    backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
+    assert model.totalCount == 4
+    assert model.matchingCount == 1
+
+
+def test_enrollment_list_model_filters_status_and_pages_rows():
+    rows = [
+        {
+            "id": "active",
+            "student_label": "PEREZ ANA",
+            "course_label": "English · Morning · Group 1",
+            "enrollment_date": "2026-01-04",
+            "active": True,
+            "pending_student": False,
+            "pending_course": False,
+            "course_id": 10,
+        },
+        {
+            "id": "inactive",
+            "student_label": "PEREZ LUIS",
+            "course_label": "English · Morning · Group 1",
+            "enrollment_date": "2026-01-03",
+            "active": False,
+            "pending_student": False,
+            "pending_course": False,
+            "course_id": 10,
+        },
+        {
+            "id": "pending-student",
+            "student_label": "Pendiente de estudiante",
+            "course_label": "English · Morning · Group 1",
+            "enrollment_date": "2026-01-02",
+            "active": True,
+            "pending_student": True,
+            "pending_course": False,
+            "course_id": 10,
+        },
+        {
+            "id": "pending-course",
+            "student_label": "GOMEZ MARIO",
+            "course_label": "Pendiente de curso",
+            "enrollment_date": "2026-01-01",
+            "active": True,
+            "pending_student": False,
+            "pending_course": True,
+            "course_id": None,
+        },
+    ]
+    model = EnrollmentListModel(lambda: rows, page_size=2)
+    model.activate()
+
+    assert isinstance(model, QAbstractListModel)
+    assert model.totalCount == 4
+    assert model.matchingCount == 4
+    assert model.rowCount() == 2
+    assert model.pageCount == 2
+    model.setPageIndex(1)
+    assert model.rowAt(0)["id"] == "pending-student"
+    assert model.rowAt(1)["id"] == "pending-course"
+
+    model.setFilters("perez", 1, 10)
+    assert model.pageIndex == 0
+    assert model.matchingCount == 1
+    assert model.rowAt(0)["id"] == "active"
+
+    model.setFilters("", 2, 10)
+    assert model.rowAt(0)["id"] == "inactive"
+    model.setFilters("", 3, 0)
+    assert model.rowAt(0)["id"] == "pending-student"
+    model.setFilters("", 4, 0)
+    assert model.rowAt(0)["id"] == "pending-course"
 
 
 def test_dashboard_summary_cache_updates_and_workspace_refresh_reloads(tmp_path):

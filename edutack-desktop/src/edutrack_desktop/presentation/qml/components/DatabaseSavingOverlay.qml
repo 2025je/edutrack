@@ -8,13 +8,9 @@ Popup {
     objectName: "databaseSavingOverlay"
     property var backendObject
     property var theme
-    property var windowController
     property bool forceVisible: false
     property bool watchBackendActivity: true
     property string forcedMessage: ""
-    property bool allowCloseRequest: false
-    property bool closePending: false
-    signal closeRequested()
     readonly property bool overlayActive: root.forceVisible
                                           || (root.watchBackendActivity
                                               && root.backendObject
@@ -36,18 +32,6 @@ Popup {
     background: Item {}
 
     contentItem: Item {
-        WindowCloseButton {
-            objectName: "windowCloseDuringSaveButton"
-            visible: root.allowCloseRequest
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.topMargin: 48
-            anchors.rightMargin: 42
-            windowController: root.windowController
-            theme: root.theme
-            onCloseRequested: root.closeRequested()
-        }
-
         Rectangle {
             width: 400
             height: 124
@@ -70,13 +54,11 @@ Popup {
 
                 Label {
                     Layout.fillWidth: true
-                    text: root.closePending
-                          ? "La aplicación se cerrará al finalizar la operación."
-                          : root.forceVisible
-                            ? root.forcedMessage
-                            : root.backendObject
-                              ? root.backendObject.activityMessage
-                              : ""
+                    text: root.forceVisible
+                          ? root.forcedMessage
+                          : root.backendObject
+                            ? root.backendObject.activityMessage
+                            : ""
                     color: root.theme.primaryText
                     font.family: "Roboto"
                     font.pixelSize: 16

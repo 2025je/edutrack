@@ -10,21 +10,17 @@ Rectangle {
     property var backendObject
     property var windowController
     property var theme
-    property int pageSize: 50
-    property int pageIndex: 0
     property string currentView: "list"
     property var editingEnrollment: null
     property var pendingEnrollment: null
     property bool editorLoading: false
-    property var appliedFilters: ({
-        searchQuery: "",
-        statusFilterIndex: 0,
-        courseFilterId: 0
-    })
     property bool filtersUpdating: false
     property bool resettingFilters: false
-    readonly property var allEnrollmentRows: backendObject.enrollments
-    readonly property int totalEnrollments: allEnrollmentRows.length
+    readonly property var enrollmentModel: backendObject.enrollmentListModel
+    readonly property int totalEnrollments: enrollmentModel.totalCount
+    readonly property int filteredEnrollmentCount: enrollmentModel.matchingCount
+    readonly property int pageIndex: enrollmentModel.pageIndex
+    readonly property int pageCount: enrollmentModel.pageCount
     readonly property var courseFilterOptions: [{
         id: 0,
         label: "Todos los cursos"
@@ -34,52 +30,12 @@ Rectangle {
             label: course.label
         }
     }))
-    readonly property var filteredEnrollmentRows: {
-        var filters = root.appliedFilters
-        var query = filters.searchQuery
-        return root.allEnrollmentRows.filter(function(enrollment) {
-            if (query) {
-                var searchableText = [
-                    enrollment.student_label,
-                    enrollment.course_label,
-                    enrollment.enrollment_date
-                ].join(" ").toLowerCase()
-                if (searchableText.indexOf(query) < 0)
-                    return false
-            }
-
-            if (filters.courseFilterId
-                    && enrollment.course_id !== filters.courseFilterId)
-                return false
-
-            if (filters.statusFilterIndex === 1)
-                return enrollment.active
-                       && !enrollment.pending_student
-                       && !enrollment.pending_course
-            if (filters.statusFilterIndex === 2)
-                return !enrollment.active
-            if (filters.statusFilterIndex === 3)
-                return enrollment.pending_student
-            if (filters.statusFilterIndex === 4)
-                return enrollment.pending_course
-            return true
-        })
-    }
-    readonly property int filteredEnrollmentCount: filteredEnrollmentRows.length
-    readonly property int pageCount: Math.max(
-        1,
-        Math.ceil(filteredEnrollmentCount / pageSize)
-    )
-    readonly property var visibleEnrollmentRows: filteredEnrollmentRows.slice(
-        pageIndex * pageSize,
-        (pageIndex + 1) * pageSize
-    )
 
     radius: 0
     color: theme.surface
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Matrículas"
-    onPageCountChanged: pageIndex = Math.min(pageIndex, pageCount - 1)
+    Component.onCompleted: enrollmentModel.activate()
     onCurrentViewChanged: {
         if (currentView !== "editor")
             enrollmentEditorLoader.source = ""
@@ -128,12 +84,11 @@ Rectangle {
         id: filterApplyTimer
         interval: 80
         onTriggered: {
-            root.appliedFilters = {
-                searchQuery: enrollmentSearch.text.trim().toLowerCase(),
-                statusFilterIndex: statusFilter.currentIndex,
-                courseFilterId: root.courseFilterOptions[courseFilter.currentIndex].id
-            }
-            root.pageIndex = 0
+            root.enrollmentModel.setFilters(
+                enrollmentSearch.text,
+                statusFilter.currentIndex,
+                root.courseFilterOptions[courseFilter.currentIndex].id
+            )
             filterUpdateFinishTimer.start()
         }
     }
@@ -294,12 +249,13 @@ Rectangle {
 
         ListView {
             id: enrollmentList
+            objectName: "enrollmentList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.filteredEnrollmentCount > 0
             clip: true
             spacing: 8
-            model: root.visibleEnrollmentRows
+            model: root.enrollmentModel
 
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AlwaysOn
@@ -307,7 +263,16 @@ Rectangle {
             }
 
             delegate: Rectangle {
-                required property var modelData
+                id: enrollmentRow
+                objectName: "enrollmentRow_" + enrollmentId
+                required property int index
+                required property string enrollmentId
+                required property string studentLabel
+                required property string courseLabel
+                required property string enrollmentDate
+                required property bool pendingStudent
+                required property bool pendingCourse
+                required property bool active
                 width: enrollmentList.width
                 height: 88
                 radius: 10
@@ -327,7 +292,7 @@ Rectangle {
 
                         Label {
                             Layout.fillWidth: true
-                            text: modelData.student_label
+                            text: studentLabel
                             color: root.theme.primaryText
                             font.family: "Roboto"
                             font.pixelSize: 15
@@ -337,7 +302,7 @@ Rectangle {
 
                         Label {
                             Layout.fillWidth: true
-                            text: modelData.course_label
+                            text: courseLabel
                             color: root.theme.secondaryText
                             font.family: "Roboto"
                             font.pixelSize: 13
@@ -349,7 +314,7 @@ Rectangle {
                         Layout.preferredWidth: 176
                         Layout.minimumWidth: 176
                         Layout.maximumWidth: 176
-                        text: "Fecha: " + modelData.enrollment_date
+                        text: "Fecha: " + enrollmentDate
                         color: root.theme.secondaryText
                         font.family: "Roboto"
                         font.pixelSize: 12
@@ -363,28 +328,28 @@ Rectangle {
                         Layout.minimumWidth: 150
                         Layout.preferredHeight: 30
                         radius: 8
-                        color: modelData.pending_student || modelData.pending_course
+                        color: pendingStudent || pendingCourse
                                ? root.theme.errorSurface
-                               : modelData.active
+                               : active
                                  ? root.theme.successSurface
                                  : root.theme.raisedSurface
-                        border.color: modelData.pending_student || modelData.pending_course
+                        border.color: pendingStudent || pendingCourse
                                       ? root.theme.error
-                                      : modelData.active
+                                      : active
                                         ? root.theme.success
                                         : root.theme.outline
 
                         Label {
                             anchors.fill: parent
                             anchors.margins: 6
-                            text: modelData.pending_student
+                            text: pendingStudent
                                   ? "Pendiente de estudiante"
-                                  : modelData.pending_course
+                                  : pendingCourse
                                     ? "Pendiente de curso"
-                                    : modelData.active ? "Activa" : "Inactiva"
-                            color: modelData.pending_student || modelData.pending_course
+                                    : active ? "Activa" : "Inactiva"
+                            color: pendingStudent || pendingCourse
                                    ? root.theme.error
-                                   : modelData.active
+                                   : active
                                      ? root.theme.success
                                      : root.theme.secondaryText
                             font.family: "Roboto"
@@ -400,7 +365,9 @@ Rectangle {
                         text: "Editar"
                         font.family: "Roboto"
                         enabled: !root.backendObject.isBusy
-                        onClicked: root.openEnrollmentEditor(modelData)
+                        onClicked: root.openEnrollmentEditor(
+                            root.enrollmentModel.rowAt(enrollmentRow.index)
+                        )
                     }
                 }
             }
@@ -418,7 +385,7 @@ Rectangle {
                 text: "Anterior"
                 enabled: root.pageIndex > 0
                 font.family: "Roboto"
-                onClicked: root.pageIndex -= 1
+                onClicked: root.enrollmentModel.setPageIndex(root.pageIndex - 1)
             }
 
             Label {
@@ -432,7 +399,7 @@ Rectangle {
                 text: "Siguiente"
                 enabled: root.pageIndex + 1 < root.pageCount
                 font.family: "Roboto"
-                onClicked: root.pageIndex += 1
+                onClicked: root.enrollmentModel.setPageIndex(root.pageIndex + 1)
             }
 
             Item {

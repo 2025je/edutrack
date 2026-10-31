@@ -39,6 +39,7 @@ Rectangle {
     radius: 0
     color: windowController.surfaceColor
     border.color: windowController.borderColor
+    Component.onCompleted: backendObject.studentListModel.activate()
 
     ColumnLayout {
         anchors.fill: parent
@@ -62,7 +63,8 @@ Rectangle {
             }
 
             Label {
-                text: windowController.matchingStudentCount + " estudiantes"
+                text: studentsPage.backendObject.studentListModel.matchingCount
+                      + " estudiantes"
                 color: windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 14
@@ -82,8 +84,9 @@ Rectangle {
             placeholderText: "Buscar por nombre, documento o curso..."
             font.family: "Roboto"
             onTextChanged: {
-                windowController.studentPageIndex = 0
-                windowController.refreshStudentPage(studentSearch.text)
+                studentsPage.backendObject.studentListModel.setQuery(
+                    studentSearch.text
+                )
             }
         }
 
@@ -129,8 +132,8 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: windowController.visibleStudentRows.length === 0
-            text: windowController.matchingStudentCount === 0
+            visible: studentsPage.backendObject.studentListModel.matchingCount === 0
+            text: studentsPage.backendObject.studentListModel.totalCount === 0
                   && studentSearch.text.trim().length === 0
                   ? "No hay estudiantes registrados."
                   : "No se encontraron estudiantes con ese filtro."
@@ -143,19 +146,26 @@ Rectangle {
 
         ListView {
             id: studentsList
+            objectName: "studentsList"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: windowController.visibleStudentRows.length > 0
+            visible: studentsPage.backendObject.studentListModel.matchingCount > 0
             clip: true
             spacing: 8
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AlwaysOn
                 active: true
             }
-            model: windowController.visibleStudentRows
+            model: studentsPage.backendObject.studentListModel
 
             delegate: Rectangle {
-                required property var modelData
+                id: studentRow
+                objectName: "studentRow_" + studentId
+                required property int index
+                required property string studentId
+                required property string label
+                required property var courses
+                required property bool active
                 width: studentsList.width
                 height: 72
                 radius: 10
@@ -171,7 +181,7 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        text: modelData.label
+                        text: label
                         color: windowController.primaryTextColor
                         font.family: "Roboto"
                         font.pixelSize: 15
@@ -183,7 +193,7 @@ Rectangle {
                         Layout.preferredWidth: 220
                         Layout.minimumWidth: 220
                         Layout.maximumWidth: 220
-                        text: (modelData.courses || []).join(", ")
+                        text: (courses || []).join(", ")
                         color: windowController.secondaryTextColor
                         font.family: "Roboto"
                         font.pixelSize: 13
@@ -201,11 +211,11 @@ Rectangle {
                         }
 
                         StudentStatusButton {
-                            active: modelData.active
+                            active: studentRow.active
                             theme: studentsPage.theme
                             onStateChangeRequested: function(isActive) {
                                 studentsPage.backendObject.setStudentActive(
-                                    modelData.id,
+                                    studentId,
                                     isActive
                                 )
                             }
@@ -213,13 +223,18 @@ Rectangle {
 
                         Button {
                             id: editStudentButton
+                            objectName: "editStudentButton"
                             Layout.preferredWidth: 96
                             Layout.minimumWidth: 96
                             Layout.maximumWidth: 96
                             text: "Editar"
                             font.family: "Roboto"
                             font.pixelSize: 12
-                            onClicked: studentsPage.openStudentEditor(modelData)
+                            onClicked: studentsPage.openStudentEditor(
+                                studentsPage.backendObject.studentListModel.rowAt(
+                                    studentRow.index
+                                )
+                            )
                         }
 
                     }
@@ -230,8 +245,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: windowController.matchingStudentCount
-                     > windowController.studentPageSize
+            visible: studentsPage.backendObject.studentListModel.pageCount > 1
 
             Item {
                 Layout.fillWidth: true
@@ -239,21 +253,18 @@ Rectangle {
 
             Button {
                 text: "Anterior"
-                enabled: windowController.studentPageIndex > 0
+                enabled: studentsPage.backendObject.studentListModel.pageIndex > 0
                 font.family: "Roboto"
-                onClicked: {
-                    windowController.studentPageIndex -= 1
-                    windowController.refreshStudentPage()
-                }
+                onClicked: studentsPage.backendObject.studentListModel.setPageIndex(
+                               studentsPage.backendObject.studentListModel.pageIndex - 1
+                           )
             }
 
             Label {
-                text: "Página " + (windowController.studentPageIndex + 1)
+                text: "Página "
+                      + (studentsPage.backendObject.studentListModel.pageIndex + 1)
                       + " de "
-                      + Math.ceil(
-                            windowController.matchingStudentCount
-                            / windowController.studentPageSize
-                        )
+                      + studentsPage.backendObject.studentListModel.pageCount
                 color: windowController.secondaryTextColor
                 font.family: "Roboto"
                 font.pixelSize: 13
@@ -261,14 +272,12 @@ Rectangle {
 
             Button {
                 text: "Siguiente"
-                enabled: (windowController.studentPageIndex + 1)
-                         * windowController.studentPageSize
-                         < windowController.matchingStudentCount
+                enabled: studentsPage.backendObject.studentListModel.pageIndex + 1
+                         < studentsPage.backendObject.studentListModel.pageCount
                 font.family: "Roboto"
-                onClicked: {
-                    windowController.studentPageIndex += 1
-                    windowController.refreshStudentPage()
-                }
+                onClicked: studentsPage.backendObject.studentListModel.setPageIndex(
+                               studentsPage.backendObject.studentListModel.pageIndex + 1
+                           )
             }
 
             Item {

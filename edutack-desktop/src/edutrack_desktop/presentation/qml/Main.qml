@@ -2,19 +2,25 @@ import QtQuick
 import QtQuick.Controls.Material
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import "components"
 import "pages"
 import "dialogs"
 
 ApplicationWindow {
     id: appWindow
-    width: 1280
-    height: 740
+    width: 980
+    height: 620
     minimumWidth: 980
     minimumHeight: 620
     visible: false
     title: "EduTrack Desktop"
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window
+           | Qt.WindowTitleHint
+           | Qt.WindowSystemMenuHint
+           | Qt.WindowMinimizeButtonHint
+           | Qt.WindowMaximizeButtonHint
+           | Qt.WindowCloseButtonHint
     property bool darkMode: false
     readonly property color pageBackgroundColor: appTheme.background
     readonly property color surfaceColor: appTheme.surface
@@ -38,14 +44,11 @@ ApplicationWindow {
     property bool sessionTrackingEnabled: false
     property string sessionSnapshot: sessionTrackingEnabled
                                          ? JSON.stringify(collectSessionState()) : ""
+    property var initialSessionState: ({})
     property bool creatingCampus: false
     property string selectedWorkspaceSection: "Resumen"
     property bool startupComplete: false
     property bool closeAfterCurrentOperation: false
-    property int studentPageIndex: 0
-    property int studentPageSize: 50
-    property int matchingStudentCount: 0
-    property var visibleStudentRows: []
     property string statusMessageText: ""
 
     AppTheme {
@@ -91,7 +94,7 @@ ApplicationWindow {
         return index >= 0 && index < campuses.length ? campuses[index].path : ""
     }
 
-    function restoreSessionState() {
+    function loadSessionState() {
         var serialized = sessionStore.loadState()
         var state = {}
         if (serialized) {
@@ -105,7 +108,39 @@ ApplicationWindow {
         }
         if (!state || state.version !== 1)
             state = {}
+        return state
+    }
 
+    function initializeWindowGeometry(state) {
+        var savedWindow = state.window || {}
+        var hasSavedGeometry =
+                typeof savedWindow.x === "number" && isFinite(savedWindow.x)
+                && typeof savedWindow.y === "number" && isFinite(savedWindow.y)
+                && typeof savedWindow.width === "number"
+                && isFinite(savedWindow.width)
+                && savedWindow.width >= appWindow.minimumWidth
+                && typeof savedWindow.height === "number"
+                && isFinite(savedWindow.height)
+                && savedWindow.height >= appWindow.minimumHeight
+        if (hasSavedGeometry) {
+            appWindow.width = Math.round(savedWindow.width)
+            appWindow.height = Math.round(savedWindow.height)
+            appWindow.x = Math.round(savedWindow.x)
+            appWindow.y = Math.round(savedWindow.y)
+            return
+        }
+
+        appWindow.width = appWindow.minimumWidth
+        appWindow.height = appWindow.minimumHeight
+        appWindow.x = Math.round(
+            Screen.virtualX + Math.max(0, (Screen.width - appWindow.width) / 2)
+        )
+        appWindow.y = Math.round(
+            Screen.virtualY + Math.max(0, (Screen.height - appWindow.height) / 2)
+        )
+    }
+
+    function restoreSessionState(state) {
         appWindow.restoringSession = true
         appWindow.darkMode = state.darkMode === true
         var workspaceSections = [
@@ -118,17 +153,6 @@ ApplicationWindow {
         ]
         if (workspaceSections.indexOf(state.selectedWorkspaceSection) >= 0)
             appWindow.selectedWorkspaceSection = state.selectedWorkspaceSection
-        if (state.window && typeof state.window === "object") {
-            if (isFinite(Number(state.window.width)))
-                appWindow.width = Math.max(appWindow.minimumWidth, Number(state.window.width))
-            if (isFinite(Number(state.window.height)))
-                appWindow.height = Math.max(appWindow.minimumHeight, Number(state.window.height))
-            if (isFinite(Number(state.window.x)))
-                appWindow.x = Number(state.window.x)
-            if (isFinite(Number(state.window.y)))
-                appWindow.y = Number(state.window.y)
-        }
-
         if (state.campusPath === appWindow.activeCampusPath()) {
             var campusForm = state.campusForm || {}
             campusSetupPage.campusName = campusForm.name || ""
@@ -147,13 +171,13 @@ ApplicationWindow {
             campusPath: appWindow.activeCampusPath(),
             darkMode: appWindow.darkMode,
             selectedWorkspaceSection: appWindow.selectedWorkspaceSection,
+            creatingCampus: appWindow.creatingCampus,
             window: {
                 x: appWindow.x,
                 y: appWindow.y,
                 width: appWindow.width,
                 height: appWindow.height
             },
-            creatingCampus: appWindow.creatingCampus,
             campusForm: {
                 name: campusSetupPage.campusName,
                 address: campusSetupPage.campusAddress
@@ -174,57 +198,20 @@ ApplicationWindow {
             statusMessageTimer.start()
     }
 
-    function requestClose() {
-        if (backend.isBusy) {
-            appWindow.closeAfterCurrentOperation = true
-            return
-        }
-        appWindow.close()
-    }
-
-    function refreshStudentPage(searchText) {
-        var query = searchText === undefined ? workspacePage.studentSearchText : searchText
-        appWindow.matchingStudentCount = backend.matchingStudentCount(query)
-        var pageCount = Math.max(
-            1,
-            Math.ceil(appWindow.matchingStudentCount / appWindow.studentPageSize)
-        )
-        appWindow.studentPageIndex = Math.min(
-            appWindow.studentPageIndex,
-            pageCount - 1
-        )
-        appWindow.visibleStudentRows = backend.studentPage(
-            query,
-            appWindow.studentPageIndex,
-            appWindow.studentPageSize
-        )
-    }
-
-    function centerWindowOnScreen() {
-        appWindow.x = Math.round(
-            Screen.virtualX + (Screen.width - appWindow.width) / 2
-        )
-        appWindow.y = Math.round(
-            Screen.virtualY + (Screen.height - appWindow.height) / 2
-        )
-    }
-
-    function toggleMaximized() {
-        if (appWindow.visibility === Window.Maximized) {
-            appWindow.visibility = Window.Windowed
-            Qt.callLater(function() { appWindow.centerWindowOnScreen() })
-            return
-        }
-
-        appWindow.centerWindowOnScreen()
-        appWindow.visibility = Window.Maximized
-    }
-
     Component.onCompleted: {
+        appWindow.initialSessionState = appWindow.loadSessionState()
+        appWindow.initializeWindowGeometry(appWindow.initialSessionState)
         appWindow.showStatusMessage(backend.errorMessage)
         startupTimer.start()
     }
-    onClosing: appWindow.persistSessionState()
+    onClosing: function(closeEvent) {
+        if (backend.isBusy) {
+            closeEvent.accepted = false
+            appWindow.closeAfterCurrentOperation = true
+            return
+        }
+        appWindow.persistSessionState()
+    }
     onSessionSnapshotChanged: {
         if (appWindow.sessionTrackingEnabled && !appWindow.restoringSession)
             sessionSaveTimer.restart()
@@ -232,9 +219,6 @@ ApplicationWindow {
 
     Connections {
         target: backend
-        function onDataChanged() {
-            appWindow.refreshStudentPage()
-        }
         function onActivityStateChanged() {
             if (appWindow.closeAfterCurrentOperation && !backend.isBusy) {
                 Qt.callLater(function() {
@@ -270,8 +254,7 @@ ApplicationWindow {
         interval: 150
         repeat: false
         onTriggered: {
-            appWindow.restoreSessionState()
-            appWindow.refreshStudentPage()
+            appWindow.restoreSessionState(appWindow.initialSessionState)
             appWindow.startupComplete = true
         }
     }
@@ -288,15 +271,7 @@ ApplicationWindow {
     StartupOverlay {
         anchors.fill: parent
         theme: appTheme
-        windowController: appWindow
-        closePending: appWindow.closeAfterCurrentOperation
         startupComplete: appWindow.startupComplete
-        onCloseRequested: appWindow.requestClose()
-    }
-
-    WindowResizeHandles {
-        anchors.fill: parent
-        windowController: appWindow
     }
 
     ColumnLayout {
@@ -304,7 +279,7 @@ ApplicationWindow {
         anchors.margins: 22
         spacing: 16
 
-        WindowTitleBar {
+        WorkspaceHeader {
             Layout.fillWidth: true
             windowController: appWindow
             backendObject: backend
@@ -312,9 +287,6 @@ ApplicationWindow {
             onCloseCampusRequested: appDialogs.openCloseCampusDialog()
             onDarkModeToggleRequested: appWindow.darkMode = !appWindow.darkMode
             onExportRequested: appDialogs.openExportDialog()
-            onMinimizeRequested: appWindow.visibility = Window.Minimized
-            onMaximizeRequested: appWindow.toggleMaximized()
-            onCloseRequested: appWindow.requestClose()
         }
 
         Rectangle {
@@ -360,9 +332,5 @@ ApplicationWindow {
     DatabaseSavingOverlay {
         backendObject: backend
         theme: appTheme
-        windowController: appWindow
-        allowCloseRequest: true
-        closePending: appWindow.closeAfterCurrentOperation
-        onCloseRequested: appWindow.requestClose()
     }
 }

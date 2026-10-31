@@ -45,9 +45,7 @@ Item {
         fileMode: FileDialog.SaveFile
         acceptLabel: "Guardar"
         rejectLabel: "Cancelar"
-        currentFile: root.pendingDatabaseAction === "create"
-                     ? root.backendObject.suggestedDatabaseFileName(root.campusPage.campusName)
-                     : "edutrack-sede-importada.sqlite3"
+        defaultSuffix: "sqlite3"
         nameFilters: ["Base de datos SQLite (*.sqlite3)"]
         onAccepted: {
             var databasePath = selectedFile.toString()
@@ -134,10 +132,13 @@ Item {
 
     Dialog {
         id: closeCampusDialog
+        objectName: "closeCampusDialog"
         title: "Cerrar sede activa"
         modal: true
         standardButtons: Dialog.NoButton
         anchors.centerIn: parent
+        onAboutToShow: modal = true
+        onAboutToHide: modal = false
         background: Rectangle {
             radius: 0
             color: root.windowController.surfaceColor
@@ -153,16 +154,21 @@ Item {
                 Layout.fillWidth: true
             }
             Button {
+                objectName: "cancelCloseCampusButton"
                 text: "No"
                 flat: true
                 Material.foreground: root.windowController.secondaryTextColor
                 onClicked: closeCampusDialog.reject()
             }
             Button {
+                objectName: "confirmCloseCampusButton"
                 text: "Sí"
                 highlighted: true
                 Material.foreground: root.theme.headerText
-                onClicked: closeCampusDialog.accept()
+                onClicked: {
+                    closeCampusDialog.modal = false
+                    closeCampusDialog.accept()
+                }
             }
         }
         onAccepted: {
@@ -190,9 +196,7 @@ Item {
         fileMode: FileDialog.SaveFile
         acceptLabel: "Guardar"
         rejectLabel: "Cancelar"
-        currentFile: root.backendObject.isNewCampus
-                     ? "edutrack-sede-inicial.edutrack"
-                     : "edutrack-sincronizacion.edutrack"
+        defaultSuffix: "edutrack"
         nameFilters: ["EduTrack (*.edutrack)"]
         onAccepted: root.backendObject.exportPackageAsync(selectedFile.toString())
     }

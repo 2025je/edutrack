@@ -32,7 +32,7 @@ Rectangle {
         fileMode: FileDialog.SaveFile
         acceptLabel: "Guardar"
         rejectLabel: "Cancelar"
-        currentFile: "edutrack-sincronizacion.edutrack"
+        defaultSuffix: "edutrack"
         nameFilters: ["EduTrack (*.edutrack)"]
         onAccepted: {
             if (!root.backendObject.exportPackageAsync(selectedFile.toString()))
@@ -428,9 +428,10 @@ Rectangle {
                             }
                         }
                         Button {
+                            objectName: "syncConfirmImportButton"
                             text: "Confirmar importación"
                             highlighted: true
-                            enabled: root.previewData.can_import
+                            enabled: root.previewData.can_import === true
                                      && !root.backendObject.isBusy
                             onClicked: {
                                 root.operationMessage = "Creando respaldo e importando…"

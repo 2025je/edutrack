@@ -56,6 +56,7 @@ from ..infrastructure.transfer import (
     read_package,
     write_package,
 )
+from .list_models import EnrollmentListModel, StudentListModel
 
 logger = structlog.get_logger(__name__)
 
@@ -331,6 +332,15 @@ class DesktopBackend(QObject):
         self._selected_student_id = ""
         self._selected_enrollment_id = ""
         self._selected_course_id: int | None = None
+        self._student_list_model = StudentListModel(
+            self._all_student_rows,
+            parent=self,
+        )
+        self._enrollment_list_model = EnrollmentListModel(
+            self._all_enrollment_rows,
+            parent=self,
+        )
+        self.dataChanged.connect(self._refresh_list_models)
         if not defer_initialize:
             try:
                 asyncio.get_running_loop()
@@ -383,6 +393,7 @@ class DesktopBackend(QObject):
         courses = self.manifest.get("courses", []) if self.manifest else []
         self._selected_course_id = courses[0]["id"] if courses else None
         self._initialized = True
+        self._refresh_list_models()
 
     @Property(str, notify=dataChanged)
     def campusName(self):
@@ -436,6 +447,18 @@ class DesktopBackend(QObject):
     @Property("QVariantList", notify=dataChanged)
     def students(self):
         return self._all_student_rows()
+
+    @Property(QObject, constant=True)
+    def studentListModel(self):
+        return self._student_list_model
+
+    @Property(QObject, constant=True)
+    def enrollmentListModel(self):
+        return self._enrollment_list_model
+
+    def _refresh_list_models(self) -> None:
+        self._student_list_model.refreshIfLoaded()
+        self._enrollment_list_model.refreshIfLoaded()
 
     def _all_student_rows(self) -> list[dict[str, Any]]:
         if self._student_rows_cache is None:
@@ -499,6 +522,9 @@ class DesktopBackend(QObject):
 
     @Property("QVariantList", notify=dataChanged)
     def enrollments(self):
+        return self._all_enrollment_rows()
+
+    def _all_enrollment_rows(self) -> list[dict[str, Any]]:
         if self._enrollment_rows_cache is None:
             self._enrollment_rows_cache = enrollment_rows(self.manifest)
         return self._enrollment_rows_cache

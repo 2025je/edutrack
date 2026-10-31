@@ -6,6 +6,7 @@ import "../components"
 
 Flickable {
     id: campusSetupFlick
+    objectName: "campusSetupFlick"
     property var backendObject
     property var windowController
     property var theme

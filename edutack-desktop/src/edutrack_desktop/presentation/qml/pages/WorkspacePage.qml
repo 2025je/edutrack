@@ -121,18 +121,29 @@ RowLayout {
 
     Component.onCompleted: ensureSectionLoaded(windowController.selectedWorkspaceSection)
 
-    Rectangle {
+    ScrollView {
         id: workspaceSidebar
+        objectName: "workspaceSidebarScroll"
         Layout.preferredWidth: 152
         Layout.fillHeight: true
-        radius: 0
-        color: windowController.surfaceColor
-        border.color: windowController.borderColor
         clip: true
+        contentWidth: availableWidth
+        contentHeight: sidebarButtons.implicitHeight + 20
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        background: Rectangle {
+            radius: 0
+            color: windowController.surfaceColor
+            border.color: windowController.borderColor
+        }
 
         ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 10
+            id: sidebarButtons
+            width: workspaceSidebar.availableWidth - 20
+            x: 10
+            y: 10
             spacing: 8
 
             Repeater {
@@ -154,26 +165,29 @@ RowLayout {
                         72,
                         Math.min(96, (workspaceNavigation.height - 64) / 6)
                     )
+                    padding: 0
                     property bool selected: windowController.selectedWorkspaceSection
                                             === modelData.label
                     Material.foreground: windowController.primaryTextColor
                     contentItem: ColumnLayout {
-                        spacing: 6
+                        spacing: 2
                         MaterialSymbol {
                             Layout.alignment: Qt.AlignHCenter
                             symbolName: sectionButton.modelData.symbol
-                            symbolSize: 36
+                            symbolSize: 32
                             symbolColor: sectionButton.selected
                                           ? windowController.accentTextColor
                                           : windowController.secondaryTextColor
                         }
                         Label {
+                            objectName: "workspaceSectionLabel_"
+                                          + sectionButton.modelData.label
                             Layout.fillWidth: true
                             text: sectionButton.modelData.label
                             horizontalAlignment: Text.AlignHCenter
                             color: windowController.primaryTextColor
                             font.family: "Roboto"
-                            font.pixelSize: 16
+                            font.pixelSize: 14
                             font.bold: sectionButton.selected
                             elide: Text.ElideRight
                         }
@@ -209,162 +223,175 @@ RowLayout {
         }
     }
 
-    Loader {
-        id: enrollmentsPageLoader
-        objectName: "enrollmentsPageLoader"
+    ScrollView {
+        id: workspacePanelScroll
+        objectName: "workspacePanelScroll"
         Layout.fillWidth: true
         Layout.fillHeight: true
-        active: windowController.selectedWorkspaceSection === "Matrículas"
-                || workspaceNavigation.enrollmentsPageLoaded
-        visible: windowController.selectedWorkspaceSection === "Matrículas"
-        asynchronous: true
-        sourceComponent: Component {
-            EnrollmentsPage {
+        clip: true
+        contentWidth: availableWidth
+        contentHeight: workspacePanelContent.height
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        Item {
+            id: workspacePanelContent
+            width: workspacePanelScroll.availableWidth
+            height: Math.max(workspaceNavigation.height, 560)
+
+            Loader {
+                id: enrollmentsPageLoader
+                objectName: "enrollmentsPageLoader"
                 anchors.fill: parent
-                backendObject: workspaceNavigation.backendObject
-                windowController: workspaceNavigation.windowController
-                theme: workspaceNavigation.theme
-            }
-        }
-        onLoaded: {
-            workspaceNavigation.enrollmentsPageLoaded = true
-            workspaceNavigation.dispatchPendingPageAction()
-        }
+                active: windowController.selectedWorkspaceSection === "Matrículas"
+                        || workspaceNavigation.enrollmentsPageLoaded
+                visible: windowController.selectedWorkspaceSection === "Matrículas"
+                asynchronous: true
+                sourceComponent: Component {
+                    EnrollmentsPage {
+                        anchors.fill: parent
+                        backendObject: workspaceNavigation.backendObject
+                        windowController: workspaceNavigation.windowController
+                        theme: workspaceNavigation.theme
+                    }
+                }
+                onLoaded: {
+                    workspaceNavigation.enrollmentsPageLoaded = true
+                    workspaceNavigation.dispatchPendingPageAction()
+                }
 
-        ColumnLayout {
-            anchors.centerIn: parent
-            visible: enrollmentsPageLoader.status === Loader.Loading
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    visible: enrollmentsPageLoader.status === Loader.Loading
 
-            BusyIndicator {
-                Layout.alignment: Qt.AlignHCenter
-                running: enrollmentsPageLoader.status === Loader.Loading
-            }
+                    BusyIndicator {
+                        Layout.alignment: Qt.AlignHCenter
+                        running: enrollmentsPageLoader.status === Loader.Loading
+                    }
 
-            Label {
-                text: "Cargando matrículas..."
-                color: workspaceNavigation.windowController.secondaryTextColor
-            }
-        }
-    }
-
-    Loader {
-        id: studentsPageLoader
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        active: windowController.selectedWorkspaceSection === "Estudiantes"
-                || workspaceNavigation.studentsPageLoaded
-        visible: windowController.selectedWorkspaceSection === "Estudiantes"
-        asynchronous: true
-        sourceComponent: Component {
-            StudentsPage {
-                anchors.fill: parent
-                backendObject: workspaceNavigation.backendObject
-                windowController: workspaceNavigation.windowController
-                theme: workspaceNavigation.theme
-                Component.onCompleted: studentSearchText = workspaceNavigation.studentSearchText
-                onStudentSearchTextChanged: {
-                    workspaceNavigation.studentSearchText = studentSearchText
+                    Label {
+                        text: "Cargando matrículas..."
+                        color: workspaceNavigation.windowController.secondaryTextColor
+                    }
                 }
             }
-        }
-        onLoaded: {
-            workspaceNavigation.studentsPageLoaded = true
-            workspaceNavigation.dispatchPendingPageAction()
-        }
-    }
 
-    Loader {
-        id: coursesPageLoader
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        active: windowController.selectedWorkspaceSection === "Cursos"
-                || workspaceNavigation.coursesPageLoaded
-        visible: windowController.selectedWorkspaceSection === "Cursos"
-        asynchronous: true
-        onLoaded: {
-            workspaceNavigation.coursesPageLoaded = true
-            workspaceNavigation.dispatchPendingPageAction()
-        }
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            visible: coursesPageLoader.status === Loader.Loading
-
-            BusyIndicator {
-                Layout.alignment: Qt.AlignHCenter
-                running: coursesPageLoader.status === Loader.Loading
-            }
-
-            Label {
-                text: "Cargando cursos..."
-                color: workspaceNavigation.windowController.secondaryTextColor
-            }
-        }
-    }
-
-    Loader {
-        id: summaryPageLoader
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        active: windowController.selectedWorkspaceSection === "Resumen"
-                || workspaceNavigation.summaryPageLoaded
-        visible: windowController.selectedWorkspaceSection === "Resumen"
-        asynchronous: true
-        onLoaded: workspaceNavigation.summaryPageLoaded = true
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            visible: summaryPageLoader.status === Loader.Loading
-
-            BusyIndicator {
-                Layout.alignment: Qt.AlignHCenter
-                running: summaryPageLoader.status === Loader.Loading
-            }
-
-            Label {
-                text: "Cargando resumen..."
-                color: workspaceNavigation.windowController.secondaryTextColor
-            }
-        }
-    }
-
-    Loader {
-        id: syncPageLoader
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        active: workspaceNavigation.windowController.selectedWorkspaceSection
-                === "Sincronización" || workspaceNavigation.syncPageLoaded
-        visible: workspaceNavigation.windowController.selectedWorkspaceSection
-                 === "Sincronización"
-        asynchronous: true
-        sourceComponent: Component {
-            SyncPage {
+            Loader {
+                id: studentsPageLoader
                 anchors.fill: parent
-                backendObject: workspaceNavigation.backendObject
-                windowController: workspaceNavigation.windowController
-                theme: workspaceNavigation.theme
+                active: windowController.selectedWorkspaceSection === "Estudiantes"
+                        || workspaceNavigation.studentsPageLoaded
+                visible: windowController.selectedWorkspaceSection === "Estudiantes"
+                asynchronous: true
+                sourceComponent: Component {
+                    StudentsPage {
+                        anchors.fill: parent
+                        backendObject: workspaceNavigation.backendObject
+                        windowController: workspaceNavigation.windowController
+                        theme: workspaceNavigation.theme
+                        Component.onCompleted: studentSearchText = workspaceNavigation.studentSearchText
+                        onStudentSearchTextChanged: {
+                            workspaceNavigation.studentSearchText = studentSearchText
+                        }
+                    }
+                }
+                onLoaded: {
+                    workspaceNavigation.studentsPageLoaded = true
+                    workspaceNavigation.dispatchPendingPageAction()
+                }
             }
-        }
-        onLoaded: workspaceNavigation.syncPageLoaded = true
-    }
 
-    Loader {
-        id: backupsPageLoader
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        active: workspaceNavigation.windowController.selectedWorkspaceSection
-                === "Respaldos" || workspaceNavigation.backupsPageLoaded
-        visible: workspaceNavigation.windowController.selectedWorkspaceSection
-                 === "Respaldos"
-        asynchronous: true
-        sourceComponent: Component {
-            BackupsPage {
+            Loader {
+                id: coursesPageLoader
                 anchors.fill: parent
-                backendObject: workspaceNavigation.backendObject
-                windowController: workspaceNavigation.windowController
-                theme: workspaceNavigation.theme
+                active: windowController.selectedWorkspaceSection === "Cursos"
+                        || workspaceNavigation.coursesPageLoaded
+                visible: windowController.selectedWorkspaceSection === "Cursos"
+                asynchronous: true
+                onLoaded: {
+                    workspaceNavigation.coursesPageLoaded = true
+                    workspaceNavigation.dispatchPendingPageAction()
+                }
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    visible: coursesPageLoader.status === Loader.Loading
+
+                    BusyIndicator {
+                        Layout.alignment: Qt.AlignHCenter
+                        running: coursesPageLoader.status === Loader.Loading
+                    }
+
+                    Label {
+                        text: "Cargando cursos..."
+                        color: workspaceNavigation.windowController.secondaryTextColor
+                    }
+                }
+            }
+
+            Loader {
+                id: summaryPageLoader
+                anchors.fill: parent
+                active: windowController.selectedWorkspaceSection === "Resumen"
+                        || workspaceNavigation.summaryPageLoaded
+                visible: windowController.selectedWorkspaceSection === "Resumen"
+                asynchronous: true
+                onLoaded: workspaceNavigation.summaryPageLoaded = true
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    visible: summaryPageLoader.status === Loader.Loading
+
+                    BusyIndicator {
+                        Layout.alignment: Qt.AlignHCenter
+                        running: summaryPageLoader.status === Loader.Loading
+                    }
+
+                    Label {
+                        text: "Cargando resumen..."
+                        color: workspaceNavigation.windowController.secondaryTextColor
+                    }
+                }
+            }
+
+            Loader {
+                id: syncPageLoader
+                anchors.fill: parent
+                active: workspaceNavigation.windowController.selectedWorkspaceSection
+                        === "Sincronización" || workspaceNavigation.syncPageLoaded
+                visible: workspaceNavigation.windowController.selectedWorkspaceSection
+                         === "Sincronización"
+                asynchronous: true
+                sourceComponent: Component {
+                    SyncPage {
+                        anchors.fill: parent
+                        backendObject: workspaceNavigation.backendObject
+                        windowController: workspaceNavigation.windowController
+                        theme: workspaceNavigation.theme
+                    }
+                }
+                onLoaded: workspaceNavigation.syncPageLoaded = true
+            }
+
+            Loader {
+                id: backupsPageLoader
+                anchors.fill: parent
+                active: workspaceNavigation.windowController.selectedWorkspaceSection
+                        === "Respaldos" || workspaceNavigation.backupsPageLoaded
+                visible: workspaceNavigation.windowController.selectedWorkspaceSection
+                         === "Respaldos"
+                asynchronous: true
+                sourceComponent: Component {
+                    BackupsPage {
+                        anchors.fill: parent
+                        backendObject: workspaceNavigation.backendObject
+                        windowController: workspaceNavigation.windowController
+                        theme: workspaceNavigation.theme
+                    }
+                }
+                onLoaded: workspaceNavigation.backupsPageLoaded = true
             }
         }
-        onLoaded: workspaceNavigation.backupsPageLoaded = true
     }
 }

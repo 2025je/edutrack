@@ -281,6 +281,15 @@ def test_main_ctrl_m_opens_enrollment_wizard_after_lazy_loading(
         engine.load(main_url)
         root = engine.rootObjects()[0] if engine.rootObjects() else None
         assert root is not None
+        window_flags = root.flags()
+        assert not (window_flags & Qt.WindowType.FramelessWindowHint)
+        assert window_flags & Qt.WindowType.WindowTitleHint
+        assert window_flags & Qt.WindowType.WindowSystemMenuHint
+        assert window_flags & Qt.WindowType.WindowMinimizeButtonHint
+        assert window_flags & Qt.WindowType.WindowMaximizeButtonHint
+        assert window_flags & Qt.WindowType.WindowCloseButtonHint
+        assert root.width() == root.minimumWidth()
+        assert root.height() == root.minimumHeight()
         root.setProperty("visible", True)
         QTest.qWait(200)
         gui_application.processEvents()
@@ -310,6 +319,28 @@ def test_main_restores_and_persists_selected_workspace_section(
 ):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Test Campus", "")
+    course_id = backend.createCourse(
+        "English",
+        "Morning",
+        "1",
+        "2026-01-01",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    backend.saveStudent("", "PEREZ", "ANA", "12345678", "987654321")
+    student_id = backend.selectedStudent["id"]
+    assert backend.saveEnrollment(
+        "",
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "enrollment_date": "2026-01-02",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+        },
+    )
+    enrollment_id = backend.selectedEnrollment["id"]
     session_store = SessionSettings(tmp_path / "session.ini")
     main_url = QUrl.fromLocalFile(
         str(
@@ -360,6 +391,204 @@ def test_main_restores_and_persists_selected_workspace_section(
             "workspaceSectionButton_Cursos",
         )
         assert courses_button.property("selected") is True
+
+        students_button = _find_visual_item(
+            second_root,
+            "workspaceSectionButton_Estudiantes",
+        )
+        _click(second_root, students_button)
+        QTest.qWait(350)
+        assert _find_visual_item(second_root, "studentRow_" + student_id)
+
+        enrollments_button = _find_visual_item(
+            second_root,
+            "workspaceSectionButton_Matrículas",
+        )
+        _click(second_root, enrollments_button)
+        QTest.qWait(350)
+        assert _find_visual_item(second_root, "enrollmentRow_" + enrollment_id)
+
+        sync_button = _find_visual_item(
+            second_root,
+            "workspaceSectionButton_Sincronización",
+        )
+        _click(second_root, sync_button)
+        QTest.qWait(350)
+        sync_page = second_root.findChild(QObject, "syncPage")
+        confirm_import_button = second_root.findChild(
+            QObject,
+            "syncConfirmImportButton",
+        )
+        assert sync_page is not None
+        assert confirm_import_button is not None
+        assert confirm_import_button.property("enabled") is False
+
+        students_button = _find_visual_item(
+            second_root,
+            "workspaceSectionButton_Estudiantes",
+        )
+        _click(second_root, students_button)
+        QTest.qWait(350)
+        edit_student_button = _find_visual_item(
+            second_root,
+            "editStudentButton",
+        )
+        _click(second_root, edit_student_button)
+        QTest.qWait(100)
+        student_last_name = _find_visual_item(
+            second_root,
+            "studentLastNameField",
+        )
+        assert student_last_name.property("text") == "PEREZ"
+    finally:
+        for engine in engines:
+            root_objects = engine.rootObjects()
+            if root_objects:
+                root_objects[0].close()
+            engine.deleteLater()
+        gui_application.processEvents()
+        asyncio.run(backend.store.dispose())
+
+
+def test_main_starts_at_minimum_size_without_saved_window_geometry(
+    tmp_path, gui_application
+):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Test Campus", "")
+    session_store = SessionSettings(tmp_path / "session.ini")
+    assert session_store.saveState(
+        json.dumps(
+            {
+                "version": 1,
+            }
+        )
+    )
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("sessionStore", session_store)
+    main_url = QUrl.fromLocalFile(
+        str(
+            Path(__file__).parents[1]
+            / "src"
+            / "edutrack_desktop"
+            / "presentation"
+            / "qml"
+            / "Main.qml"
+        )
+    )
+    try:
+        engine.load(main_url)
+        root = engine.rootObjects()[0] if engine.rootObjects() else None
+        assert root is not None
+        root.setProperty("visible", True)
+        QTest.qWait(250)
+        gui_application.processEvents()
+
+        sidebar_scroll = root.findChild(QObject, "workspaceSidebarScroll")
+        panel_scroll = root.findChild(QObject, "workspacePanelScroll")
+        assert sidebar_scroll is not None
+        assert panel_scroll is not None
+        assert sidebar_scroll.property("contentHeight") > sidebar_scroll.property("height")
+        assert panel_scroll.property("contentHeight") > panel_scroll.property("height")
+        for section in (
+            "Matrículas",
+            "Estudiantes",
+            "Cursos",
+            "Sincronización",
+            "Respaldos",
+            "Resumen",
+        ):
+            button = _find_visual_item(
+                root,
+                "workspaceSectionButton_" + section,
+            )
+            label = _find_visual_item(
+                root,
+                "workspaceSectionLabel_" + section,
+            )
+            label_top = label.mapToItem(button, QPointF(0, 0)).y()
+            assert label_top >= 0
+            assert label_top + label.height() <= button.height()
+
+        screen_geometry = root.screen().geometry()
+        max_width = max(root.minimumWidth(), screen_geometry.width())
+        max_height = max(root.minimumHeight(), screen_geometry.height())
+        expected_x = screen_geometry.x() + max(
+            0, (screen_geometry.width() - root.width()) / 2
+        )
+        expected_y = screen_geometry.y() + max(
+            0, (screen_geometry.height() - root.height()) / 2
+        )
+        assert root.width() == root.minimumWidth()
+        assert root.height() == root.minimumHeight()
+        assert abs(root.x() - expected_x) <= 4
+        assert abs(root.y() - expected_y) <= 4
+        assert root.x() >= screen_geometry.x() - 4
+        assert root.y() >= screen_geometry.y() - 4
+        assert root.x() + root.width() <= screen_geometry.x() + max_width + 4
+        assert root.y() + root.height() <= screen_geometry.y() + max_height + 4
+    finally:
+        root_objects = engine.rootObjects()
+        if root_objects:
+            root_objects[0].close()
+        engine.deleteLater()
+        gui_application.processEvents()
+        asyncio.run(backend.store.dispose())
+
+
+def test_main_persists_window_geometry_across_restarts(tmp_path, gui_application):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Test Campus", "")
+    session_store = SessionSettings(tmp_path / "session.ini")
+    main_url = QUrl.fromLocalFile(
+        str(
+            Path(__file__).parents[1]
+            / "src"
+            / "edutrack_desktop"
+            / "presentation"
+            / "qml"
+            / "Main.qml"
+        )
+    )
+    engines = []
+
+    def open_main_window():
+        engine = QQmlApplicationEngine()
+        engines.append(engine)
+        engine.rootContext().setContextProperty("backend", backend)
+        engine.rootContext().setContextProperty("sessionStore", session_store)
+        engine.load(main_url)
+        root = engine.rootObjects()[0] if engine.rootObjects() else None
+        assert root is not None
+        root.setProperty("visible", True)
+        QTest.qWait(250)
+        gui_application.processEvents()
+        return root
+
+    try:
+        first_root = open_main_window()
+        first_root.setProperty("x", 60)
+        first_root.setProperty("y", 70)
+        first_root.setProperty("width", 1120)
+        first_root.setProperty("height", 740)
+        gui_application.processEvents()
+        saved_geometry = {
+            "x": first_root.x(),
+            "y": first_root.y(),
+            "width": first_root.width(),
+            "height": first_root.height(),
+        }
+
+        first_root.close()
+        gui_application.processEvents()
+        saved_state = json.loads(session_store.loadState())
+        assert saved_state["window"] == saved_geometry
+
+        second_root = open_main_window()
+        assert second_root.x() == saved_geometry["x"]
+        assert second_root.y() == saved_geometry["y"]
+        assert second_root.width() == saved_geometry["width"]
+        assert second_root.height() == saved_geometry["height"]
     finally:
         for engine in engines:
             root_objects = engine.rootObjects()
@@ -400,11 +629,7 @@ def test_main_close_button_waits_for_active_operation(
         backend._save_in_progress = True
         backend.activityStateChanged.emit()
         gui_application.processEvents()
-        close_button = _find_visual_item(
-            root,
-            "windowCloseDuringSaveButton",
-        )
-        _click(root, close_button)
+        root.close()
 
         assert root.isVisible()
         assert root.property("closeAfterCurrentOperation") is True
@@ -451,11 +676,7 @@ def test_main_can_close_while_startup_overlay_is_visible(
         root.setProperty("startupComplete", False)
         gui_application.processEvents()
 
-        close_button = _find_visual_item(
-            root,
-            "windowCloseDuringStartupButton",
-        )
-        _click(root, close_button)
+        root.close()
 
         assert root.isVisible() is False
     finally:
@@ -465,3 +686,87 @@ def test_main_can_close_while_startup_overlay_is_visible(
         engine.deleteLater()
         gui_application.processEvents()
         asyncio.run(backend.store.dispose())
+
+
+def test_main_closes_after_opening_and_closing_a_saved_campus(
+    tmp_path, gui_application
+):
+    database_path = tmp_path / "default.sqlite3"
+    saved_campus_path = tmp_path / "saved.sqlite3"
+    backend = DesktopBackend(
+        database_path,
+        tmp_path / "campuses.json",
+    )
+    assert backend.createWorkspace(
+        "Sede guardada",
+        "",
+        str(saved_campus_path),
+    )
+    assert backend.closeCampus()
+
+    session_store = SessionSettings(tmp_path / "session.ini")
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("sessionStore", session_store)
+    main_url = QUrl.fromLocalFile(
+        str(
+            Path(__file__).parents[1]
+            / "src"
+            / "edutrack_desktop"
+            / "presentation"
+            / "qml"
+            / "Main.qml"
+        )
+    )
+    try:
+        engine.load(main_url)
+        root = engine.rootObjects()[0] if engine.rootObjects() else None
+        assert root is not None
+        root.setProperty("visible", True)
+        QTest.qWait(250)
+        gui_application.processEvents()
+
+        campus_setup = root.findChild(QObject, "campusSetupFlick")
+        open_button = _find_visual_item(root, "savedCampusOpenButton_0")
+        assert campus_setup is not None
+        button_bottom = open_button.mapToItem(
+            campus_setup,
+            QPointF(open_button.width() / 2, open_button.height()),
+        ).y()
+        if button_bottom > campus_setup.height():
+            campus_setup.setProperty(
+                "contentY",
+                campus_setup.property("contentY")
+                + button_bottom
+                - campus_setup.height()
+                + 1,
+            )
+            gui_application.processEvents()
+        _click(root, open_button)
+        QTest.qWait(250)
+        assert backend.hasWorkspace
+
+        _click(
+            root,
+            _find_visual_item(root, "closeCampusButton"),
+        )
+        dialog = root.findChild(QObject, "closeCampusDialog")
+        assert dialog is not None
+        assert dialog.property("visible")
+        confirm_button = root.findChild(QObject, "confirmCloseCampusButton")
+        assert confirm_button is not None
+        _click(root, confirm_button)
+
+        assert not backend.hasWorkspace
+        assert dialog.property("visible")
+        assert dialog.property("modal") is False
+        root.close()
+        assert root.isVisible() is False
+    finally:
+        root_objects = engine.rootObjects()
+        if root_objects:
+            root_objects[0].close()
+        engine.deleteLater()
+        gui_application.processEvents()
+        if backend.store is not None:
+            asyncio.run(backend.store.dispose())
