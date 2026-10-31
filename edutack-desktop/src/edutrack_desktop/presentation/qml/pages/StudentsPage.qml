@@ -16,6 +16,9 @@ Rectangle {
     property var selectedStudent: null
     property var studentEditorItem: null
     property string currentView: "list"
+    readonly property bool hasUnsavedChanges: currentView === "edit"
+                                               && studentEditorItem
+                                               && studentEditorItem.hasUnsavedChanges
 
     function openStudentEditor(student) {
         selectedStudent = student
@@ -51,6 +54,10 @@ Rectangle {
     radius: 0
     color: studentsPage.windowController.surfaceColor
     border.color: studentsPage.windowController.borderColor
+    onVisibleChanged: {
+        if (visible)
+            backendObject.studentListModel.activate()
+    }
     Component.onCompleted: backendObject.studentListModel.activate()
 
     Timer {
@@ -194,7 +201,21 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            visible: studentsPage.backendObject.studentListModel.isLoading
+                     && studentsPage.backendObject.studentListModel.matchingCount === 0
+            text: "Cargando estudiantes..."
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: studentsPage.windowController.secondaryTextColor
+            font.family: "Roboto"
+            font.pixelSize: 16
+        }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             visible: studentsPage.backendObject.studentListModel.matchingCount === 0
+                     && !studentsPage.backendObject.studentListModel.isLoading
             text: studentsPage.backendObject.studentListModel.totalCount === 0
                   && studentSearch.text.trim().length === 0
                   ? "No hay estudiantes registrados."

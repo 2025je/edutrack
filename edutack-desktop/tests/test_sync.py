@@ -152,6 +152,41 @@ def test_preview_blocks_concurrent_and_unmatched_local_changes(manifest):
     assert preview["unchanged"] == 4
 
 
+def test_preview_exposes_field_level_differences(manifest):
+    local = deepcopy(manifest)
+    _set_base_hashes(local)
+    incoming = deepcopy(manifest)
+
+    local["students"][0]["first_name"] = "ANA LOCAL"
+    incoming["students"][0]["first_name"] = "ANA WEB"
+    local["courses"][0]["name"] = "MATEMÁTICAS LOCAL"
+    incoming["courses"][0]["name"] = "MATEMÁTICAS WEB"
+    local["enrollments"][0]["monthly_fee"] = "81.00"
+    incoming["enrollments"][0]["monthly_fee"] = "82.00"
+
+    preview = build_import_preview(local, incoming)
+    student = next(item for item in preview["items"] if item["kind"] == "student")
+    course = next(item for item in preview["items"] if item["kind"] == "course")
+    enrollment = next(item for item in preview["items"] if item["kind"] == "enrollment")
+
+    assert student["state"] == "conflict"
+    assert {
+        "field": "Nombres",
+        "local": "ANA LOCAL",
+        "incoming": "ANA WEB",
+    } in student["changes"]
+    assert {
+        "field": "Nombre",
+        "local": "MATEMÁTICAS LOCAL",
+        "incoming": "MATEMÁTICAS WEB",
+    } in course["changes"]
+    assert {
+        "field": "Mensualidad",
+        "local": "81.00",
+        "incoming": "82.00",
+    } in enrollment["changes"]
+
+
 def test_preview_counts_new_and_changed_images(manifest):
     local = deepcopy(manifest)
     incoming = deepcopy(manifest)
@@ -161,6 +196,12 @@ def test_preview_counts_new_and_changed_images(manifest):
     preview = build_import_preview(local, incoming)
     assert preview["images_new"] == 1
     assert preview["images_changed"] == 0
+    enrollment = next(item for item in preview["items"] if item["kind"] == "enrollment")
+    assert {
+        "field": "Imagen de ficha",
+        "local": "Sin imagen",
+        "incoming": "Imagen aaaaaaaaaaaa",
+    } in enrollment["changes"]
 
     local["enrollments"][0]["record_image"] = "attachments/" + "b" * 64 + ".jpg"
     local["enrollments"][0]["record_image_hash"] = "b" * 64
@@ -271,9 +312,7 @@ def test_backup_verification_checks_workspace_and_integrity(manifest, tmp_path):
         verify_sqlite_backup(incomplete)
 
 
-def test_restore_sqlite_backup_replaces_database_from_verified_copy(
-    manifest, tmp_path
-):
+def test_restore_sqlite_backup_replaces_database_from_verified_copy(manifest, tmp_path):
     source = tmp_path / "source.sqlite3"
     destination = tmp_path / "destination.sqlite3"
     asyncio.run(LocalStore(source).save(manifest))

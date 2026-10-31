@@ -24,8 +24,7 @@ from edutrack_desktop.infrastructure.transfer import (
 )
 
 COURSE_TEXT_ALPHABET = (
-    "áéíóúüñÁÉÍÓÚÜÑabcdefghijklmnopqrstuvwxyz"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_."
+    "áéíóúüñÁÉÍÓÚÜÑabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_."
 )
 
 
@@ -91,9 +90,7 @@ def manifest():
                 "active": True,
             }
         ],
-        "promoters": [
-            {"id": 40, "server_id": 40, "name": "Promotor", "active": True}
-        ],
+        "promoters": [{"id": 40, "server_id": 40, "name": "Promotor", "active": True}],
     }
 
 
@@ -189,9 +186,7 @@ def test_local_store_save_updates_rows_without_replacing_tables(manifest, tmp_pa
     asyncio.run(verify_incremental_save())
 
 
-def test_local_store_incremental_save_rolls_back_invalid_references(
-    manifest, tmp_path
-):
+def test_local_store_incremental_save_rolls_back_invalid_references(manifest, tmp_path):
     store = LocalStore(tmp_path / "rollback.sqlite3")
 
     async def verify_rollback():
@@ -225,16 +220,10 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
         try:
             await store.save_records(
                 updated,
-                {
-                    "students": [
-                        RecordMutation(0, updated["students"][0])
-                    ]
-                },
+                {"students": [RecordMutation(0, updated["students"][0])]},
             )
         finally:
-            event.remove(
-                store.engine.sync_engine, "before_cursor_execute", capture_sql
-            )
+            event.remove(store.engine.sync_engine, "before_cursor_execute", capture_sql)
 
         assert any(
             "select" in statement and "from desktop_students" in statement
@@ -283,9 +272,7 @@ def test_incremental_enrollment_save_batches_records_and_reference_checks(
         try:
             await store.save_records(updated, {"enrollments": changes})
         finally:
-            event.remove(
-                store.engine.sync_engine, "before_cursor_execute", capture_sql
-            )
+            event.remove(store.engine.sync_engine, "before_cursor_execute", capture_sql)
 
         for table in (
             "desktop_enrollments",
@@ -302,9 +289,7 @@ def test_incremental_enrollment_save_batches_records_and_reference_checks(
         asyncio.run(store.dispose())
 
 
-def test_student_page_searches_filters_and_paginates_in_sqlite(
-    manifest, tmp_path
-):
+def test_student_page_searches_filters_and_paginates_in_sqlite(manifest, tmp_path):
     data = deepcopy(manifest)
     inactive_student_id = str(uuid.uuid4())
     data["students"].append(
@@ -363,21 +348,15 @@ def test_student_page_searches_filters_and_paginates_in_sqlite(
         assert first_page[0]["label"] == "Gómez Luis"
         assert second_page[0]["label"] == "Pérez Ana"
 
-        inactive_page, _, inactive_count = await store.student_page(
-            "", 2, 0, 0, 50
-        )
+        inactive_page, _, inactive_count = await store.student_page("", 2, 0, 0, 50)
         assert inactive_count == 1
         assert inactive_page[0]["id"] == inactive_student_id
 
-        course_page, _, course_count = await store.student_page(
-            "", 0, 30, 0, 50
-        )
+        course_page, _, course_count = await store.student_page("", 0, 30, 0, 50)
         assert course_count == 1
         assert course_page[0]["label"] == "Pérez Ana"
 
-        search_page, _, search_count = await store.student_page(
-            "historia", 0, 0, 0, 50
-        )
+        search_page, _, search_count = await store.student_page("historia", 0, 0, 0, 50)
         assert search_count == 1
         assert search_page[0]["id"] == inactive_student_id
         assert search_page[0]["courses"] == ["Historia · Tarde · Grupo 2"]
@@ -393,6 +372,79 @@ def test_student_page_searches_filters_and_paginates_in_sqlite(
         )
         assert accented_count == 1
         assert accented_page[0]["id"] == inactive_student_id
+
+    try:
+        asyncio.run(verify_page())
+    finally:
+        asyncio.run(store.dispose())
+
+
+def test_enrollment_page_searches_filters_and_paginates_in_sqlite(manifest, tmp_path):
+    data = deepcopy(manifest)
+    inactive = deepcopy(data["enrollments"][0])
+    inactive.update(
+        id=str(uuid.uuid4()),
+        server_id=None,
+        base_hash=None,
+        enrollment_date="2026-01-03",
+        active=False,
+    )
+    pending_student = deepcopy(data["enrollments"][0])
+    pending_student.update(
+        id=str(uuid.uuid4()),
+        server_id=None,
+        base_hash=None,
+        student_id=None,
+        student_server_id=None,
+        enrollment_date="2026-01-04",
+    )
+    pending_course = deepcopy(data["enrollments"][0])
+    pending_course.update(
+        id=str(uuid.uuid4()),
+        server_id=None,
+        base_hash=None,
+        course_id=None,
+        enrollment_date="2026-01-05",
+    )
+    data["enrollments"].extend((inactive, pending_student, pending_course))
+    store = LocalStore(tmp_path / "enrollment-page.sqlite3")
+
+    async def verify_page():
+        await store.save(data)
+
+        first_page, total, matching = await store.enrollment_page("", 0, 0, 0, 2)
+        second_page, _, _ = await store.enrollment_page("", 0, 0, 1, 2)
+        assert total == matching == 4
+        assert len(first_page) == len(second_page) == 2
+        assert first_page[0]["id"] == pending_course["id"]
+        assert first_page[0]["pending_course"] is True
+        assert first_page[1]["id"] == pending_student["id"]
+        assert first_page[1]["pending_student"] is True
+
+        active_page, _, active_count = await store.enrollment_page("", 1, 0, 0, 50)
+        assert active_count == 1
+        assert active_page[0]["id"] == data["enrollments"][0]["id"]
+
+        inactive_page, _, inactive_count = await store.enrollment_page("", 2, 0, 0, 50)
+        assert inactive_count == 1
+        assert inactive_page[0]["id"] == inactive["id"]
+
+        student_page, _, student_count = await store.enrollment_page("", 3, 0, 0, 50)
+        assert student_count == 1
+        assert student_page[0]["id"] == pending_student["id"]
+
+        course_page, _, course_count = await store.enrollment_page("", 4, 0, 0, 50)
+        assert course_count == 1
+        assert course_page[0]["id"] == pending_course["id"]
+
+        searched_page, _, searched_count = await store.enrollment_page(
+            "perez ana matematicas", 0, 30, 0, 50
+        )
+        assert searched_count == 2
+        assert {row["id"] for row in searched_page} == {
+            data["enrollments"][0]["id"],
+            inactive["id"],
+        }
 
     try:
         asyncio.run(verify_page())

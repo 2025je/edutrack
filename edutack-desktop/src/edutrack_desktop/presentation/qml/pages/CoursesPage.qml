@@ -14,6 +14,9 @@ Rectangle {
     property var courseEditorItem: null
     property string currentView: "list"
     readonly property var courseListModel: root.backendObject.courseListModel
+    readonly property bool hasUnsavedChanges: currentView === "edit"
+                                               && courseEditorItem
+                                               && courseEditorItem.hasUnsavedChanges
 
     function focusSearch() {
         courseSearch.forceActiveFocus()
@@ -91,6 +94,20 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.courseListModel.matchingCount === 0
+                     && root.courseListModel.isLoading
+            text: "Cargando cursos..."
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: root.theme.secondaryText
+            font.family: "Roboto"
+            font.pixelSize: 16
+        }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.courseListModel.matchingCount === 0
+                     && !root.courseListModel.isLoading
             text: root.courseListModel.totalCount === 0
                   ? "No hay cursos registrados."
                   : "No se encontraron cursos con ese filtro."

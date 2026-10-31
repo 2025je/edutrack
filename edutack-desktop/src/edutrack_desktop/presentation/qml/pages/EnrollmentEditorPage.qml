@@ -16,7 +16,22 @@ Rectangle {
     property string courseSearchQuery: ""
     property int studentSearchLimit: 20
     property var studentSearchResults: []
+    property int studentSearchResultVersion: 0
+    property int studentSearchRequestId: 0
+    property bool studentSearchPending: false
+    property var initialEnrollmentValues: null
+    readonly property bool hasUnsavedChanges: {
+        if (!root.initialEnrollmentValues)
+            return false
+        return String(root.selectedStudentId) !== root.initialEnrollmentValues.studentId
+                || String(root.selectedCourseId) !== root.initialEnrollmentValues.courseId
+                || enrollmentDateField.value !== root.initialEnrollmentValues.date
+                || enrollmentFeeField.text !== root.initialEnrollmentValues.enrollmentFee
+                || monthlyFeeField.text !== root.initialEnrollmentValues.monthlyFee
+                || enrollmentActiveField.checked !== root.initialEnrollmentValues.active
+    }
     readonly property var studentOptions: {
+        var resultVersion = root.studentSearchResultVersion
         var options = [{
             id: "",
             label: "Sin estudiante",
@@ -78,6 +93,13 @@ Rectangle {
     signal cancelRequested()
     signal enrollmentSaved()
 
+    function requestCancel() {
+        if (root.hasUnsavedChanges)
+            discardDialog.open()
+        else
+            root.cancelRequested()
+    }
+
     color: theme.surface
     border.color: theme.outline
 
@@ -105,7 +127,8 @@ Rectangle {
     function refreshStudentSearch() {
         if (!root.backendObject)
             return
-        root.studentSearchResults = root.backendObject.searchStudents(
+        root.studentSearchPending = true
+        root.studentSearchRequestId = root.backendObject.searchStudentsAsync(
             root.studentSearchQuery,
             root.studentSearchLimit
         )
@@ -121,6 +144,14 @@ Rectangle {
         enrollmentFeeField.text = String(root.enrollment.enrollment_fee || "0.00")
         monthlyFeeField.text = String(root.enrollment.monthly_fee || "0.00")
         enrollmentActiveField.checked = root.enrollment.active !== false
+        root.initialEnrollmentValues = {
+            studentId: String(root.selectedStudentId),
+            courseId: String(root.selectedCourseId),
+            date: enrollmentDateField.value,
+            enrollmentFee: enrollmentFeeField.text,
+            monthlyFee: monthlyFeeField.text,
+            active: enrollmentActiveField.checked
+        }
     }
 
     function chooseStudent(option) {
@@ -184,6 +215,12 @@ Rectangle {
             root.errorText = root.backendObject.errorMessage
     }
 
+    DiscardChangesDialog {
+        id: discardDialog
+        theme: root.theme
+        onDiscardConfirmed: root.cancelRequested()
+    }
+
     Shortcut {
         sequence: "Ctrl+S"
         enabled: root.visible && !root.backendObject.isBusy
@@ -196,11 +233,28 @@ Rectangle {
         sequence: "Esc"
         enabled: root.visible && !studentPicker.opened
                  && !coursePicker.opened && !enrollmentDateField.popupOpen
-        onActivated: root.cancelRequested()
+        onActivated: root.requestCancel()
     }
 
     onEnrollmentChanged: loadEnrollment()
     Component.onCompleted: loadEnrollment()
+
+    Connections {
+        target: root.backendObject
+        function onStudentSearchFinished(requestId, rows, error) {
+            if (requestId !== root.studentSearchRequestId)
+                return
+            root.studentSearchPending = false
+            if (error.length > 0) {
+                root.studentSearchResults = []
+                root.studentSearchResultVersion += 1
+                root.errorText = error
+            } else {
+                root.studentSearchResults = rows
+                root.studentSearchResultVersion += 1
+            }
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -212,9 +266,10 @@ Rectangle {
             spacing: 16
 
             Button {
+                objectName: "cancelEnrollmentEditButton"
                 text: "Volver a matrículas"
                 enabled: !root.backendObject.isBusy
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Label {
@@ -361,11 +416,17 @@ Rectangle {
                                 studentSearchField.clear()
                                 root.studentSearchQuery = ""
                                 root.studentSearchLimit = 20
+                                root.studentSearchResults = []
+                                root.studentSearchResultVersion += 1
                                 studentSearchTimer.stop()
                                 root.refreshStudentSearch()
                                 studentSearchField.forceActiveFocus()
                             }
-                            onClosed: studentSearchTimer.stop()
+                            onClosed: {
+                                studentSearchTimer.stop()
+                                root.studentSearchRequestId = 0
+                                root.studentSearchPending = false
+                            }
 
                             contentItem: ColumnLayout {
                                 spacing: 12
@@ -386,8 +447,20 @@ Rectangle {
                                     onTextChanged: {
                                         root.studentSearchQuery = text
                                         root.studentSearchLimit = 20
+                                        root.studentSearchResults = []
+                                        root.studentSearchResultVersion += 1
+                                        root.studentSearchRequestId = 0
+                                        root.studentSearchPending = true
                                         studentSearchTimer.restart()
                                     }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: root.studentSearchPending
+                                    text: "Buscando estudiantes..."
+                                    color: root.theme.secondaryText
+                                    font.family: "Roboto"
                                 }
 
                                 ListView {
@@ -489,6 +562,7 @@ Rectangle {
                                     Layout.fillWidth: true
                                     visible: root.studentSearchQuery.trim().length > 0
                                              && root.studentSearchResults.length === 0
+                                             && !root.studentSearchPending
                                     text: "No se encontraron estudiantes."
                                     color: root.theme.secondaryText
                                     font.family: "Roboto"

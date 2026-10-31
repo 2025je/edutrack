@@ -17,9 +17,23 @@ Rectangle {
     property var selectedStudent: null
     property string errorText: ""
     property var searchResults: []
+    property int searchResultsVersion: 0
     property int searchLimit: 20
+    property int searchRequestId: 0
+    property bool searchPending: false
     property var duplicateCandidates: []
+    property int duplicateSearchRequestId: 0
+    property bool duplicateSearchPending: false
     property var savedResult: null
+    readonly property bool hasUnsavedChanges: {
+        return root.currentStep === 2 || root.currentStep === 3
+                || root.selectedStudent !== null
+                || (root.creatingStudent
+                    && (lastNameField.text.trim().length > 0
+                        || firstNameField.text.trim().length > 0
+                        || documentField.text.trim().length > 0
+                        || phonesField.text.trim().length > 0))
+    }
 
     readonly property var activeCourses: {
         var courses = root.backendObject ? root.backendObject.courses : []
@@ -53,7 +67,7 @@ Rectangle {
         sequence: "Esc"
         enabled: root.visible && !recordImageDialog.visible
                  && !enrollmentDateField.popupOpen
-        onActivated: root.cancelRequested()
+        onActivated: root.requestCancel()
     }
 
     function begin() {
@@ -63,6 +77,12 @@ Rectangle {
         root.selectedStudent = null
         root.errorText = ""
         root.searchLimit = 20
+        root.searchResults = []
+        root.searchResultsVersion += 1
+        root.searchRequestId = 0
+        root.searchPending = false
+        root.duplicateSearchRequestId = 0
+        root.duplicateSearchPending = false
         root.duplicateCandidates = []
         root.savedResult = null
         studentSearchField.clear()
@@ -73,22 +93,38 @@ Rectangle {
         root.refreshSearch()
     }
 
+    function requestCancel() {
+        if (root.hasUnsavedChanges)
+            discardDialog.open()
+        else
+            root.cancelRequested()
+    }
+
     function refreshSearch() {
         if (!root.backendObject)
             return
-        root.searchResults = root.backendObject.searchStudents(
+        root.searchPending = true
+        root.searchRequestId = root.backendObject.searchStudentsAsync(
             studentSearchField.text, root.searchLimit)
     }
 
     function refreshDuplicates() {
         if (!root.backendObject || !root.creatingStudent) {
             root.duplicateCandidates = []
+            root.duplicateSearchPending = false
+            root.duplicateSearchRequestId = 0
             return
         }
         var query = (lastNameField.text + " " + firstNameField.text).trim()
-        root.duplicateCandidates = query.length >= 3
-            ? root.backendObject.searchStudents(query, 5)
-            : []
+        if (query.length < 3) {
+            root.duplicateCandidates = []
+            root.duplicateSearchPending = false
+            root.duplicateSearchRequestId = 0
+            return
+        }
+        root.duplicateSearchPending = true
+        root.duplicateSearchRequestId = root.backendObject.searchStudentsAsync(
+            query, 5)
     }
 
     function studentLabel(student) {
@@ -211,6 +247,12 @@ Rectangle {
         onTriggered: root.refreshSearch()
     }
 
+    DiscardChangesDialog {
+        id: discardDialog
+        theme: root.theme
+        onDiscardConfirmed: root.cancelRequested()
+    }
+
     Timer {
         id: duplicateDebounce
         interval: 300
@@ -223,6 +265,27 @@ Rectangle {
         function onDataChanged() {
             if (root.currentStep === 1 && !root.creatingStudent)
                 root.refreshSearch()
+        }
+        function onStudentSearchFinished(requestId, rows, error) {
+            if (requestId === root.searchRequestId) {
+                root.searchPending = false
+                if (error.length > 0) {
+                    root.searchResults = []
+                    root.searchResultsVersion += 1
+                    root.errorText = error
+                } else {
+                    root.searchResults = rows
+                    root.searchResultsVersion += 1
+                }
+            } else if (requestId === root.duplicateSearchRequestId) {
+                root.duplicateSearchPending = false
+                if (error.length > 0) {
+                    root.duplicateCandidates = []
+                    root.errorText = error
+                } else {
+                    root.duplicateCandidates = rows
+                }
+            }
         }
     }
 
@@ -243,10 +306,11 @@ Rectangle {
             Layout.fillWidth: true
 
             Button {
+                objectName: "enrollmentWizardCancelButton"
                 text: "Cancelar"
                 visible: root.currentStep < 4
                 enabled: !root.backendObject.isBusy
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Label {
@@ -289,6 +353,9 @@ Rectangle {
                 onTextChanged: {
                     root.selectedStudent = null
                     root.errorText = ""
+                    root.searchResults = []
+                    root.searchResultsVersion += 1
+                    root.searchPending = true
                     root.searchLimit = 20
                     searchDebounce.restart()
                 }
@@ -302,14 +369,26 @@ Rectangle {
                 font.family: "Roboto"
             }
 
+            Label {
+                Layout.fillWidth: true
+                visible: !root.creatingStudent && root.searchPending
+                text: "Buscando estudiantes..."
+                color: root.theme.secondaryText
+                font.family: "Roboto"
+            }
+
             ListView {
                 id: studentList
+                objectName: "enrollmentStudentResultsList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 visible: !root.creatingStudent && root.searchResults.length > 0
                 clip: true
                 spacing: 8
-                model: root.searchResults
+                model: {
+                    var version = root.searchResultsVersion
+                    return root.searchResults
+                }
 
                 delegate: Button {
                     id: studentChoice
@@ -401,6 +480,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 visible: !root.creatingStudent && root.searchResults.length === 0
+                         && !root.searchPending
                 text: "No se encontraron estudiantes con ese criterio."
                 color: root.theme.secondaryText
                 font.family: "Roboto"
@@ -445,7 +525,12 @@ Rectangle {
                         objectName: "newEnrollmentStudentLastName"
                         Layout.fillWidth: true
                         maximumLength: 120
-                        onTextChanged: duplicateDebounce.restart()
+                        onTextChanged: {
+                            root.duplicateCandidates = []
+                            root.duplicateSearchRequestId = 0
+                            root.duplicateSearchPending = true
+                            duplicateDebounce.restart()
+                        }
                     }
                 }
 
@@ -462,7 +547,12 @@ Rectangle {
                         objectName: "newEnrollmentStudentFirstName"
                         Layout.fillWidth: true
                         maximumLength: 120
-                        onTextChanged: duplicateDebounce.restart()
+                        onTextChanged: {
+                            root.duplicateCandidates = []
+                            root.duplicateSearchRequestId = 0
+                            root.duplicateSearchPending = true
+                            duplicateDebounce.restart()
+                        }
                     }
                 }
 
@@ -511,6 +601,14 @@ Rectangle {
                 color: root.theme.error
                 font.family: "Roboto"
                 wrapMode: Text.Wrap
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: root.creatingStudent && root.duplicateSearchPending
+                text: "Comprobando posibles duplicados..."
+                color: root.theme.secondaryText
+                font.family: "Roboto"
             }
 
             Label {

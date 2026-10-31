@@ -11,8 +11,28 @@ Rectangle {
     property var course
     property var theme
     property string errorText: ""
+    property var initialCourseValues: null
+    readonly property bool hasUnsavedChanges: {
+        if (!root.initialCourseValues)
+            return false
+        return nameField.text !== root.initialCourseValues.name
+                || scheduleField.text !== root.initialCourseValues.schedule
+                || groupField.text !== root.initialCourseValues.group
+                || startDateField.value !== root.initialCourseValues.startDate
+                || enrollmentFeeField.text !== root.initialCourseValues.enrollmentFee
+                || monthlyFeeField.text !== root.initialCourseValues.monthlyFee
+                || capacityField.text !== root.initialCourseValues.capacity
+                || activeCheckBox.checked !== root.initialCourseValues.active
+    }
     signal cancelRequested()
     signal saveSucceeded()
+
+    function requestCancel() {
+        if (root.hasUnsavedChanges)
+            discardDialog.open()
+        else
+            root.cancelRequested()
+    }
 
     function normalizeAmount(field) {
         var match = /^([0-9]+)(?:[.,]([0-9]{1,2}))?$/.exec(field.text.trim())
@@ -59,6 +79,22 @@ Rectangle {
         capacityField.text = String(root.course.capacity)
         activeCheckBox.checked = root.course.active
         errorText = ""
+        root.initialCourseValues = {
+            name: nameField.text,
+            schedule: scheduleField.text,
+            group: groupField.text,
+            startDate: startDateField.value,
+            enrollmentFee: enrollmentFeeField.text,
+            monthlyFee: monthlyFeeField.text,
+            capacity: capacityField.text,
+            active: activeCheckBox.checked
+        }
+    }
+
+    DiscardChangesDialog {
+        id: discardDialog
+        theme: root.theme
+        onDiscardConfirmed: root.cancelRequested()
     }
 
     onCourseChanged: loadCourse()
@@ -78,7 +114,7 @@ Rectangle {
     Shortcut {
         sequence: "Esc"
         enabled: root.visible && !startDateField.popupOpen
-        onActivated: root.cancelRequested()
+        onActivated: root.requestCancel()
     }
 
     ColumnLayout {
@@ -92,7 +128,7 @@ Rectangle {
 
             Button {
                 text: "Volver a cursos"
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Label {
@@ -273,7 +309,7 @@ Rectangle {
             Button {
                 text: "Cancelar"
                 enabled: !root.backendObject.courseSaveInProgress
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Button {

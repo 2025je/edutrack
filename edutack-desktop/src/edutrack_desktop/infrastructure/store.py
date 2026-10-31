@@ -74,9 +74,7 @@ def _course_values(
     item: dict[str, Any], workspace_id: int, position: int
 ) -> dict[str, Any]:
     course_id = int(item["id"])
-    search_text = (
-        f"{item['name']} · {item['schedule']} · Grupo {item['group']}"
-    )
+    search_text = f"{item['name']} · {item['schedule']} · Grupo {item['group']}"
     return {
         "id": course_id,
         "workspace_id": workspace_id,
@@ -152,9 +150,7 @@ class LocalStore:
             self.engine.sync_engine, "before_cursor_execute", self._log_statement
         )
         event.listen(self.engine.sync_engine, "connect", self._enable_foreign_keys)
-        self.session_factory = async_sessionmaker(
-            self.engine, expire_on_commit=False
-        )
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self._initialized = False
 
     async def initialize(self):
@@ -213,9 +209,7 @@ class LocalStore:
             return True, row.data if row is not None else None
 
         async with self.engine.connect() as connection:
-            table_exists, legacy_data = await connection.run_sync(
-                read_legacy_workspace
-            )
+            table_exists, legacy_data = await connection.run_sync(read_legacy_workspace)
         if not table_exists:
             return
 
@@ -245,8 +239,8 @@ class LocalStore:
         async with self.session_factory() as session:
             statement = select(StudentRecord)
             for index, token in enumerate(tokens):
-                escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace(
-                    "_", "\\_"
+                escaped = (
+                    token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 )
                 pattern = f"{escaped}%"
                 search_columns = (
@@ -263,9 +257,7 @@ class LocalStore:
                         column.like(word_pattern, escape="\\")
                         for column in search_columns
                     )
-                statement = statement.where(
-                    or_(*token_conditions)
-                )
+                statement = statement.where(or_(*token_conditions))
             students = (
                 await session.scalars(
                     statement.order_by(StudentRecord.position.desc()).limit(limit)
@@ -277,10 +269,7 @@ class LocalStore:
             active_courses = await self._active_courses(
                 session, [student.id for student in students]
             )
-            return [
-                self._student_row(student, active_courses)
-                for student in students
-            ]
+            return [self._student_row(student, active_courses) for student in students]
 
     @staticmethod
     async def _active_courses(
@@ -332,9 +321,7 @@ class LocalStore:
             "active": student.active,
             "courses": active_courses.get(student.id, []),
             "label": " ".join(
-                part
-                for part in (student.last_name, student.first_name)
-                if part
+                part for part in (student.last_name, student.first_name) if part
             ),
         }
 
@@ -388,8 +375,7 @@ class LocalStore:
                     + StudentRecord.first_name_search,
                 )
                 search_conditions: list[ColumnElement[bool]] = [
-                    column.like(pattern, escape="\\")
-                    for column in searchable_columns
+                    column.like(pattern, escape="\\") for column in searchable_columns
                 ]
                 search_conditions.append(
                     exists(
@@ -411,9 +397,7 @@ class LocalStore:
                 select(func.count()).select_from(StudentRecord)
             )
             matching_count = await session.scalar(
-                select(func.count())
-                .select_from(StudentRecord)
-                .where(*conditions)
+                select(func.count()).select_from(StudentRecord).where(*conditions)
             )
             students = (
                 await session.scalars(
@@ -441,8 +425,8 @@ class LocalStore:
         tokens = normalize_search_text(query).split()
         conditions: list[ColumnElement[bool]] = []
         for token in tokens:
-            escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace(
-                "_", "\\_"
+            escaped = (
+                token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             )
             pattern = f"%{escaped}%"
             conditions.append(
@@ -452,9 +436,9 @@ class LocalStore:
                 )
             )
 
-        active_student_count = func.count(
-            func.distinct(StudentRecord.id)
-        ).label("student_count")
+        active_student_count = func.count(func.distinct(StudentRecord.id)).label(
+            "student_count"
+        )
         course_statement = (
             select(
                 CourseRecord.id.label("id"),
@@ -496,9 +480,7 @@ class LocalStore:
                 select(func.count()).select_from(CourseRecord)
             )
             matching_count = await session.scalar(
-                select(func.count())
-                .select_from(CourseRecord)
-                .where(*conditions)
+                select(func.count()).select_from(CourseRecord).where(*conditions)
             )
             rows = (await session.execute(course_statement)).mappings().all()
             return (
@@ -506,8 +488,7 @@ class LocalStore:
                     {
                         **dict(row),
                         "label": (
-                            f"{row['name']} · {row['schedule']} · "
-                            f"Grupo {row['group']}"
+                            f"{row['name']} · {row['schedule']} · Grupo {row['group']}"
                         ),
                     }
                     for row in rows
@@ -515,6 +496,165 @@ class LocalStore:
                 int(total_count or 0),
                 int(matching_count or 0),
             )
+
+    async def enrollment_page(
+        self,
+        query: str,
+        status_filter_index: int,
+        course_filter_id: int,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        await self.initialize()
+        if status_filter_index not in (0, 1, 2, 3, 4):
+            raise ValueError("El filtro de estado de matrículas no es válido.")
+        if (
+            not isinstance(query, str)
+            or isinstance(course_filter_id, bool)
+            or not isinstance(course_filter_id, int)
+            or isinstance(page_index, bool)
+            or not isinstance(page_index, int)
+            or isinstance(page_size, bool)
+            or not isinstance(page_size, int)
+            or course_filter_id < 0
+            or page_index < 0
+            or not 1 <= page_size <= 100
+        ):
+            raise ValueError("La página de matrículas solicitada no es válida.")
+
+        conditions: list[ColumnElement[bool]] = []
+        if status_filter_index == 1:
+            conditions.extend(
+                (
+                    EnrollmentRecord.active.is_(True),
+                    StudentRecord.id.is_not(None),
+                    CourseRecord.id.is_not(None),
+                )
+            )
+        elif status_filter_index == 2:
+            conditions.append(EnrollmentRecord.active.is_(False))
+        elif status_filter_index == 3:
+            conditions.append(StudentRecord.id.is_(None))
+        elif status_filter_index == 4:
+            conditions.append(CourseRecord.id.is_(None))
+        if course_filter_id:
+            conditions.append(EnrollmentRecord.course_id == course_filter_id)
+
+        student_search_columns = (
+            StudentRecord.last_name_search,
+            StudentRecord.first_name_search,
+            StudentRecord.document_number_search,
+            StudentRecord.last_name_search + " " + StudentRecord.first_name_search,
+        )
+        for token in normalize_search_text(query).split():
+            escaped = (
+                token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            conditions.append(
+                or_(
+                    *(
+                        column.like(pattern, escape="\\")
+                        for column in student_search_columns
+                    ),
+                    CourseRecord.search_text.like(pattern, escape="\\"),
+                    EnrollmentRecord.enrollment_date.like(pattern, escape="\\"),
+                )
+            )
+
+        joined_enrollments = (
+            select(
+                EnrollmentRecord,
+                StudentRecord.last_name,
+                StudentRecord.first_name,
+                StudentRecord.active.label("student_active"),
+                CourseRecord.name.label("course_name"),
+                CourseRecord.schedule.label("course_schedule"),
+                CourseRecord.group_name.label("course_group"),
+            )
+            .select_from(EnrollmentRecord)
+            .outerjoin(
+                StudentRecord,
+                EnrollmentRecord.student_id == StudentRecord.id,
+            )
+            .outerjoin(
+                CourseRecord,
+                EnrollmentRecord.course_id == CourseRecord.id,
+            )
+            .where(*conditions)
+        )
+        async with self.session_factory() as session:
+            total_count = await session.scalar(
+                select(func.count()).select_from(EnrollmentRecord)
+            )
+            matching_count = await session.scalar(
+                select(func.count(EnrollmentRecord.id))
+                .select_from(EnrollmentRecord)
+                .outerjoin(
+                    StudentRecord,
+                    EnrollmentRecord.student_id == StudentRecord.id,
+                )
+                .outerjoin(
+                    CourseRecord,
+                    EnrollmentRecord.course_id == CourseRecord.id,
+                )
+                .where(*conditions)
+            )
+            result = await session.execute(
+                joined_enrollments.order_by(
+                    EnrollmentRecord.enrollment_date.desc(),
+                    EnrollmentRecord.position.desc(),
+                )
+                .offset(page_index * page_size)
+                .limit(page_size)
+            )
+            rows = []
+            for (
+                enrollment,
+                last_name,
+                first_name,
+                student_active,
+                course_name,
+                course_schedule,
+                course_group,
+            ) in result:
+                student_label = (
+                    " ".join(part for part in (last_name, first_name) if part)
+                    if last_name is not None
+                    else "Pendiente de estudiante"
+                )
+                pending_course = course_name is None
+                course_label = (
+                    f"{course_name} · {course_schedule} · Grupo {course_group}"
+                    if not pending_course
+                    else "Pendiente de curso"
+                )
+                rows.append(
+                    {
+                        "id": enrollment.id,
+                        "server_id": enrollment.server_id,
+                        "base_hash": enrollment.base_hash,
+                        "student_id": enrollment.student_id,
+                        "student_server_id": enrollment.student_server_id,
+                        "course_id": enrollment.course_id,
+                        "enrollment_date": enrollment.enrollment_date,
+                        "promoter_ids": enrollment.promoter_ids,
+                        "enrollment_fee": enrollment.enrollment_fee,
+                        "monthly_fee": enrollment.monthly_fee,
+                        "record_code": enrollment.record_code,
+                        "active": enrollment.active,
+                        "record_image": enrollment.record_image,
+                        "record_image_hash": enrollment.record_image_hash,
+                        "record_image_quality": enrollment.record_image_quality,
+                        "student_label": student_label,
+                        "course_label": course_label,
+                        "pending_student": last_name is None,
+                        "pending_course": pending_course,
+                        "student_active": bool(student_active),
+                        "label": f"{student_label} — {course_label}",
+                    }
+                )
+            return rows, int(total_count or 0), int(matching_count or 0)
 
     @staticmethod
     async def _student_page_rows(
@@ -529,7 +669,9 @@ class LocalStore:
         active_courses = await LocalStore._active_courses(
             session, [student.id for student in students]
         )
-        rows = [LocalStore._student_row(student, active_courses) for student in students]
+        rows = [
+            LocalStore._student_row(student, active_courses) for student in students
+        ]
         return rows, int(total_count or 0), int(matching_count or 0)
 
     async def _load(self):
@@ -759,16 +901,12 @@ class LocalStore:
             await upsert_many(
                 StudentRecord,
                 students,
-                lambda item, position: _student_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _student_values(item, workspace.id, position),
             )
             await upsert_many(
                 CourseRecord,
                 courses,
-                lambda item, position: _course_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _course_values(item, workspace.id, position),
             )
             await upsert_many(
                 PromoterRecord,
@@ -779,9 +917,7 @@ class LocalStore:
             )
             await session.flush()
 
-            student_ids = {
-                mutation.record["id"] for mutation in students
-            }
+            student_ids = {mutation.record["id"] for mutation in students}
             required_student_ids = {
                 mutation.record["student_id"]
                 for mutation in enrollments
@@ -803,9 +939,7 @@ class LocalStore:
                 CourseRecord, missing_course_ids
             )
 
-            promoter_ids = {
-                int(mutation.record["id"]) for mutation in promoters
-            }
+            promoter_ids = {int(mutation.record["id"]) for mutation in promoters}
             required_promoter_ids = {
                 int(promoter_id)
                 for mutation in enrollments
@@ -839,9 +973,7 @@ class LocalStore:
             await upsert_many(
                 EnrollmentRecord,
                 enrollments,
-                lambda item, position: _enrollment_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _enrollment_values(item, workspace.id, position),
             )
 
         audit_logger.info(
@@ -879,15 +1011,15 @@ class LocalStore:
                     raise ValueError(
                         "Una matrícula hace referencia a un curso inexistente."
                     )
-                if any(int(value) not in promoter_ids for value in item["promoter_ids"]):
+                if any(
+                    int(value) not in promoter_ids for value in item["promoter_ids"]
+                ):
                     raise ValueError(
                         "Una matrícula hace referencia a un promotor inexistente."
                     )
 
             async def synchronize(model, records, get_id, get_values):
-                existing: list[Any] = list(
-                    (await session.scalars(select(model))).all()
-                )
+                existing: list[Any] = list((await session.scalars(select(model))).all())
                 existing_by_id = {record.id: record for record in existing}
                 requested_ids = set()
                 for position, item in enumerate(records):
@@ -907,17 +1039,13 @@ class LocalStore:
                 StudentRecord,
                 manifest["students"],
                 lambda item: item["id"],
-                lambda item, position: _student_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _student_values(item, workspace.id, position),
             )
             stale_courses, _ = await synchronize(
                 CourseRecord,
                 manifest["courses"],
                 lambda item: int(item["id"]),
-                lambda item, position: _course_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _course_values(item, workspace.id, position),
             )
             stale_promoters, _ = await synchronize(
                 PromoterRecord,
@@ -933,9 +1061,7 @@ class LocalStore:
                 EnrollmentRecord,
                 manifest["enrollments"],
                 lambda item: item["id"],
-                lambda item, position: _enrollment_values(
-                    item, workspace.id, position
-                ),
+                lambda item, position: _enrollment_values(item, workspace.id, position),
             )
             for record in stale_enrollments:
                 if record.id not in requested_enrollments:

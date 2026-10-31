@@ -17,6 +17,13 @@ Rectangle {
     color: theme.surface
     border.color: theme.outline
 
+    function formatModifiedAt(value) {
+        var date = new Date(value)
+        if (!value || isNaN(date.getTime()))
+            return "Fecha desconocida"
+        return Qt.formatDateTime(date, "dd/MM/yyyy HH:mm")
+    }
+
     function formatSize(bytes) {
         var value = Number(bytes || 0)
         if (value < 1024)
@@ -255,7 +262,10 @@ Rectangle {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: backupRow.modelData.modified_at
+                                text: "Modificado: "
+                                      + root.formatModifiedAt(
+                                            backupRow.modelData.modified_at
+                                        )
                                       + " · "
                                       + root.formatSize(backupRow.modelData.size_bytes)
                                 color: root.theme.secondaryText

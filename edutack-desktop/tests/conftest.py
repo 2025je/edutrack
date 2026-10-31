@@ -9,4 +9,5 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 @pytest.fixture(scope="session", autouse=True)
 def gui_application():
     application = QGuiApplication.instance() or QGuiApplication([])
+    application.setQuitOnLastWindowClosed(False)
     yield application

@@ -2,7 +2,11 @@ import asyncio
 
 import pytest
 
-from benchmark_data import build_course_search_manifest, build_manifest
+from benchmark_data import (
+    build_course_search_manifest,
+    build_enrollment_search_manifest,
+    build_manifest,
+)
 from edutrack_desktop.domain.record_service import RecordMutation
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.transfer import read_package, write_package
@@ -57,6 +61,24 @@ def course_store(request, benchmark_loop, tmp_path_factory):
         benchmark_loop.run_until_complete(store.dispose())
 
 
+@pytest.fixture(
+    scope="module",
+    params=DATASET_SIZES,
+    ids=lambda size: f"{size}-enrollments",
+)
+def enrollment_store(request, benchmark_loop, tmp_path_factory):
+    size = request.param
+    manifest = build_enrollment_search_manifest(size)
+    store = LocalStore(
+        tmp_path_factory.mktemp(f"enrollment-search-{size}") / "workspace.sqlite3"
+    )
+    try:
+        benchmark_loop.run_until_complete(store.save(manifest))
+        yield size, store
+    finally:
+        benchmark_loop.run_until_complete(store.dispose())
+
+
 @pytest.mark.performance
 @pytest.mark.benchmark(group="student-search")
 def test_benchmark_student_search(benchmark, benchmark_loop, student_store):
@@ -98,9 +120,7 @@ def test_benchmark_student_page_search(benchmark, benchmark_loop, student_store)
 
 @pytest.mark.performance
 @pytest.mark.benchmark(group="incremental-save")
-def test_benchmark_incremental_student_save(
-    benchmark, benchmark_loop, student_store
-):
+def test_benchmark_incremental_student_save(benchmark, benchmark_loop, student_store):
     size, manifest, store = student_store
     student = manifest["students"][-1]
     student["first_name"] = "ACTUALIZADO"
@@ -126,9 +146,7 @@ def test_benchmark_course_search(benchmark, benchmark_loop, course_store):
     query = f"CURSO {size:05d}"
 
     def search_course():
-        return benchmark_loop.run_until_complete(
-            store.student_page(query, 0, 0, 0, 50)
-        )
+        return benchmark_loop.run_until_complete(store.student_page(query, 0, 0, 0, 50))
 
     rows, _, matching_count = search_course()
     assert matching_count == 1
@@ -148,9 +166,7 @@ def test_benchmark_course_list_page_search(benchmark, benchmark_loop, course_sto
     query = f"CURSO {size:05d}"
 
     def search_course_page():
-        return benchmark_loop.run_until_complete(
-            store.course_page(query, 0, 50)
-        )
+        return benchmark_loop.run_until_complete(store.course_page(query, 0, 50))
 
     rows, total_count, matching_count = search_course_page()
     assert total_count == size
@@ -159,6 +175,33 @@ def test_benchmark_course_list_page_search(benchmark, benchmark_loop, course_sto
     assert rows[0]["id"] == size
     benchmark.pedantic(
         search_course_page,
+        rounds=BENCHMARK_ROUNDS,
+        iterations=1,
+        warmup_rounds=3,
+    )
+
+
+@pytest.mark.performance
+@pytest.mark.benchmark(group="enrollment-list-page")
+def test_benchmark_enrollment_list_page_search(
+    benchmark,
+    benchmark_loop,
+    enrollment_store,
+):
+    size, store = enrollment_store
+
+    def search_enrollment_page():
+        return benchmark_loop.run_until_complete(
+            store.enrollment_page("curso benchmark", 0, 0, 0, 50)
+        )
+
+    rows, total_count, matching_count = search_enrollment_page()
+    assert total_count == matching_count == size
+    assert len(rows) == 50
+    assert rows[0]["pending_student"] is False
+    assert rows[0]["pending_course"] is False
+    benchmark.pedantic(
+        search_enrollment_page,
         rounds=BENCHMARK_ROUNDS,
         iterations=1,
         warmup_rounds=3,

@@ -49,6 +49,7 @@ ApplicationWindow {
     property string selectedWorkspaceSection: "Resumen"
     property bool startupComplete: false
     property bool closeAfterCurrentOperation: false
+    property bool closeAllowedWithUnsavedChanges: false
     property string statusMessageText: ""
     property string campusFormName: ""
     property string campusFormAddress: ""
@@ -262,6 +263,13 @@ ApplicationWindow {
             appWindow.closeAfterCurrentOperation = true
             return
         }
+        if (!appWindow.closeAllowedWithUnsavedChanges
+                && appWindow.workspacePageItem
+                && appWindow.workspacePageItem.hasUnsavedChanges) {
+            closeEvent.accepted = false
+            unsavedCloseDialog.open()
+            return
+        }
         appWindow.persistSessionState()
     }
     onSessionSnapshotChanged: {
@@ -283,6 +291,52 @@ ApplicationWindow {
         }
         function onErrorChanged() {
             appWindow.showStatusMessage(backend.errorMessage)
+        }
+    }
+
+    Dialog {
+        id: unsavedCloseDialog
+        modal: true
+        title: "Cambios sin guardar"
+        standardButtons: Dialog.NoButton
+        width: Math.min(440, appWindow.width - 32)
+        anchors.centerIn: Overlay.overlay
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            Label {
+                Layout.fillWidth: true
+                text: "Hay cambios sin guardar en un formulario. "
+                      + "¿Quieres descartarlos y cerrar EduTrack Desktop?"
+                color: appTheme.primaryText
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    text: "Seguir trabajando"
+                    onClicked: unsavedCloseDialog.close()
+                }
+
+                Button {
+                    text: "Descartar y cerrar"
+                    highlighted: true
+                    onClicked: {
+                        unsavedCloseDialog.close()
+                        appWindow.closeAllowedWithUnsavedChanges = true
+                        Qt.callLater(function() {
+                            appWindow.close()
+                        })
+                    }
+                }
+            }
         }
     }
 

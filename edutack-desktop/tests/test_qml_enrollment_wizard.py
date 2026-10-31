@@ -28,21 +28,13 @@ def enrollment_wizard(tmp_path, gui_application):
     backend.saveStudent("", "PEREZ", "ANA", "12345678", "987654321")
 
     qml_directory = (
-        Path(__file__).parents[1]
-        / "src"
-        / "edutrack_desktop"
-        / "presentation"
-        / "qml"
+        Path(__file__).parents[1] / "src" / "edutrack_desktop" / "presentation" / "qml"
     )
     view = QQuickView()
-    theme_url = QUrl.fromLocalFile(
-        str(qml_directory / "components" / "AppTheme.qml")
-    )
+    theme_url = QUrl.fromLocalFile(str(qml_directory / "components" / "AppTheme.qml"))
     theme_component = QQmlComponent(view.engine(), theme_url)
     theme = theme_component.create()
-    assert theme is not None, [
-        error.toString() for error in theme_component.errors()
-    ]
+    assert theme is not None, [error.toString() for error in theme_component.errors()]
 
     page_url = QUrl.fromLocalFile(
         str(qml_directory / "pages" / "EnrollmentWizardPage.qml")
@@ -51,9 +43,7 @@ def enrollment_wizard(tmp_path, gui_application):
     root = page_component.createWithInitialProperties(
         {"backendObject": backend, "theme": theme}
     )
-    assert root is not None, [
-        error.toString() for error in page_component.errors()
-    ]
+    assert root is not None, [error.toString() for error in page_component.errors()]
 
     view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
     view.setContent(page_url, page_component, root)
@@ -102,6 +92,16 @@ def _find_visual_item(window, object_name):
     raise AssertionError(f"QML item {object_name!r} was not found.")
 
 
+def _wait_for_visual_item(window, object_name, gui_application):
+    for _ in range(100):
+        gui_application.processEvents()
+        try:
+            return _find_visual_item(window, object_name)
+        except AssertionError:
+            QTest.qWait(10)
+    raise AssertionError(f"QML item {object_name!r} was not loaded.")
+
+
 def _qml_texts(root):
     items = [root]
     items.extend(root.findChildren(QObject))
@@ -112,6 +112,30 @@ def _qml_texts(root):
     ]
 
 
+def _variant(value):
+    return value.toVariant() if hasattr(value, "toVariant") else value
+
+
+def _wait_for_search(root, property_name, gui_application):
+    for _ in range(100):
+        gui_application.processEvents()
+        if not root.property(property_name):
+            return
+        QTest.qWait(10)
+    raise AssertionError(f"Timed out waiting for {property_name}.")
+
+
+def _wait_for_model(model, gui_application, matching_count=None):
+    for _ in range(100):
+        gui_application.processEvents()
+        if not model.isLoading and (
+            matching_count is None or model.matchingCount == matching_count
+        ):
+            return
+        QTest.qWait(10)
+    raise AssertionError("Timed out waiting for the paged list model.")
+
+
 def test_qml_wizard_search_selection_validation_and_keyboard_save(
     enrollment_wizard, gui_application
 ):
@@ -119,13 +143,31 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     search = _item(root, "enrollmentStudentSearch")
     search.setProperty("text", "perez ana")
     QTest.qWait(300)
+    _wait_for_search(root, "searchPending", gui_application)
     gui_application.processEvents()
 
-    results = root.property("searchResults")
+    results = _variant(root.property("searchResults"))
     assert len(results) == 1
-    option = _item(root, "enrollmentStudentOption")
+    result_list = _item(root, "enrollmentStudentResultsList")
+    assert result_list.property("count") == 1, {
+        "visible": result_list.property("visible"),
+        "height": result_list.property("height"),
+        "search_results": results,
+    }
+    option = _wait_for_visual_item(view, "enrollmentStudentOption", gui_application)
     _click(view, option)
-    assert root.property("selectedStudent")["id"] == backend.students[0]["id"]
+    selected_student = root.property("selectedStudent")
+    assert selected_student is not None, {
+        "option_visible": option.isVisible(),
+        "option_enabled": option.isEnabled(),
+        "option_size": (option.width(), option.height()),
+        "option_position": option.mapToScene(QPointF(0, 0)),
+        "view_size": (view.width(), view.height()),
+        "view_active": view.isActive(),
+        "result_list_visible": result_list.isVisible(),
+        "result_list_height": result_list.height(),
+    }
+    assert selected_student["id"] == backend.students[0]["id"]
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
     assert root.property("currentStep") == 2
@@ -151,8 +193,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     enrollment_fee.setProperty("text", "100.00")
     assert root.findChild(QObject, "newEnrollmentRecordCode") is None
     assert not any(
-        "Código de ficha" in text or text == "Promotores"
-        for text in _qml_texts(root)
+        "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
 
     date_field = _item(root, "newEnrollmentDate")
@@ -182,8 +223,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     assert root.property("currentStep") == 3, root.property("errorText")
     assert monthly_fee.property("text") == "80.70"
     assert not any(
-        "Código de ficha" in text or text == "Promotores"
-        for text in _qml_texts(root)
+        "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
 
     QTest.keyClick(
@@ -201,8 +241,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     assert backend.manifest["enrollments"][0]["promoter_ids"] == []
     assert backend.manifest["enrollments"][0]["monthly_fee"] == "80.70"
     assert not any(
-        "Código de ficha" in text or text == "Promotores"
-        for text in _qml_texts(root)
+        "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
     assert backend.errorMessage == "Matrícula guardada en este dispositivo."
 
@@ -225,6 +264,30 @@ def test_qml_wizard_validates_new_student_and_cancels_with_escape(
     assert canceled == [True]
 
 
+def test_qml_wizard_confirms_discarding_new_student_fields(
+    enrollment_wizard, gui_application
+):
+    view, root, _backend = enrollment_wizard
+    canceled = []
+    root.cancelRequested.connect(lambda: canceled.append(True))
+    _click(view, _item(root, "enrollmentCreateStudentButton"))
+    last_name = _item(root, "newEnrollmentStudentLastName")
+    last_name.setProperty("text", "GARCÍA")
+    assert root.property("hasUnsavedChanges") is True
+
+    _click(view, _item(root, "enrollmentWizardCancelButton"))
+    _wait_for_visual_item(view, "continueEditingButton", gui_application)
+    assert canceled == []
+    _click(view, _find_visual_item(view, "continueEditingButton"))
+    assert last_name.property("text") == "GARCÍA"
+    assert root.property("hasUnsavedChanges") is True
+
+    _click(view, _item(root, "enrollmentWizardCancelButton"))
+    _wait_for_visual_item(view, "discardChangesButton", gui_application)
+    _click(view, _find_visual_item(view, "discardChangesButton"))
+    assert canceled == [True]
+
+
 def test_qml_wizard_creates_student_without_leaving_enrollment(
     enrollment_wizard, gui_application
 ):
@@ -235,15 +298,17 @@ def test_qml_wizard_creates_student_without_leaving_enrollment(
     first_name = _item(root, "newEnrollmentStudentFirstName")
     first_name.setProperty("text", "ANA")
     QTest.qWait(350)
+    _wait_for_search(root, "duplicateSearchPending", gui_application)
     gui_application.processEvents()
-    assert len(root.property("duplicateCandidates")) == 1
+    assert len(_variant(root.property("duplicateCandidates"))) == 1
 
     last_name.setProperty("text", "ROJAS")
     first_name.setProperty("text", "LUCIA")
     _item(root, "newEnrollmentStudentPhones").setProperty("text", "912345678")
     QTest.qWait(350)
+    _wait_for_search(root, "duplicateSearchPending", gui_application)
     gui_application.processEvents()
-    assert root.property("duplicateCandidates") == []
+    assert _variant(root.property("duplicateCandidates")) == []
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
     assert root.property("currentStep") == 2
@@ -293,14 +358,20 @@ def test_main_ctrl_m_opens_enrollment_wizard_after_lazy_loading(
         root.setProperty("visible", True)
         QTest.qWait(200)
         gui_application.processEvents()
-        assert _find_visual_item(
-            root,
-            "campusSetupPageLoader",
-        ).property("item") is None
-        assert _find_visual_item(
-            root,
-            "appDialogsLoader",
-        ).property("item") is None
+        assert (
+            _find_visual_item(
+                root,
+                "campusSetupPageLoader",
+            ).property("item")
+            is None
+        )
+        assert (
+            _find_visual_item(
+                root,
+                "appDialogsLoader",
+            ).property("item")
+            is None
+        )
         assert root.findChild(QObject, "studentsPage") is None
 
         QTest.keyClick(
@@ -422,10 +493,7 @@ def test_main_restores_and_persists_selected_workspace_section(
             QPointF(0, 0),
         )
         assert button_position.x() >= 0
-        assert (
-            button_position.x() + edit_button.width()
-            <= courses_page.width()
-        ), {
+        assert button_position.x() + edit_button.width() <= courses_page.width(), {
             "button_x": button_position.x(),
             "button_width": edit_button.width(),
             "page_width": courses_page.width(),
@@ -455,7 +523,11 @@ def test_main_restores_and_persists_selected_workspace_section(
         )
         _click(second_root, students_button)
         QTest.qWait(350)
-        assert _find_visual_item(second_root, "studentRow_" + student_id)
+        _wait_for_visual_item(
+            second_root,
+            "studentRow_" + student_id,
+            gui_application,
+        )
 
         students_page = _find_visual_item(second_root, "studentsPage")
         student_editor_loader = _find_visual_item(
@@ -470,21 +542,24 @@ def test_main_restores_and_persists_selected_workspace_section(
         QTest.qWait(80)
         assert backend.studentListModel.matchingCount == 1
         QTest.qWait(250)
-        assert backend.studentListModel.matchingCount == 0
+        _wait_for_model(backend.studentListModel, gui_application, 0)
 
         student_search.setProperty("text", "")
         status_filter.setProperty("currentIndex", 2)
         assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        _wait_for_model(backend.studentListModel, gui_application, 0)
         assert backend.studentListModel.matchingCount == 0
 
         status_filter.setProperty("currentIndex", 1)
         course_filter.setProperty("currentIndex", 1)
         assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        _wait_for_model(backend.studentListModel, gui_application, 1)
         assert backend.studentListModel.matchingCount == 1
 
         status_filter.setProperty("currentIndex", 0)
         course_filter.setProperty("currentIndex", 0)
         assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        _wait_for_model(backend.studentListModel, gui_application)
 
         enrollments_button = _find_visual_item(
             second_root,
@@ -492,7 +567,16 @@ def test_main_restores_and_persists_selected_workspace_section(
         )
         _click(second_root, enrollments_button)
         QTest.qWait(350)
-        assert _find_visual_item(second_root, "enrollmentRow_" + enrollment_id)
+        assert second_root.property("selectedWorkspaceSection") == "Matrículas"
+        _wait_for_model(backend.enrollmentListModel, gui_application, 1)
+        assert _find_visual_item(
+            second_root,
+            "enrollmentRow_" + enrollment_id,
+        ), (
+            backend.enrollmentListModel.totalCount,
+            backend.enrollmentListModel.matchingCount,
+            backend.enrollmentListModel.isLoading,
+        )
 
         sync_button = _find_visual_item(
             second_root,
@@ -581,7 +665,9 @@ def test_main_starts_at_minimum_size_without_saved_window_geometry(
         panel_scroll = root.findChild(QObject, "workspacePanelScroll")
         assert sidebar_scroll is not None
         assert panel_scroll is not None
-        assert sidebar_scroll.property("contentHeight") > sidebar_scroll.property("height")
+        assert sidebar_scroll.property("contentHeight") > sidebar_scroll.property(
+            "height"
+        )
         assert panel_scroll.property("contentHeight") > panel_scroll.property("height")
         for section in (
             "Matrículas",
@@ -692,9 +778,7 @@ def test_main_persists_window_geometry_across_restarts(tmp_path, gui_application
         asyncio.run(backend.store.dispose())
 
 
-def test_main_close_button_waits_for_active_operation(
-    tmp_path, gui_application
-):
+def test_main_close_button_waits_for_active_operation(tmp_path, gui_application):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Test Campus", "")
     session_store = SessionSettings(tmp_path / "session.ini")
@@ -742,9 +826,7 @@ def test_main_close_button_waits_for_active_operation(
         asyncio.run(backend.store.dispose())
 
 
-def test_main_can_close_while_startup_overlay_is_visible(
-    tmp_path, gui_application
-):
+def test_main_can_close_while_startup_overlay_is_visible(tmp_path, gui_application):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Test Campus", "")
     session_store = SessionSettings(tmp_path / "session.ini")

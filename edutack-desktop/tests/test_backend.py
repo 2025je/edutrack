@@ -29,6 +29,18 @@ def qcore_application():
     return QCoreApplication.instance() or QCoreApplication([])
 
 
+def _wait_for_model(model):
+    errors = []
+    model.queryFailed.connect(lambda error_type, message: errors.append(message))
+    deadline = time.monotonic() + 5
+    while model.isLoading and time.monotonic() < deadline:
+        QCoreApplication.instance().processEvents()
+        time.sleep(0.002)
+    QCoreApplication.instance().processEvents()
+    assert not model.isLoading
+    assert errors == []
+
+
 def test_desktop_settings_configure_default_storage_paths(tmp_path):
     created_paths = []
 
@@ -241,9 +253,7 @@ def test_database_saves_expose_global_saving_state(tmp_path):
         tmp_path / "workspace.sqlite3", store_factory=store_factory
     )
     saving_states = []
-    backend.savingStateChanged.connect(
-        lambda: saving_states.append(backend.isSaving)
-    )
+    backend.savingStateChanged.connect(lambda: saving_states.append(backend.isSaving))
     assert backend.createWorkspace("Sede de prueba", "")
     assert saving_states == [True, False]
 
@@ -299,9 +309,7 @@ def test_student_pages_filter_and_refresh_after_saving(tmp_path):
         "GOMEZ MARIO",
         "PEREZ ANA",
     ]
-    assert [row["label"] for row in backend.studentPage("", 1, 2)] == [
-        "ROJAS LUIS"
-    ]
+    assert [row["label"] for row in backend.studentPage("", 1, 2)] == ["ROJAS LUIS"]
     assert backend.matchingStudentCount("2222") == 1
     assert backend.studentPage("2222", 0, 50)[0]["label"] == "PEREZ ANA"
 
@@ -320,6 +328,7 @@ def test_student_list_model_filters_and_refreshes_after_saving(tmp_path):
     model = backend.studentListModel
     assert isinstance(model, QAbstractListModel)
     model.activate()
+    _wait_for_model(model)
     role_ids = {
         role_name.data().decode(): role_id
         for role_id, role_name in model.roleNames().items()
@@ -331,12 +340,14 @@ def test_student_list_model_filters_and_refreshes_after_saving(tmp_path):
     assert model.data(model.index(0, 0), role_ids["label"]) == "GOMEZ MARIO"
 
     model.setQuery("2222")
+    _wait_for_model(model)
     assert model.matchingCount == 1
     assert model.rowCount() == 1
     assert model.data(model.index(0, 0), role_ids["studentId"])
     assert model.rowAt(0)["label"] == "PEREZ ANA"
 
     backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
+    _wait_for_model(model)
     assert model.totalCount == 4
     assert model.matchingCount == 1
 
@@ -386,10 +397,12 @@ def test_course_list_model_searches_accent_insensitively_and_counts_active_stude
     model = backend.courseListModel
     assert isinstance(model, QAbstractListModel)
     model.activate()
+    _wait_for_model(model)
     assert model.totalCount == 2
     assert model.matchingCount == 2
 
     model.setQuery("matematicas manana")
+    _wait_for_model(model)
     assert model.matchingCount == 1
     assert model.rowCount() == 1
     course_group = model.rowAt(0)
@@ -397,6 +410,7 @@ def test_course_list_model_searches_accent_insensitively_and_counts_active_stude
     assert course_group["courses"][0]["student_count"] == 1
 
     model.setQuery("2026-02")
+    _wait_for_model(model)
     assert model.matchingCount == 1
     assert model.rowAt(0)["courses"][0]["name"].casefold() == "inglés".casefold()
 
@@ -417,9 +431,7 @@ def test_course_list_model_paginates_before_grouping():
     ]
 
     def page_provider(query, page_index, page_size):
-        matching = [
-            row for row in rows if query.lower() in row["name"].lower()
-        ]
+        matching = [row for row in rows if query.lower() in row["name"].lower()]
         start = page_index * page_size
         return matching[start : start + page_size], len(rows), len(matching)
 
@@ -482,7 +494,37 @@ def test_enrollment_list_model_filters_status_and_pages_rows():
             "course_id": None,
         },
     ]
-    model = EnrollmentListModel(lambda: rows, page_size=2)
+
+    def page_provider(query, status_index, course_id, page_index, page_size):
+        matching = rows
+        if query:
+            matching = [
+                row
+                for row in matching
+                if query.casefold()
+                in f"{row['student_label']} {row['course_label']} "
+                f"{row['enrollment_date']}".casefold()
+            ]
+        if course_id:
+            matching = [row for row in matching if row.get("course_id") == course_id]
+        if status_index == 1:
+            matching = [
+                row
+                for row in matching
+                if row["active"]
+                and not row["pending_student"]
+                and not row["pending_course"]
+            ]
+        elif status_index == 2:
+            matching = [row for row in matching if not row["active"]]
+        elif status_index == 3:
+            matching = [row for row in matching if row["pending_student"]]
+        elif status_index == 4:
+            matching = [row for row in matching if row["pending_course"]]
+        start = page_index * page_size
+        return matching[start : start + page_size], len(rows), len(matching)
+
+    model = EnrollmentListModel(page_provider, page_size=2)
     model.activate()
 
     assert isinstance(model, QAbstractListModel)
@@ -628,7 +670,9 @@ def test_save_course_updates_validates_and_persists(tmp_path):
     existing_course_id = backend.createCourse(
         "Pastelería", "Tarde", "2", "2026-01-02", "40.00", "60.00", "15"
     )
-    course = next(item for item in backend.manifest["courses"] if item["id"] == course_id)
+    course = next(
+        item for item in backend.manifest["courses"] if item["id"] == course_id
+    )
     course["server_id"] = 25
     asyncio.run(backend.store.save(backend.manifest))
     backend.selectCourse(course_id)
@@ -1023,9 +1067,7 @@ def test_removing_saved_campus_only_removes_catalog_entry(tmp_path):
 
     assert backend.removeCampusFromList(str(saved_path))
     assert saved_path.is_file()
-    assert [campus["campus_name"] for campus in backend.campuses] == [
-        "Sede activa"
-    ]
+    assert [campus["campus_name"] for campus in backend.campuses] == ["Sede activa"]
     assert backend.catalog.active_path == str(active_path.resolve())
     assert "se conservaron" in backend.errorMessage
 

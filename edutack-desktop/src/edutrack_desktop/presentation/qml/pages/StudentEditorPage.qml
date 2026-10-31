@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import "../components"
 
 Rectangle {
     id: root
@@ -10,8 +11,24 @@ Rectangle {
     property var student
     property var theme
     property string errorText: ""
+    property var initialStudentValues: null
+    readonly property bool hasUnsavedChanges: {
+        if (!root.initialStudentValues)
+            return false
+        return lastNameField.text !== root.initialStudentValues.lastName
+                || firstNameField.text !== root.initialStudentValues.firstName
+                || documentField.text !== root.initialStudentValues.document
+                || phonesField.text !== root.initialStudentValues.phones
+    }
     signal cancelRequested()
     signal saveSucceeded()
+
+    function requestCancel() {
+        if (root.hasUnsavedChanges)
+            discardDialog.open()
+        else
+            root.cancelRequested()
+    }
 
     function loadStudent() {
         lastNameField.clear()
@@ -19,12 +36,18 @@ Rectangle {
         documentField.clear()
         phonesField.clear()
         root.errorText = ""
-        if (!root.student)
-            return
-        lastNameField.text = root.student.last_name
-        firstNameField.text = root.student.first_name
-        documentField.text = root.student.document_number || ""
-        phonesField.text = (root.student.phone_numbers || []).join(", ")
+        if (root.student) {
+            lastNameField.text = root.student.last_name
+            firstNameField.text = root.student.first_name
+            documentField.text = root.student.document_number || ""
+            phonesField.text = (root.student.phone_numbers || []).join(", ")
+        }
+        root.initialStudentValues = {
+            lastName: lastNameField.text,
+            firstName: firstNameField.text,
+            document: documentField.text,
+            phones: phonesField.text
+        }
     }
 
     function saveStudent() {
@@ -40,6 +63,12 @@ Rectangle {
             root.saveSucceeded()
         else
             root.errorText = root.backendObject.errorMessage
+    }
+
+    DiscardChangesDialog {
+        id: discardDialog
+        theme: root.theme
+        onDiscardConfirmed: root.cancelRequested()
     }
 
     onStudentChanged: loadStudent()
@@ -58,7 +87,7 @@ Rectangle {
     Shortcut {
         sequence: "Esc"
         enabled: root.visible
-        onActivated: root.cancelRequested()
+        onActivated: root.requestCancel()
     }
 
     ColumnLayout {
@@ -72,7 +101,7 @@ Rectangle {
 
             Button {
                 text: "Volver a estudiantes"
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Label {
@@ -185,7 +214,7 @@ Rectangle {
 
             Button {
                 text: "Cancelar"
-                onClicked: root.cancelRequested()
+                onClicked: root.requestCancel()
             }
 
             Button {

@@ -16,6 +16,15 @@ Rectangle {
     property bool editorLoading: false
     property bool filtersUpdating: false
     property bool resettingFilters: false
+    readonly property bool hasUnsavedChanges: {
+        if (root.currentView === "wizard")
+            return enrollmentWizardLoader.item
+                    && enrollmentWizardLoader.item.hasUnsavedChanges
+        if (root.currentView === "editor")
+            return enrollmentEditorLoader.item
+                    && enrollmentEditorLoader.item.hasUnsavedChanges
+        return false
+    }
     readonly property var enrollmentModel: backendObject.enrollmentListModel
     readonly property int totalEnrollments: enrollmentModel.totalCount
     readonly property int filteredEnrollmentCount: enrollmentModel.matchingCount
@@ -35,6 +44,10 @@ Rectangle {
     color: theme.surface
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Matrículas"
+    onVisibleChanged: {
+        if (visible)
+            enrollmentModel.activate()
+    }
     Component.onCompleted: enrollmentModel.activate()
     onCurrentViewChanged: {
         if (currentView !== "editor")
@@ -237,6 +250,20 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.filteredEnrollmentCount === 0
+                     && root.enrollmentModel.isLoading
+            text: "Cargando matrículas..."
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: root.theme.secondaryText
+            font.family: "Roboto"
+            font.pixelSize: 16
+        }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.filteredEnrollmentCount === 0
+                     && !root.enrollmentModel.isLoading
             text: root.totalEnrollments === 0
                   ? "No hay matrículas registradas."
                   : "No se encontraron matrículas con esos filtros."

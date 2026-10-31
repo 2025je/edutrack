@@ -368,39 +368,101 @@ Rectangle {
 
                     ListView {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(contentHeight, 150)
+                        Layout.preferredHeight: Math.min(contentHeight, 220)
                         visible: root.previewItems.length > 0
                         clip: true
                         model: root.previewItems
-                        delegate: RowLayout {
+                        delegate: ColumnLayout {
                             id: previewRow
                             required property var modelData
                             width: ListView.view.width
-                            spacing: 8
-                            Label {
-                                Layout.preferredWidth: 100
-                                text: previewRow.modelData.state + " · "
-                                      + previewRow.modelData.kind
-                                color: previewRow.modelData.state === "conflict"
-                                       ? root.theme.error : root.theme.secondaryText
-                                font.family: "Roboto"
-                                font.pixelSize: 11
-                            }
-                            Label {
-                                Layout.preferredWidth: 150
-                                text: previewRow.modelData.label
-                                color: root.theme.primaryText
-                                font.family: "Roboto"
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-                            Label {
+                            spacing: 4
+                            property bool changesExpanded: false
+
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: previewRow.modelData.message
-                                color: root.theme.secondaryText
-                                font.family: "Roboto"
-                                font.pixelSize: 11
-                                wrapMode: Text.Wrap
+                                spacing: 8
+
+                                Label {
+                                    Layout.preferredWidth: 100
+                                    text: previewRow.modelData.state + " · "
+                                          + previewRow.modelData.kind
+                                    color: previewRow.modelData.state === "conflict"
+                                           ? root.theme.error : root.theme.secondaryText
+                                    font.family: "Roboto"
+                                    font.pixelSize: 11
+                                }
+                                Label {
+                                    Layout.preferredWidth: 150
+                                    text: previewRow.modelData.label
+                                    color: root.theme.primaryText
+                                    font.family: "Roboto"
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: previewRow.modelData.message
+                                    color: root.theme.secondaryText
+                                    font.family: "Roboto"
+                                    font.pixelSize: 11
+                                    wrapMode: Text.Wrap
+                                }
+                                Button {
+                                    visible: (previewRow.modelData.changes || []).length > 0
+                                    text: previewRow.changesExpanded
+                                          ? "Ocultar" : "Diferencias"
+                                    font.pixelSize: 10
+                                    onClicked: previewRow.changesExpanded
+                                               = !previewRow.changesExpanded
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: previewRow.changesExpanded
+                                spacing: 3
+
+                                Repeater {
+                                    model: previewRow.modelData.changes || []
+
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: 8
+
+                                        Label {
+                                            Layout.preferredWidth: 100
+                                            text: modelData.field
+                                            color: root.theme.primaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: "Desktop: " + modelData.local
+                                            color: root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: "Web: " + modelData.incoming
+                                            color: root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 1
+                                color: root.theme.divider
                             }
                         }
                     }

@@ -20,6 +20,14 @@ RowLayout {
     property bool summaryPageLoaded: false
     property bool syncPageLoaded: false
     property bool backupsPageLoaded: false
+    readonly property bool hasUnsavedChanges: {
+        return (enrollmentsPageLoader.item
+                && enrollmentsPageLoader.item.hasUnsavedChanges)
+                || (studentsPageLoader.item
+                    && studentsPageLoader.item.hasUnsavedChanges)
+                || (coursesPageLoader.item
+                    && coursesPageLoader.item.hasUnsavedChanges)
+    }
 
     function ensureSectionLoaded(section) {
         if (section === "Matrículas")
