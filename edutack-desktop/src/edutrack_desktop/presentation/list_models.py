@@ -14,10 +14,16 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from edutrack_desktop.application.presenters import course_week_groups
+
 Row = dict[str, Any]
 RowsProvider = Callable[[], list[Row]]
 StudentPageProvider = Callable[
     [str, int, int, int, int],
+    tuple[list[Row], int, int] | None,
+]
+CoursePageProvider = Callable[
+    [str, int, int],
     tuple[list[Row], int, int] | None,
 ]
 
@@ -251,6 +257,69 @@ class StudentListModel(PagedListModel):
             self._status_filter_index,
             self._course_filter_id,
         )
+
+    @Slot(int, result="QVariantMap")
+    def rowAt(self, index: int) -> Row:
+        return self.row_at(index)
+
+
+class CourseListModel(PagedListModel):
+    def __init__(
+        self,
+        page_provider: CoursePageProvider,
+        page_size: int = 50,
+        parent: QObject | None = None,
+    ):
+        self._page_provider = page_provider
+        self._query = ""
+        super().__init__(
+            None,
+            {
+                "weekLabel": "label",
+                "courses": "courses",
+            },
+            page_size,
+            parent,
+        )
+
+    def refresh(self) -> None:
+        page = self._page_provider(
+            self._query,
+            self._page_index,
+            self._page_size,
+        )
+        if page is None:
+            return
+        rows, total_count, matching_count = page
+        page_count = max(1, ceil(matching_count / self._page_size))
+        page_index = min(self._page_index, page_count - 1)
+        if page_index != self._page_index:
+            self._page_index = page_index
+            page = self._page_provider(
+                self._query,
+                self._page_index,
+                self._page_size,
+            )
+            if page is None:
+                return
+            rows, total_count, matching_count = page
+        self._replace_page(
+            course_week_groups(rows),
+            total_count,
+            matching_count,
+            already_paged=True,
+        )
+
+    @Slot(str)
+    def setQuery(self, query: str) -> None:
+        query = query.strip()
+        if query == self._query:
+            self.activate()
+            return
+        self._query = query
+        self._page_index = 0
+        if self._loaded:
+            self.refresh()
 
     @Slot(int, result="QVariantMap")
     def rowAt(self, index: int) -> Row:

@@ -1,6 +1,7 @@
 from edutrack_desktop.application.presenters import (
     course_rows,
     course_students,
+    course_week_groups,
     dashboard_summary,
     enrollment_rows,
     student_rows,
@@ -154,6 +155,50 @@ def test_course_rows_are_ordered_by_start_date_newest_first():
     }
 
     assert [row["id"] for row in course_rows(manifest)] == [3, 2, 1]
+
+
+def test_course_week_groups_sort_dates_and_keep_invalid_dates_at_the_end():
+    courses = [
+        {
+            "id": 1,
+            "name": "B",
+            "schedule": "Mañana",
+            "group": "1",
+            "start_date": "2026-01-05",
+        },
+        {
+            "id": 2,
+            "name": "A",
+            "schedule": "Tarde",
+            "group": "2",
+            "start_date": "2026-01-05",
+        },
+        {
+            "id": 3,
+            "name": "Anterior",
+            "schedule": "Mañana",
+            "group": "1",
+            "start_date": "2026-01-04",
+        },
+        {
+            "id": 4,
+            "name": "Fecha inválida",
+            "schedule": "Mañana",
+            "group": "1",
+            "start_date": "2026-02-30",
+        },
+    ]
+
+    groups = course_week_groups(courses)
+
+    assert [group["label"] for group in groups] == [
+        "SEMANA: del 5 al 11 de enero de 2026",
+        "SEMANA: del 29 de diciembre de 2025 al 4 de enero de 2026",
+        "Semana no definida",
+    ]
+    assert [course["id"] for course in groups[0]["courses"]] == [2, 1]
+    assert [course["id"] for course in groups[1]["courses"]] == [3]
+    assert [course["id"] for course in groups[2]["courses"]] == [4]
 
 
 def test_course_students_are_ordered_by_registration_recency():

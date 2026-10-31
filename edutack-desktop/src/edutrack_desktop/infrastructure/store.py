@@ -5,12 +5,24 @@ from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import MetaData, Table, URL, event, exists, func, inspect, or_, select
+from sqlalchemy import (
+    MetaData,
+    Table,
+    URL,
+    and_,
+    event,
+    exists,
+    func,
+    inspect,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql.elements import ColumnElement
 import structlog
 
+from ..domain.record_service import RecordMutation
 from .models import (
     CourseRecord,
     EnrollmentRecord,
@@ -24,6 +36,108 @@ from .search import normalize_search_text
 
 logger = structlog.get_logger(__name__)
 audit_logger = structlog.get_logger("edutrack_desktop.database")
+
+
+def _workspace_values(manifest: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "format": manifest["format"],
+        "version": manifest["version"],
+        "bundle_id": manifest["bundle_id"],
+        "campus_id": manifest["campus_id"],
+        "campus_name": manifest["campus_name"],
+        "campus_address": manifest.get("campus_address", ""),
+        "attachment_data": manifest.get("_attachment_data"),
+    }
+
+
+def _student_values(
+    item: dict[str, Any], workspace_id: int, position: int
+) -> dict[str, Any]:
+    return {
+        "id": item["id"],
+        "workspace_id": workspace_id,
+        "position": position,
+        "server_id": item["server_id"],
+        "base_hash": item["base_hash"],
+        "last_name": item["last_name"],
+        "first_name": item["first_name"],
+        "document_number": item["document_number"],
+        "last_name_search": normalize_search_text(item["last_name"]),
+        "first_name_search": normalize_search_text(item["first_name"]),
+        "document_number_search": normalize_search_text(item["document_number"]),
+        "phone_numbers": item["phone_numbers"],
+        "active": item["active"],
+    }
+
+
+def _course_values(
+    item: dict[str, Any], workspace_id: int, position: int
+) -> dict[str, Any]:
+    course_id = int(item["id"])
+    search_text = (
+        f"{item['name']} · {item['schedule']} · Grupo {item['group']}"
+    )
+    return {
+        "id": course_id,
+        "workspace_id": workspace_id,
+        "position": position,
+        "server_id": item.get("server_id", course_id),
+        "name": item["name"],
+        "schedule": item["schedule"],
+        "group_name": item["group"],
+        "search_text": normalize_search_text(search_text),
+        "start_date": item["start_date"],
+        "enrollment_fee": item["enrollment_fee"],
+        "monthly_fee": item["monthly_fee"],
+        "capacity": item["capacity"],
+        "active": item["active"],
+    }
+
+
+def _promoter_values(
+    item: dict[str, Any],
+    workspace_id: int,
+    position: int,
+    version: int,
+) -> dict[str, Any]:
+    promoter_id = int(item["id"])
+    return {
+        "id": promoter_id,
+        "workspace_id": workspace_id,
+        "position": position,
+        "server_id": (
+            item.get("server_id")
+            if item.get("server_id") is not None or version == 3
+            else promoter_id
+        ),
+        "name": item["name"],
+        "active": item["active"],
+    }
+
+
+def _enrollment_values(
+    item: dict[str, Any], workspace_id: int, position: int
+) -> dict[str, Any]:
+    course_id = item.get("course_id")
+    return {
+        "id": item["id"],
+        "workspace_id": workspace_id,
+        "position": position,
+        "server_id": item["server_id"],
+        "base_hash": item["base_hash"],
+        "student_id": item.get("student_id"),
+        "student_server_id": item["student_server_id"],
+        "course_id": int(course_id) if course_id is not None else None,
+        "enrollment_date": item["enrollment_date"],
+        "promoter_ids": [int(value) for value in item["promoter_ids"]],
+        "enrollment_fee": item["enrollment_fee"],
+        "monthly_fee": item["monthly_fee"],
+        "record_code": item["record_code"],
+        "active": item["active"],
+        "record_image": item["record_image"],
+        "record_image_hash": item["record_image_hash"],
+        "record_image_quality": item["record_image_quality"],
+    }
 
 
 class LocalStore:
@@ -160,56 +274,69 @@ class LocalStore:
             if not students:
                 return []
 
-            student_ids = [student.id for student in students]
-            enrollment_rows = (
-                await session.execute(
-                    select(
-                        EnrollmentRecord.student_id,
-                        CourseRecord.name,
-                        CourseRecord.schedule,
-                        CourseRecord.group_name,
-                    )
-                    .outerjoin(
-                        CourseRecord,
-                        EnrollmentRecord.course_id == CourseRecord.id,
-                    )
-                    .where(
-                        EnrollmentRecord.active.is_(True),
-                        EnrollmentRecord.student_id.in_(student_ids),
-                    )
-                    .order_by(EnrollmentRecord.position.desc())
-                )
-            ).all()
-            active_courses: dict[str, list[str]] = {}
-            for student_id, name, schedule, group_name in enrollment_rows:
-                if student_id is None:
-                    continue
-                course_label = (
-                    f"{name} · {schedule} · Grupo {group_name}"
-                    if name is not None
-                    else "Pendiente de curso"
-                )
-                active_courses.setdefault(student_id, []).append(course_label)
-
+            active_courses = await self._active_courses(
+                session, [student.id for student in students]
+            )
             return [
-                {
-                    "id": student.id,
-                    "server_id": student.server_id,
-                    "base_hash": student.base_hash,
-                    "last_name": student.last_name,
-                    "first_name": student.first_name,
-                    "document_number": student.document_number,
-                    "phone_numbers": student.phone_numbers,
-                    "active": student.active,
-                    "courses": active_courses.get(student.id, []),
-                    "label": " ".join(
-                        part
-                        for part in (student.last_name, student.first_name)
-                        if part
-                    ),
-                }
+                self._student_row(student, active_courses)
                 for student in students
             ]
+
+    @staticmethod
+    async def _active_courses(
+        session: AsyncSession, student_ids: Sequence[str]
+    ) -> dict[str, list[str]]:
+        enrollment_rows = (
+            await session.execute(
+                select(
+                    EnrollmentRecord.student_id,
+                    CourseRecord.name,
+                    CourseRecord.schedule,
+                    CourseRecord.group_name,
+                )
+                .outerjoin(
+                    CourseRecord,
+                    EnrollmentRecord.course_id == CourseRecord.id,
+                )
+                .where(
+                    EnrollmentRecord.active.is_(True),
+                    EnrollmentRecord.student_id.in_(student_ids),
+                )
+                .order_by(EnrollmentRecord.position.desc())
+            )
+        ).all()
+        active_courses: dict[str, list[str]] = {}
+        for student_id, name, schedule, group_name in enrollment_rows:
+            if student_id is None:
+                continue
+            course_label = (
+                f"{name} · {schedule} · Grupo {group_name}"
+                if name is not None
+                else "Pendiente de curso"
+            )
+            active_courses.setdefault(student_id, []).append(course_label)
+        return active_courses
+
+    @staticmethod
+    def _student_row(
+        student: StudentRecord, active_courses: dict[str, list[str]]
+    ) -> dict[str, Any]:
+        return {
+            "id": student.id,
+            "server_id": student.server_id,
+            "base_hash": student.base_hash,
+            "last_name": student.last_name,
+            "first_name": student.first_name,
+            "document_number": student.document_number,
+            "phone_numbers": student.phone_numbers,
+            "active": student.active,
+            "courses": active_courses.get(student.id, []),
+            "label": " ".join(
+                part
+                for part in (student.last_name, student.first_name)
+                if part
+            ),
+        }
 
     async def student_page(
         self,
@@ -264,39 +391,20 @@ class LocalStore:
                     column.like(pattern, escape="\\")
                     for column in searchable_columns
                 ]
-                folded_query = query.casefold()
-                course_rows = (
-                    await session.execute(
-                        select(
-                            CourseRecord.id,
-                            CourseRecord.name,
-                            CourseRecord.schedule,
-                            CourseRecord.group_name,
+                search_conditions.append(
+                    exists(
+                        select(EnrollmentRecord.id)
+                        .join(
+                            CourseRecord,
+                            EnrollmentRecord.course_id == CourseRecord.id,
+                        )
+                        .where(
+                            EnrollmentRecord.student_id == StudentRecord.id,
+                            EnrollmentRecord.active.is_(True),
+                            CourseRecord.search_text.like(pattern, escape="\\"),
                         )
                     )
-                ).all()
-                matching_course_ids = [
-                    course_id
-                    for course_id, name, schedule, group_name in course_rows
-                    if folded_query
-                    in f"{name} · {schedule} · Grupo {group_name}".casefold()
-                ]
-
-                if matching_course_ids:
-                    search_conditions.append(
-                        exists(
-                            select(EnrollmentRecord.id)
-                            .join(
-                                CourseRecord,
-                                EnrollmentRecord.course_id == CourseRecord.id,
-                            )
-                            .where(
-                                EnrollmentRecord.student_id == StudentRecord.id,
-                                EnrollmentRecord.active.is_(True),
-                                EnrollmentRecord.course_id.in_(matching_course_ids),
-                            )
-                        )
-                    )
+                )
                 conditions.append(or_(*search_conditions))
 
             total_count = await session.scalar(
@@ -320,6 +428,94 @@ class LocalStore:
                 session, students, total_count, matching_count
             )
 
+    async def course_page(
+        self,
+        query: str,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        await self.initialize()
+        if page_index < 0 or not 1 <= page_size <= 100:
+            raise ValueError("La página de cursos solicitada no es válida.")
+
+        tokens = normalize_search_text(query).split()
+        conditions: list[ColumnElement[bool]] = []
+        for token in tokens:
+            escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace(
+                "_", "\\_"
+            )
+            pattern = f"%{escaped}%"
+            conditions.append(
+                or_(
+                    CourseRecord.search_text.like(pattern, escape="\\"),
+                    CourseRecord.start_date.like(pattern, escape="\\"),
+                )
+            )
+
+        active_student_count = func.count(
+            func.distinct(StudentRecord.id)
+        ).label("student_count")
+        course_statement = (
+            select(
+                CourseRecord.id.label("id"),
+                CourseRecord.server_id.label("server_id"),
+                CourseRecord.name.label("name"),
+                CourseRecord.schedule.label("schedule"),
+                CourseRecord.group_name.label("group"),
+                CourseRecord.start_date.label("start_date"),
+                CourseRecord.enrollment_fee.label("enrollment_fee"),
+                CourseRecord.monthly_fee.label("monthly_fee"),
+                CourseRecord.capacity.label("capacity"),
+                CourseRecord.active.label("active"),
+                active_student_count,
+            )
+            .select_from(CourseRecord)
+            .outerjoin(
+                EnrollmentRecord,
+                and_(
+                    EnrollmentRecord.course_id == CourseRecord.id,
+                    EnrollmentRecord.active.is_(True),
+                ),
+            )
+            .outerjoin(
+                StudentRecord,
+                and_(
+                    StudentRecord.id == EnrollmentRecord.student_id,
+                    StudentRecord.active.is_(True),
+                ),
+            )
+            .where(*conditions)
+            .group_by(CourseRecord.id)
+            .order_by(CourseRecord.start_date.desc(), CourseRecord.position.desc())
+            .offset(page_index * page_size)
+            .limit(page_size)
+        )
+
+        async with self.session_factory() as session:
+            total_count = await session.scalar(
+                select(func.count()).select_from(CourseRecord)
+            )
+            matching_count = await session.scalar(
+                select(func.count())
+                .select_from(CourseRecord)
+                .where(*conditions)
+            )
+            rows = (await session.execute(course_statement)).mappings().all()
+            return (
+                [
+                    {
+                        **dict(row),
+                        "label": (
+                            f"{row['name']} · {row['schedule']} · "
+                            f"Grupo {row['group']}"
+                        ),
+                    }
+                    for row in rows
+                ],
+                int(total_count or 0),
+                int(matching_count or 0),
+            )
+
     @staticmethod
     async def _student_page_rows(
         session: AsyncSession,
@@ -330,56 +526,10 @@ class LocalStore:
         if not students:
             return [], int(total_count or 0), int(matching_count or 0)
 
-        student_ids = [student.id for student in students]
-        enrollment_rows = (
-            await session.execute(
-                select(
-                    EnrollmentRecord.student_id,
-                    CourseRecord.name,
-                    CourseRecord.schedule,
-                    CourseRecord.group_name,
-                )
-                .outerjoin(
-                    CourseRecord,
-                    EnrollmentRecord.course_id == CourseRecord.id,
-                )
-                .where(
-                    EnrollmentRecord.active.is_(True),
-                    EnrollmentRecord.student_id.in_(student_ids),
-                )
-                .order_by(EnrollmentRecord.position.desc())
-            )
-        ).all()
-        active_courses: dict[str, list[str]] = {}
-        for student_id, name, schedule, group_name in enrollment_rows:
-            if student_id is None:
-                continue
-            course_label = (
-                f"{name} · {schedule} · Grupo {group_name}"
-                if name is not None
-                else "Pendiente de curso"
-            )
-            active_courses.setdefault(student_id, []).append(course_label)
-
-        rows = [
-            {
-                "id": student.id,
-                "server_id": student.server_id,
-                "base_hash": student.base_hash,
-                "last_name": student.last_name,
-                "first_name": student.first_name,
-                "document_number": student.document_number,
-                "phone_numbers": student.phone_numbers,
-                "active": student.active,
-                "courses": active_courses.get(student.id, []),
-                "label": " ".join(
-                    part
-                    for part in (student.last_name, student.first_name)
-                    if part
-                ),
-            }
-            for student in students
-        ]
+        active_courses = await LocalStore._active_courses(
+            session, [student.id for student in students]
+        )
+        rows = [LocalStore._student_row(student, active_courses) for student in students]
         return rows, int(total_count or 0), int(matching_count or 0)
 
     async def _load(self):
@@ -537,203 +687,175 @@ class LocalStore:
     def create_backup(self, destination):
         return create_sqlite_backup(self.path, Path(destination))
 
-    async def save_records(self, manifest, changes):
-        """Persist only named records and workspace metadata in one transaction."""
+    async def save_records(
+        self, manifest: dict[str, Any], changes: dict[str, list[RecordMutation]]
+    ) -> None:
+        """Persist changed records and workspace metadata in one transaction."""
         await self.initialize()
-        async with self.session_factory.begin() as session:
-            workspace = await session.get(Workspace, 1)
-            if workspace is None:
-                raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            workspace_values = {
-                "format": manifest["format"],
-                "version": manifest["version"],
-                "bundle_id": manifest["bundle_id"],
-                "campus_id": manifest["campus_id"],
-                "campus_name": manifest["campus_name"],
-                "campus_address": manifest.get("campus_address", ""),
-                "attachment_data": manifest.get("_attachment_data"),
-            }
-            for key, value in workspace_values.items():
-                if getattr(workspace, key) != value:
-                    setattr(workspace, key, value)
 
-            def requested_rows(
-                collection_name: str,
-                requested_ids: list[Any],
-                id_getter: Any,
-            ) -> dict[Any, tuple[int, dict[str, Any]]]:
-                requested_set = set(requested_ids)
-                found: dict[Any, tuple[int, dict[str, Any]]] = {}
-                if not requested_set:
-                    return found
-                for position, item in enumerate(manifest[collection_name]):
-                    record_id = id_getter(item)
-                    if record_id in requested_set:
-                        found[record_id] = (position, item)
-                if found.keys() != requested_set:
+        def requested_changes(collection_name: str) -> list[RecordMutation]:
+            mutations = changes.get(collection_name, [])
+            seen_ids = set()
+            for mutation in mutations:
+                if (
+                    not isinstance(mutation, RecordMutation)
+                    or isinstance(mutation.position, bool)
+                    or mutation.position < 0
+                    or not isinstance(mutation.record, dict)
+                    or "id" not in mutation.record
+                ):
                     raise ValueError(
-                        f"No se encontraron todos los registros de {collection_name}."
+                        f"Los cambios de {collection_name} no son válidos."
                     )
-                return found
+                record_id = mutation.record["id"]
+                if record_id in seen_ids:
+                    raise ValueError(
+                        f"Hay IDs duplicados en los cambios de {collection_name}."
+                    )
+                seen_ids.add(record_id)
+            return mutations
 
-            async def upsert(model, record_id, values):
-                record = await session.get(model, record_id)
+        async def existing_ids(model, record_ids: set[Any]) -> set[Any]:
+            if not record_ids:
+                return set()
+            result: Any = await session.scalars(
+                select(model.id).where(model.id.in_(record_ids))
+            )
+            return set(result.all())
+
+        async def upsert_many(model, mutations, values_for):
+            if not mutations:
+                return
+            mutation_ids = {mutation.record["id"] for mutation in mutations}
+            result: Any = await session.scalars(
+                select(model).where(model.id.in_(mutation_ids))
+            )
+            existing_records: list[Any] = list(result.all())
+            records_by_id = {record.id: record for record in existing_records}
+            for mutation in mutations:
+                item = mutation.record
+                values = values_for(item, mutation.position)
+                record = records_by_id.get(item["id"])
                 if record is None:
                     session.add(model(**values))
-                    return
+                    continue
                 for key, value in values.items():
                     if getattr(record, key) != value:
                         setattr(record, key, value)
 
-            students = requested_rows(
-                "students", changes.get("students", []), lambda item: item["id"]
-            )
-            for student_id, (position, item) in students.items():
-                await upsert(
-                    StudentRecord,
-                    student_id,
-                    {
-                        "id": student_id,
-                        "workspace_id": workspace.id,
-                        "position": position,
-                        "server_id": item["server_id"],
-                        "base_hash": item["base_hash"],
-                        "last_name": item["last_name"],
-                        "first_name": item["first_name"],
-                        "document_number": item["document_number"],
-                        "last_name_search": normalize_search_text(
-                            item["last_name"]
-                        ),
-                        "first_name_search": normalize_search_text(
-                            item["first_name"]
-                        ),
-                        "document_number_search": normalize_search_text(
-                            item["document_number"]
-                        ),
-                        "phone_numbers": item["phone_numbers"],
-                        "active": item["active"],
-                    },
-                )
+        students = requested_changes("students")
+        courses = requested_changes("courses")
+        promoters = requested_changes("promoters")
+        enrollments = requested_changes("enrollments")
 
-            courses = requested_rows(
-                "courses",
-                changes.get("courses", []),
-                lambda item: int(item["id"]),
-            )
-            for course_id, (position, item) in courses.items():
-                await upsert(
-                    CourseRecord,
-                    course_id,
-                    {
-                        "id": course_id,
-                        "workspace_id": workspace.id,
-                        "position": position,
-                        "server_id": item.get("server_id", course_id),
-                        "name": item["name"],
-                        "schedule": item["schedule"],
-                        "group_name": item["group"],
-                        "start_date": item["start_date"],
-                        "enrollment_fee": item["enrollment_fee"],
-                        "monthly_fee": item["monthly_fee"],
-                        "capacity": item["capacity"],
-                        "active": item["active"],
-                    },
-                )
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+            for key, value in _workspace_values(manifest).items():
+                if getattr(workspace, key) != value:
+                    setattr(workspace, key, value)
 
-            promoters = requested_rows(
-                "promoters",
-                changes.get("promoters", []),
-                lambda item: int(item["id"]),
+            await upsert_many(
+                StudentRecord,
+                students,
+                lambda item, position: _student_values(
+                    item, workspace.id, position
+                ),
             )
-            for promoter_id, (position, item) in promoters.items():
-                await upsert(
-                    PromoterRecord,
-                    promoter_id,
-                    {
-                        "id": promoter_id,
-                        "workspace_id": workspace.id,
-                        "position": position,
-                        "server_id": (
-                            item.get("server_id")
-                            if item.get("server_id") is not None
-                            or manifest["version"] == 3
-                            else promoter_id
-                        ),
-                        "name": item["name"],
-                        "active": item["active"],
-                    },
-                )
+            await upsert_many(
+                CourseRecord,
+                courses,
+                lambda item, position: _course_values(
+                    item, workspace.id, position
+                ),
+            )
+            await upsert_many(
+                PromoterRecord,
+                promoters,
+                lambda item, position: _promoter_values(
+                    item, workspace.id, position, manifest["version"]
+                ),
+            )
+            await session.flush()
 
-            enrollments = requested_rows(
-                "enrollments",
-                changes.get("enrollments", []),
-                lambda item: item["id"],
+            student_ids = {
+                mutation.record["id"] for mutation in students
+            }
+            required_student_ids = {
+                mutation.record["student_id"]
+                for mutation in enrollments
+                if mutation.record.get("student_id") is not None
+            }
+            missing_student_ids = required_student_ids - student_ids
+            available_student_ids = student_ids | await existing_ids(
+                StudentRecord, missing_student_ids
             )
-            for enrollment_id, (position, item) in enrollments.items():
+
+            course_ids = {int(mutation.record["id"]) for mutation in courses}
+            required_course_ids = {
+                int(mutation.record["course_id"])
+                for mutation in enrollments
+                if mutation.record.get("course_id") is not None
+            }
+            missing_course_ids = required_course_ids - course_ids
+            available_course_ids = course_ids | await existing_ids(
+                CourseRecord, missing_course_ids
+            )
+
+            promoter_ids = {
+                int(mutation.record["id"]) for mutation in promoters
+            }
+            required_promoter_ids = {
+                int(promoter_id)
+                for mutation in enrollments
+                for promoter_id in mutation.record["promoter_ids"]
+            }
+            missing_promoter_ids = required_promoter_ids - promoter_ids
+            available_promoter_ids = promoter_ids | await existing_ids(
+                PromoterRecord, missing_promoter_ids
+            )
+
+            for mutation in enrollments:
+                item = mutation.record
                 student_id = item.get("student_id")
-                if student_id is not None and await session.get(
-                    StudentRecord, student_id
-                ) is None:
+                if student_id is not None and student_id not in available_student_ids:
                     raise ValueError(
                         "Una matrícula hace referencia a un estudiante inexistente."
                     )
                 course_id = item.get("course_id")
-                if course_id is not None and await session.get(
-                    CourseRecord, int(course_id)
-                ) is None:
+                if course_id is not None and int(course_id) not in available_course_ids:
                     raise ValueError(
                         "Una matrícula hace referencia a un curso inexistente."
                     )
-                promoter_ids = [int(value) for value in item["promoter_ids"]]
-                for promoter_id in promoter_ids:
-                    if await session.get(PromoterRecord, promoter_id) is None:
-                        raise ValueError(
-                            "Una matrícula hace referencia a un promotor inexistente."
-                        )
-                await upsert(
-                    EnrollmentRecord,
-                    enrollment_id,
-                    {
-                        "id": enrollment_id,
-                        "workspace_id": workspace.id,
-                        "position": position,
-                        "server_id": item["server_id"],
-                        "base_hash": item["base_hash"],
-                        "student_id": student_id,
-                        "student_server_id": item["student_server_id"],
-                        "course_id": int(course_id) if course_id is not None else None,
-                        "enrollment_date": item["enrollment_date"],
-                        "promoter_ids": promoter_ids,
-                        "enrollment_fee": item["enrollment_fee"],
-                        "monthly_fee": item["monthly_fee"],
-                        "record_code": item["record_code"],
-                        "active": item["active"],
-                        "record_image": item["record_image"],
-                        "record_image_hash": item["record_image_hash"],
-                        "record_image_quality": item["record_image_quality"],
-                    },
-                )
+                if any(
+                    int(promoter_id) not in available_promoter_ids
+                    for promoter_id in item["promoter_ids"]
+                ):
+                    raise ValueError(
+                        "Una matrícula hace referencia a un promotor inexistente."
+                    )
+
+            await upsert_many(
+                EnrollmentRecord,
+                enrollments,
+                lambda item, position: _enrollment_values(
+                    item, workspace.id, position
+                ),
+            )
 
         audit_logger.info(
             "database.records_saved",
-            student_count=len(changes.get("students", [])),
-            enrollment_count=len(changes.get("enrollments", [])),
-            course_count=len(changes.get("courses", [])),
-            promoter_count=len(changes.get("promoters", [])),
+            student_count=len(students),
+            enrollment_count=len(enrollments),
+            course_count=len(courses),
+            promoter_count=len(promoters),
         )
 
     async def _save(self, manifest, sync_history_event=None):
         async with self.session_factory.begin() as session:
             workspace = await session.get(Workspace, 1)
-            workspace_values = {
-                "format": manifest["format"],
-                "version": manifest["version"],
-                "bundle_id": manifest["bundle_id"],
-                "campus_id": manifest["campus_id"],
-                "campus_name": manifest["campus_name"],
-                "campus_address": manifest.get("campus_address", ""),
-                "attachment_data": manifest.get("_attachment_data"),
-            }
+            workspace_values = _workspace_values(manifest)
             if workspace is None:
                 workspace = Workspace(id=1, **workspace_values)
                 session.add(workspace)
@@ -785,60 +907,25 @@ class LocalStore:
                 StudentRecord,
                 manifest["students"],
                 lambda item: item["id"],
-                lambda item, position: {
-                    "id": item["id"],
-                    "workspace_id": workspace.id,
-                    "position": position,
-                    "server_id": item["server_id"],
-                    "base_hash": item["base_hash"],
-                    "last_name": item["last_name"],
-                    "first_name": item["first_name"],
-                    "document_number": item["document_number"],
-                    "last_name_search": normalize_search_text(item["last_name"]),
-                    "first_name_search": normalize_search_text(item["first_name"]),
-                    "document_number_search": normalize_search_text(
-                        item["document_number"]
-                    ),
-                    "phone_numbers": item["phone_numbers"],
-                    "active": item["active"],
-                },
+                lambda item, position: _student_values(
+                    item, workspace.id, position
+                ),
             )
             stale_courses, _ = await synchronize(
                 CourseRecord,
                 manifest["courses"],
                 lambda item: int(item["id"]),
-                lambda item, position: {
-                    "id": int(item["id"]),
-                    "workspace_id": workspace.id,
-                    "position": position,
-                    "server_id": item.get("server_id", int(item["id"])),
-                    "name": item["name"],
-                    "schedule": item["schedule"],
-                    "group_name": item["group"],
-                    "start_date": item["start_date"],
-                    "enrollment_fee": item["enrollment_fee"],
-                    "monthly_fee": item["monthly_fee"],
-                    "capacity": item["capacity"],
-                    "active": item["active"],
-                },
+                lambda item, position: _course_values(
+                    item, workspace.id, position
+                ),
             )
             stale_promoters, _ = await synchronize(
                 PromoterRecord,
                 manifest["promoters"],
                 lambda item: int(item["id"]),
-                lambda item, position: {
-                    "id": int(item["id"]),
-                    "workspace_id": workspace.id,
-                    "position": position,
-                    "server_id": (
-                        item.get("server_id")
-                        if item.get("server_id") is not None
-                        or manifest["version"] == 3
-                        else int(item["id"])
-                    ),
-                    "name": item["name"],
-                    "active": item["active"],
-                },
+                lambda item, position: _promoter_values(
+                    item, workspace.id, position, manifest["version"]
+                ),
             )
             await session.flush()
 
@@ -846,25 +933,9 @@ class LocalStore:
                 EnrollmentRecord,
                 manifest["enrollments"],
                 lambda item: item["id"],
-                lambda item, position: {
-                    "id": item["id"],
-                    "workspace_id": workspace.id,
-                    "position": position,
-                    "server_id": item["server_id"],
-                    "base_hash": item["base_hash"],
-                    "student_id": item.get("student_id"),
-                    "student_server_id": item["student_server_id"],
-                    "course_id": item.get("course_id"),
-                    "enrollment_date": item["enrollment_date"],
-                    "promoter_ids": [int(value) for value in item["promoter_ids"]],
-                    "enrollment_fee": item["enrollment_fee"],
-                    "monthly_fee": item["monthly_fee"],
-                    "record_code": item["record_code"],
-                    "active": item["active"],
-                    "record_image": item["record_image"],
-                    "record_image_hash": item["record_image_hash"],
-                    "record_image_quality": item["record_image_quality"],
-                },
+                lambda item, position: _enrollment_values(
+                    item, workspace.id, position
+                ),
             )
             for record in stale_enrollments:
                 if record.id not in requested_enrollments:

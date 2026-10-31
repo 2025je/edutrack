@@ -5,18 +5,27 @@ import sqlite3
 import uuid
 from contextlib import closing
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import given, settings, strategies as st
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, inspect
+from sqlalchemy import event, inspect, select
 
-from edutrack_desktop.infrastructure.models import StudentRecord
+from edutrack_desktop.domain.record_service import RecordMutation
+from edutrack_desktop.infrastructure.models import CourseRecord, StudentRecord
+from edutrack_desktop.infrastructure.search import normalize_search_text
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.transfer import (
     PackageError,
     read_package,
     write_package,
+)
+
+COURSE_TEXT_ALPHABET = (
+    "áéíóúüñÁÉÍÓÚÜÑabcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_."
 )
 
 
@@ -214,7 +223,14 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
 
         event.listen(store.engine.sync_engine, "before_cursor_execute", capture_sql)
         try:
-            await store.save_records(updated, {"students": [student_id]})
+            await store.save_records(
+                updated,
+                {
+                    "students": [
+                        RecordMutation(0, updated["students"][0])
+                    ]
+                },
+            )
         finally:
             event.remove(
                 store.engine.sync_engine, "before_cursor_execute", capture_sql
@@ -235,6 +251,55 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
         assert result[0]["id"] == student_id
 
     asyncio.run(verify_specific_save())
+
+
+def test_incremental_enrollment_save_batches_records_and_reference_checks(
+    manifest, tmp_path
+):
+    data = deepcopy(manifest)
+    for _ in range(4):
+        enrollment = deepcopy(data["enrollments"][0])
+        enrollment["id"] = str(uuid.uuid4())
+        enrollment["record_code"] = None
+        data["enrollments"].append(enrollment)
+
+    store = LocalStore(tmp_path / "batched-save.sqlite3")
+
+    async def verify_batched_save():
+        await store.save(data)
+        updated = deepcopy(data)
+        changes = []
+        for position, enrollment in enumerate(updated["enrollments"]):
+            enrollment["monthly_fee"] = f"{81 + position}.00"
+            changes.append(RecordMutation(position, enrollment))
+
+        statements = []
+
+        def capture_sql(_connection, _cursor, statement, _parameters, *_):
+            if statement.lstrip().lower().startswith("select"):
+                statements.append(statement.lower())
+
+        event.listen(store.engine.sync_engine, "before_cursor_execute", capture_sql)
+        try:
+            await store.save_records(updated, {"enrollments": changes})
+        finally:
+            event.remove(
+                store.engine.sync_engine, "before_cursor_execute", capture_sql
+            )
+
+        for table in (
+            "desktop_enrollments",
+            "desktop_students",
+            "desktop_courses",
+            "desktop_promoters",
+        ):
+            assert sum(f"from {table}" in statement for statement in statements) == 1
+        assert await store.load() == updated
+
+    try:
+        asyncio.run(verify_batched_save())
+    finally:
+        asyncio.run(store.dispose())
 
 
 def test_student_page_searches_filters_and_paginates_in_sqlite(
@@ -316,6 +381,12 @@ def test_student_page_searches_filters_and_paginates_in_sqlite(
         assert search_count == 1
         assert search_page[0]["id"] == inactive_student_id
         assert search_page[0]["courses"] == ["Historia · Tarde · Grupo 2"]
+
+        accented_course_page, _, accented_course_count = await store.student_page(
+            "matematicas", 0, 0, 0, 50
+        )
+        assert accented_course_count == 1
+        assert accented_course_page[0]["id"] == manifest["students"][0]["id"]
 
         accented_page, _, accented_count = await store.student_page(
             "gomez", 0, 0, 0, 50
@@ -424,10 +495,122 @@ def test_migration_from_revision_0002_backfills_search_columns(manifest, tmp_pat
 
         upgraded_store = LocalStore(database_path)
         assert await upgraded_store.search_students("perez ana")
+        course_page, _, course_count = await upgraded_store.student_page(
+            "matematicas", 0, 0, 0, 50
+        )
+        assert course_count == 1
+        assert course_page[0]["id"] == manifest["students"][0]["id"]
         assert await upgraded_store.load() == manifest
         await upgraded_store.dispose()
 
     asyncio.run(verify_upgrade())
+
+
+@given(st.text())
+def test_search_text_normalization_is_idempotent(value):
+    normalized = normalize_search_text(value)
+
+    assert normalize_search_text(normalized) == normalized
+
+
+@settings(max_examples=2, deadline=None)
+@given(
+    names=st.lists(
+        st.text(
+            alphabet=COURSE_TEXT_ALPHABET,
+            min_size=1,
+            max_size=30,
+        ),
+        min_size=501,
+        max_size=501,
+    ),
+    schedules=st.lists(
+        st.text(
+            alphabet=COURSE_TEXT_ALPHABET,
+            min_size=1,
+            max_size=20,
+        ),
+        min_size=501,
+        max_size=501,
+    ),
+)
+def test_course_search_migration_backfills_multiple_batches(names, schedules):
+    with TemporaryDirectory() as directory:
+        database_path = Path(directory) / "course-search.sqlite3"
+        manifest = {
+            "format": "edutrack-offline",
+            "version": 2,
+            "bundle_id": "00000000-0000-0000-0000-000000000001",
+            "campus_id": 1,
+            "campus_name": "Sede de prueba",
+            "campus_address": "",
+            "students": [],
+            "enrollments": [],
+            "courses": [
+                {
+                    "id": index,
+                    "server_id": None,
+                    "name": f"{names[index - 1]} {index}",
+                    "schedule": schedules[index - 1],
+                    "group": "1",
+                    "start_date": "2026-01-01",
+                    "enrollment_fee": "100.00",
+                    "monthly_fee": "80.00",
+                    "capacity": 20,
+                    "active": True,
+                }
+                for index in range(1, 502)
+            ],
+            "promoters": [],
+        }
+
+        async def verify_upgrade():
+            store = LocalStore(database_path)
+            try:
+                await store.save(manifest)
+                config_path = (
+                    Path(__file__).parents[1]
+                    / "src"
+                    / "edutrack_desktop"
+                    / "infrastructure"
+                    / "alembic.ini"
+                )
+
+                def downgrade_schema(connection):
+                    config = Config(str(config_path))
+                    config.set_main_option(
+                        "sqlalchemy.url",
+                        store.engine.url.render_as_string().replace("%", "%%"),
+                    )
+                    config.attributes["connection"] = connection
+                    command.downgrade(config, "0004_sync_history")
+
+                async with store.engine.begin() as connection:
+                    await connection.run_sync(downgrade_schema)
+            finally:
+                await store.dispose()
+
+            upgraded_store = LocalStore(database_path)
+            try:
+                await upgraded_store.load()
+                async with upgraded_store.session_factory() as session:
+                    rows = (
+                        await session.execute(
+                            select(CourseRecord.id, CourseRecord.search_text)
+                        )
+                    ).all()
+                expected = {
+                    course["id"]: normalize_search_text(
+                        f"{course['name']} · {course['schedule']} · "
+                        f"Grupo {course['group']}"
+                    )
+                    for course in manifest["courses"]
+                }
+                assert dict(rows) == expected
+            finally:
+                await upgraded_store.dispose()
+
+        asyncio.run(verify_upgrade())
 
 
 def test_legacy_json_workspace_is_migrated_without_data_loss(manifest, tmp_path):

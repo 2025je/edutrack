@@ -50,6 +50,16 @@ ApplicationWindow {
     property bool startupComplete: false
     property bool closeAfterCurrentOperation: false
     property string statusMessageText: ""
+    property string campusFormName: ""
+    property string campusFormAddress: ""
+    property bool campusSetupPageLoaded: false
+    property bool workspacePageLoaded: false
+    property bool appDialogsRequested: false
+    property bool appDialogsLoaded: false
+    property string pendingAppDialogAction: ""
+    property var campusSetupPageItem: null
+    property var workspacePageItem: null
+    property var appDialogsItem: null
 
     AppTheme {
         id: appTheme
@@ -60,26 +70,35 @@ ApplicationWindow {
         sequence: "Ctrl+N"
         enabled: backend.hasWorkspace && !backend.isBusy
                  && !appWindow.creatingCampus
-        onActivated: workspacePage.openNewStudent()
+        onActivated: {
+            if (appWindow.workspacePageItem)
+                appWindow.workspacePageItem.openNewStudent()
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+M"
         enabled: backend.hasWorkspace && !backend.isBusy
                  && !appWindow.creatingCampus
-        onActivated: workspacePage.openNewEnrollment()
+        onActivated: {
+            if (appWindow.workspacePageItem)
+                appWindow.workspacePageItem.openNewEnrollment()
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+F"
         enabled: backend.hasWorkspace && !appWindow.creatingCampus
-        onActivated: workspacePage.focusCurrentSearch()
+        onActivated: {
+            if (appWindow.workspacePageItem)
+                appWindow.workspacePageItem.focusCurrentSearch()
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+E"
         enabled: backend.hasWorkspace && !backend.isBusy
-        onActivated: appDialogs.openExportDialog()
+        onActivated: appWindow.requestAppDialog("export")
     }
 
     Shortcut {
@@ -92,6 +111,31 @@ ApplicationWindow {
         var index = backend.activeCampusIndex
         var campuses = backend.campuses
         return index >= 0 && index < campuses.length ? campuses[index].path : ""
+    }
+
+    function requestAppDialog(action) {
+        appWindow.pendingAppDialogAction = action
+        appWindow.appDialogsRequested = true
+        if (appWindow.appDialogsItem)
+            Qt.callLater(appWindow.dispatchPendingAppDialog)
+    }
+
+    function dispatchPendingAppDialog() {
+        if (!appWindow.appDialogsItem || !appWindow.pendingAppDialogAction)
+            return
+
+        var action = appWindow.pendingAppDialogAction
+        appWindow.pendingAppDialogAction = ""
+        if (action === "import")
+            appWindow.appDialogsItem.openImportDialog()
+        else if (action === "createDatabase")
+            appWindow.appDialogsItem.openCreateDatabaseDialog()
+        else if (action === "openDatabase")
+            appWindow.appDialogsItem.openLocalDatabaseDialog()
+        else if (action === "export")
+            appWindow.appDialogsItem.openExportDialog()
+        else if (action === "closeCampus")
+            appWindow.appDialogsItem.openCloseCampusDialog()
     }
 
     function loadSessionState() {
@@ -155,12 +199,20 @@ ApplicationWindow {
             appWindow.selectedWorkspaceSection = state.selectedWorkspaceSection
         if (state.campusPath === appWindow.activeCampusPath()) {
             var campusForm = state.campusForm || {}
-            campusSetupPage.campusName = campusForm.name || ""
-            campusSetupPage.campusAddress = campusForm.address || ""
+            appWindow.campusFormName = campusForm.name || ""
+            appWindow.campusFormAddress = campusForm.address || ""
             appWindow.creatingCampus = state.creatingCampus === true
+            if (appWindow.campusSetupPageItem) {
+                appWindow.campusSetupPageItem.campusName = appWindow.campusFormName
+                appWindow.campusSetupPageItem.campusAddress = appWindow.campusFormAddress
+            }
         }
 
-        workspacePage.ensureSectionLoaded(appWindow.selectedWorkspaceSection)
+        if (appWindow.workspacePageItem) {
+            appWindow.workspacePageItem.ensureSectionLoaded(
+                appWindow.selectedWorkspaceSection
+            )
+        }
         appWindow.restoringSession = false
         appWindow.sessionTrackingEnabled = true
     }
@@ -179,8 +231,8 @@ ApplicationWindow {
                 height: appWindow.height
             },
             campusForm: {
-                name: campusSetupPage.campusName,
-                address: campusSetupPage.campusAddress
+                name: appWindow.campusFormName,
+                address: appWindow.campusFormAddress
             }
         }
 
@@ -259,13 +311,36 @@ ApplicationWindow {
         }
     }
 
-    AppDialogs {
-        id: appDialogs
+    Loader {
+        id: appDialogsLoader
+        objectName: "appDialogsLoader"
         anchors.fill: parent
-        backendObject: backend
-        windowController: appWindow
-        campusPage: campusSetupPage
-        theme: appTheme
+        active: appWindow.appDialogsRequested || appWindow.appDialogsLoaded
+        asynchronous: true
+        sourceComponent: Component {
+            AppDialogs {
+                anchors.fill: parent
+                backendObject: backend
+                windowController: appWindow
+                campusPage: appWindow.campusSetupPageItem
+                theme: appTheme
+            }
+        }
+        onLoaded: {
+            appWindow.appDialogsItem = item
+            appWindow.appDialogsLoaded = true
+            appWindow.dispatchPendingAppDialog()
+        }
+        onStatusChanged: {
+            if (status === Loader.Error) {
+                appWindow.appDialogsItem = null
+                appWindow.pendingAppDialogAction = ""
+                console.error("No se pudieron cargar los diálogos: " + errorString())
+                appWindow.showStatusMessage(
+                    "No se pudieron cargar los diálogos de la aplicación."
+                )
+            }
+        }
     }
 
     StartupOverlay {
@@ -284,9 +359,9 @@ ApplicationWindow {
             windowController: appWindow
             backendObject: backend
             theme: appTheme
-            onCloseCampusRequested: appDialogs.openCloseCampusDialog()
+            onCloseCampusRequested: appWindow.requestAppDialog("closeCampus")
             onDarkModeToggleRequested: appWindow.darkMode = !appWindow.darkMode
-            onExportRequested: appDialogs.openExportDialog()
+            onExportRequested: appWindow.requestAppDialog("export")
         }
 
         Rectangle {
@@ -297,25 +372,87 @@ ApplicationWindow {
             color: setupVisible ? appWindow.surfaceColor : "transparent"
             border.color: setupVisible ? appWindow.borderColor : "transparent"
 
-            CampusSetupPage {
-                id: campusSetupPage
+            Loader {
+                id: campusSetupLoader
+                objectName: "campusSetupPageLoader"
                 anchors.fill: parent
-                backendObject: backend
-                windowController: appWindow
-                theme: appTheme
-                statusBarHeight: statusBar.height
-                onImportRequested: appDialogs.openImportDialog()
-                onOpenLocalDatabaseRequested: appDialogs.openLocalDatabaseDialog()
-                onCreateDatabaseRequested: appDialogs.openCreateDatabaseDialog()
+                active: !backend.hasWorkspace || appWindow.creatingCampus
+                        || appWindow.campusSetupPageLoaded
+                visible: !backend.hasWorkspace || appWindow.creatingCampus
+                sourceComponent: Component {
+                    CampusSetupPage {
+                        anchors.fill: parent
+                        backendObject: backend
+                        windowController: appWindow
+                        theme: appTheme
+                        statusBarHeight: statusBar.height
+                        onCampusNameChanged: appWindow.campusFormName = campusName
+                        onCampusAddressChanged: appWindow.campusFormAddress = campusAddress
+                        onImportRequested: appWindow.requestAppDialog("import")
+                        onOpenLocalDatabaseRequested: appWindow.requestAppDialog(
+                                                           "openDatabase"
+                                                       )
+                        onCreateDatabaseRequested: appWindow.requestAppDialog(
+                                                       "createDatabase"
+                                                   )
+                    }
+                }
+                onLoaded: {
+                    appWindow.campusSetupPageLoaded = true
+                    appWindow.campusSetupPageItem = item
+                    appWindow.campusSetupPageItem.campusName =
+                            appWindow.campusFormName
+                    appWindow.campusSetupPageItem.campusAddress =
+                            appWindow.campusFormAddress
+                }
+                onStatusChanged: {
+                    if (status === Loader.Error) {
+                        appWindow.campusSetupPageItem = null
+                        console.error(
+                            "No se pudo cargar la configuración de sede: "
+                            + errorString()
+                        )
+                        appWindow.showStatusMessage(
+                            "No se pudo cargar la configuración de sede."
+                        )
+                    }
+                }
             }
 
-            WorkspacePage {
-                id: workspacePage
+            Loader {
+                id: workspacePageLoader
+                objectName: "workspacePageLoader"
                 anchors.fill: parent
-                backendObject: backend
-                windowController: appWindow
-                theme: appTheme
-                statusBarHeight: statusBar.height
+                active: backend.hasWorkspace || appWindow.workspacePageLoaded
+                visible: backend.hasWorkspace && !appWindow.creatingCampus
+                sourceComponent: Component {
+                    WorkspacePage {
+                        anchors.fill: parent
+                        backendObject: backend
+                        windowController: appWindow
+                        theme: appTheme
+                        statusBarHeight: statusBar.height
+                    }
+                }
+                onLoaded: {
+                    appWindow.workspacePageLoaded = true
+                    appWindow.workspacePageItem = item
+                    appWindow.workspacePageItem.ensureSectionLoaded(
+                        appWindow.selectedWorkspaceSection
+                    )
+                }
+                onStatusChanged: {
+                    if (status === Loader.Error) {
+                        appWindow.workspacePageItem = null
+                        console.error(
+                            "No se pudo cargar el espacio de trabajo: "
+                            + errorString()
+                        )
+                        appWindow.showStatusMessage(
+                            "No se pudo cargar el espacio de trabajo."
+                        )
+                    }
+                }
             }
 
             StatusBar {

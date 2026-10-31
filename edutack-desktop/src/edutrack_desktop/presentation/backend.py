@@ -39,7 +39,7 @@ from ..application.presenters import (
     student_rows,
 )
 from ..application.sync import build_import_preview
-from ..domain.record_service import RecordService
+from ..domain.record_service import RecordMutation, RecordService
 from ..infrastructure.app_settings import DesktopSettings
 from ..infrastructure.backup import (
     create_sqlite_backup,
@@ -56,7 +56,7 @@ from ..infrastructure.transfer import (
     read_package,
     write_package,
 )
-from .list_models import EnrollmentListModel, StudentListModel
+from .list_models import CourseListModel, EnrollmentListModel, StudentListModel
 
 logger = structlog.get_logger(__name__)
 
@@ -74,7 +74,7 @@ class _WorkspaceSaveWorker(QRunnable):
         self,
         store: WorkspaceStore,
         manifest: dict[str, Any],
-        record_changes: dict[str, list[Any]] | None = None,
+        record_changes: dict[str, list[RecordMutation]] | None = None,
     ):
         super().__init__()
         self.setAutoDelete(False)
@@ -336,6 +336,10 @@ class DesktopBackend(QObject):
             self._student_page_rows,
             parent=self,
         )
+        self._course_list_model = CourseListModel(
+            self._course_page_rows,
+            parent=self,
+        )
         self._enrollment_list_model = EnrollmentListModel(
             self._all_enrollment_rows,
             parent=self,
@@ -456,8 +460,13 @@ class DesktopBackend(QObject):
     def enrollmentListModel(self):
         return self._enrollment_list_model
 
+    @Property(QObject, constant=True)
+    def courseListModel(self):
+        return self._course_list_model
+
     def _refresh_list_models(self) -> None:
         self._student_list_model.refreshIfLoaded()
+        self._course_list_model.refreshIfLoaded()
         self._enrollment_list_model.refreshIfLoaded()
 
     def _all_student_rows(self) -> list[dict[str, Any]]:
@@ -499,6 +508,35 @@ class DesktopBackend(QObject):
             )
             self._set_error(
                 "No se pudo cargar la lista de estudiantes desde la base local."
+            )
+            return None
+
+    def _course_page_rows(
+        self,
+        query: str,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int] | None:
+        if not self.manifest or self.store is None:
+            return [], 0, 0
+        try:
+            return self._run_async(
+                self.store.course_page(query, page_index, page_size)
+            )
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            logger.error(
+                "workspace.course_page_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(
+                "No se pudo cargar la lista de cursos desde la base local."
             )
             return None
 
@@ -1314,6 +1352,24 @@ class DesktopBackend(QObject):
         self._invalidate_student_rows()
         self.dataChanged.emit()
         return True
+
+    @staticmethod
+    def _mutation_for_record(
+        manifest: dict[str, Any], collection: str, record: dict[str, Any]
+    ) -> RecordMutation:
+        position = next(
+            (
+                index
+                for index, item in enumerate(manifest[collection])
+                if item is record
+            ),
+            None,
+        )
+        if position is None:
+            raise RuntimeError(
+                f"El registro modificado ya no existe en {collection}."
+            )
+        return RecordMutation(position, record)
 
     def _persist_manifest(
         self, store, manifest, record_changes=None, history_event=None
@@ -2175,7 +2231,7 @@ class DesktopBackend(QObject):
             )
             return 0
         try:
-            course_id = self._record_service.create_course(
+            mutation = self._record_service.create_course(
                 self.manifest,
                 name,
                 schedule,
@@ -2185,12 +2241,13 @@ class DesktopBackend(QObject):
                 monthly_fee,
                 capacity,
             )
+            course_id = int(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("course.create", exc)
             self._set_error(str(exc) or "Revisa los datos del curso.")
             return 0
         self._selected_course_id = course_id
-        if not self._save({"courses": [course_id]}):
+        if not self._save({"courses": [mutation]}):
             return 0
         self.selectionChanged.emit()
         self._set_error("Curso guardado localmente.")
@@ -2213,7 +2270,7 @@ class DesktopBackend(QObject):
             self._set_error("Primero abre una sede o crea una nueva en este dispositivo.")
             return False
         try:
-            self._record_service.update_course(
+            mutation = self._record_service.update_course(
                 self.manifest,
                 source_id,
                 name,
@@ -2230,7 +2287,7 @@ class DesktopBackend(QObject):
             self._set_error(str(exc) or "Revisa los datos del curso.")
             return False
         self._selected_course_id = source_id
-        if not self._save({"courses": [source_id]}):
+        if not self._save({"courses": [mutation]}):
             return False
         self.selectionChanged.emit()
         self._set_error("Curso actualizado correctamente en este dispositivo.")
@@ -2258,7 +2315,7 @@ class DesktopBackend(QObject):
 
         updated_manifest = deepcopy(self.manifest)
         try:
-            self._record_service.update_course(
+            mutation = self._record_service.update_course(
                 updated_manifest,
                 source_id,
                 name,
@@ -2282,7 +2339,7 @@ class DesktopBackend(QObject):
         self.courseSaveStateChanged.emit()
         self.savingStateChanged.emit()
         self.activityStateChanged.emit()
-        changes = {"courses": [source_id]}
+        changes = {"courses": [mutation]}
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -2304,7 +2361,7 @@ class DesktopBackend(QObject):
         self,
         store: WorkspaceStore,
         manifest: dict[str, Any],
-        record_changes: dict[str, list[Any]],
+        record_changes: dict[str, list[RecordMutation]],
     ):
         try:
             await store.save_records(manifest, record_changes)
@@ -2363,12 +2420,15 @@ class DesktopBackend(QObject):
                 raise ValueError(
                     "Los promotores se crean desde Desktop al preparar una sede nueva."
                 )
-            promoter_id = self._record_service.create_promoter(self.manifest, name)
+            mutation = self._record_service.create_promoter(
+                self.manifest, name
+            )
+            promoter_id = int(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("promoter.create", exc)
             self._set_error(str(exc))
             return 0
-        if not self._save({"promoters": [promoter_id]}):
+        if not self._save({"promoters": [mutation]}):
             return 0
         self._set_error("Promotor guardado localmente.")
         return promoter_id
@@ -2433,8 +2493,11 @@ class DesktopBackend(QObject):
         )
         row["record_image"] = package_path
         row["record_image_hash"] = image_hash
+        mutation = self._mutation_for_record(
+            self.manifest, "enrollments", row
+        )
         if not self._save(
-            {"enrollments": [self._selected_enrollment_id]}
+            {"enrollments": [mutation]}
         ):
             return
         self.selectionChanged.emit()
@@ -2460,8 +2523,11 @@ class DesktopBackend(QObject):
         row["record_image"] = None
         row["record_image_hash"] = ""
         self._record_service.remove_unused_attachments(self.manifest)
+        mutation = self._mutation_for_record(
+            self.manifest, "enrollments", row
+        )
         if not self._save(
-            {"enrollments": [self._selected_enrollment_id]}
+            {"enrollments": [mutation]}
         ):
             return
         self.selectionChanged.emit()
@@ -2475,7 +2541,7 @@ class DesktopBackend(QObject):
             self._set_error("Primero abre el archivo de una sede.")
             return False
         try:
-            student_id = self._record_service.save_student(
+            mutation = self._record_service.save_student(
                 self.manifest,
                 source_id,
                 last_name,
@@ -2483,12 +2549,13 @@ class DesktopBackend(QObject):
                 document_number,
                 phone_text,
             )
+            student_id = str(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("student.save", exc)
             self._set_error(str(exc))
             return False
         self._selected_student_id = student_id
-        if not self._save({"students": [student_id]}):
+        if not self._save({"students": [mutation]}):
             return False
         self.selectionChanged.emit()
         self._set_error("Estudiante guardado en este dispositivo.")
@@ -2500,7 +2567,7 @@ class DesktopBackend(QObject):
             self._set_error("Primero abre el archivo de una sede.")
             return False
         try:
-            self._record_service.set_student_active(
+            mutation = self._record_service.set_student_active(
                 self.manifest,
                 source_id,
                 active,
@@ -2509,7 +2576,7 @@ class DesktopBackend(QObject):
             self._log_validation_failure("student.set_active", exc)
             self._set_error(str(exc))
             return False
-        if not self._save({"students": [source_id]}):
+        if not self._save({"students": [mutation]}):
             return False
         state = "activado" if active else "desactivado"
         self._set_error(f"Estudiante {state} correctamente en este dispositivo.")
@@ -2535,8 +2602,12 @@ class DesktopBackend(QObject):
             self.store,
             result.manifest,
             {
-                "students": [result.student_id] if result.student_created else [],
-                "enrollments": [result.enrollment_id],
+                "students": (
+                    [result.student_change]
+                    if result.student_change is not None
+                    else []
+                ),
+                "enrollments": [result.enrollment_change],
             },
         )
         if not succeeded:
@@ -2567,17 +2638,18 @@ class DesktopBackend(QObject):
             self._set_error("Los datos de la matrícula no tienen un formato válido.")
             return False
         try:
-            enrollment_id = self._record_service.save_enrollment(
+            mutation = self._record_service.save_enrollment(
                 self.manifest,
                 source_id,
                 fields,
             )
+            enrollment_id = str(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("enrollment.save", exc)
             self._set_error(str(exc) or "Revisa los datos de la matrícula.")
             return False
         self._selected_enrollment_id = enrollment_id
-        if not self._save({"enrollments": [enrollment_id]}):
+        if not self._save({"enrollments": [mutation]}):
             return False
         self.selectionChanged.emit()
         self._set_error("Matrícula guardada en este dispositivo.")

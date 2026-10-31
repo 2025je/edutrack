@@ -4,10 +4,11 @@ import platform
 import statistics
 import tempfile
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
+from benchmark_data import build_course_search_manifest, build_manifest
+from edutrack_desktop.domain.record_service import RecordMutation
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.logging_config import configure_logging
 from edutrack_desktop.infrastructure.transfer import read_package, write_package
@@ -16,33 +17,6 @@ from edutrack_desktop.infrastructure.transfer import read_package, write_package
 ITERATIONS = 5
 DATASET_SIZES = (1_000, 10_000, 50_000)
 PACKAGE_STUDENT_COUNT = 2_000
-
-
-def build_manifest(student_count: int) -> dict[str, Any]:
-    return {
-        "format": "edutrack-offline",
-        "version": 2,
-        "bundle_id": str(uuid.uuid4()),
-        "campus_id": 1,
-        "campus_name": "Benchmark local",
-        "campus_address": "",
-        "students": [
-            {
-                "id": str(uuid.uuid4()),
-                "server_id": None,
-                "base_hash": None,
-                "last_name": f"APELLIDO{index:05d}",
-                "first_name": f"NOMBRE{index:05d}",
-                "document_number": f"{10_000_000 + index:08d}",
-                "phone_numbers": [f"9{index:08d}"],
-                "active": True,
-            }
-            for index in range(1, student_count + 1)
-        ],
-        "enrollments": [],
-        "courses": [],
-        "promoters": [],
-    }
 
 
 def median_milliseconds(samples: list[float]) -> float:
@@ -109,7 +83,11 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             started = time.perf_counter()
             await store.save_records(
                 manifest,
-                {"students": [student["id"]]},
+                {
+                    "students": [
+                        RecordMutation(size - 1, student)
+                    ]
+                },
             )
             incremental_save_samples.append(time.perf_counter() - started)
 
@@ -125,6 +103,38 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             "one_record_incremental_save_median_ms": median_milliseconds(
                 incremental_save_samples
             ),
+        }
+    finally:
+        await store.dispose()
+
+
+async def benchmark_course_search(size: int, root: Path) -> dict[str, Any]:
+    database_path = root / f"course-search-{size}.sqlite3"
+    manifest = build_course_search_manifest(size)
+    student_id = manifest["students"][0]["id"]
+    store = LocalStore(database_path)
+    try:
+        await store.save(manifest)
+        query = f"CURSO {size:05d}"
+        await store.student_page(query, 0, 0, 0, 50)
+        samples = []
+        for _ in range(ITERATIONS):
+            started = time.perf_counter()
+            rows, _, matching_count = await store.student_page(
+                query,
+                0,
+                0,
+                0,
+                50,
+            )
+            samples.append(time.perf_counter() - started)
+            if matching_count != 1 or rows[0]["id"] != student_id:
+                raise RuntimeError(
+                    "La búsqueda de curso no devolvió al estudiante esperado."
+                )
+        return {
+            "courses": size,
+            "course_search_median_ms": median_milliseconds(samples),
         }
     finally:
         await store.dispose()
@@ -169,6 +179,10 @@ async def main() -> None:
         datasets = [
             await benchmark_dataset(size, root) for size in DATASET_SIZES
         ]
+        course_search_datasets = [
+            await benchmark_course_search(size, root)
+            for size in DATASET_SIZES
+        ]
         package = benchmark_package(root)
 
     print(
@@ -178,6 +192,7 @@ async def main() -> None:
                 "platform": platform.platform(),
                 "iterations_per_median": ITERATIONS,
                 "datasets": datasets,
+                "course_search_datasets": course_search_datasets,
                 "package_limit_case": package,
             },
             ensure_ascii=False,

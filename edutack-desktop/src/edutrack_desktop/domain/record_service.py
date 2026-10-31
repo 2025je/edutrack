@@ -1,10 +1,17 @@
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 PHONE_PATTERN = re.compile(r"9\d{8}\Z")
+
+
+@dataclass(frozen=True)
+class RecordMutation:
+    position: int
+    record: dict[str, Any]
 
 
 class RecordService:
@@ -82,7 +89,7 @@ class RecordService:
         enrollment_fee: str,
         monthly_fee: str,
         capacity: str,
-    ) -> int:
+    ) -> RecordMutation:
         fields = self.normalize_course_fields(
             manifest,
             None,
@@ -97,10 +104,10 @@ class RecordService:
         course_id = (
             max((int(item["id"]) for item in manifest["courses"]), default=0) + 1
         )
-        manifest["courses"].append(
-            {"id": course_id, "server_id": None, **fields, "active": True}
-        )
-        return course_id
+        record = {"id": course_id, "server_id": None, **fields, "active": True}
+        position = len(manifest["courses"])
+        manifest["courses"].append(record)
+        return RecordMutation(position, record)
 
     def update_course(
         self,
@@ -114,13 +121,18 @@ class RecordService:
         monthly_fee: str,
         capacity: str,
         active: bool,
-    ) -> None:
-        course = next(
-            (item for item in manifest["courses"] if item["id"] == course_id),
+    ) -> RecordMutation:
+        position = next(
+            (
+                index
+                for index, item in enumerate(manifest["courses"])
+                if item["id"] == course_id
+            ),
             None,
         )
-        if course is None:
+        if position is None:
             raise ValueError("Selecciona un curso válido para editar.")
+        course = manifest["courses"][position]
         fields = self.normalize_course_fields(
             manifest,
             course_id,
@@ -134,8 +146,11 @@ class RecordService:
         )
         course.update(fields)
         course["active"] = active
+        return RecordMutation(position, course)
 
-    def create_promoter(self, manifest: dict[str, Any], name: str) -> int:
+    def create_promoter(
+        self, manifest: dict[str, Any], name: str
+    ) -> RecordMutation:
         if manifest.get("campus_mode") != "new":
             raise ValueError(
                 "Los promotores se crean desde Desktop al preparar una sede nueva."
@@ -151,10 +166,15 @@ class RecordService:
         promoter_id = (
             max((int(item["id"]) for item in manifest["promoters"]), default=0) + 1
         )
-        manifest["promoters"].append(
-            {"id": promoter_id, "server_id": None, "name": name, "active": True}
-        )
-        return promoter_id
+        record = {
+            "id": promoter_id,
+            "server_id": None,
+            "name": name,
+            "active": True,
+        }
+        position = len(manifest["promoters"])
+        manifest["promoters"].append(record)
+        return RecordMutation(position, record)
 
     def save_student(
         self,
@@ -164,7 +184,7 @@ class RecordService:
         first_name: str,
         document_number: str,
         phone_text: str,
-    ) -> str:
+    ) -> RecordMutation:
         last_name = last_name.strip().upper()
         first_name = first_name.strip().upper()
         document_number = document_number.strip()
@@ -177,9 +197,18 @@ class RecordService:
             raise ValueError("Ingresa uno o más celulares peruanos de 9 dígitos.")
         if len(set(phones)) != len(phones):
             raise ValueError("No repitas un teléfono.")
-        row = next(
-            (item for item in manifest["students"] if item["id"] == source_id),
+        row_position = next(
+            (
+                index
+                for index, item in enumerate(manifest["students"])
+                if item["id"] == source_id
+            ),
             None,
+        )
+        row = (
+            manifest["students"][row_position]
+            if row_position is not None
+            else None
         )
         full_name = f"{last_name} {first_name}".strip().casefold()
         duplicate = any(
@@ -206,6 +235,7 @@ class RecordService:
                 "base_hash": None,
                 "active": True,
             }
+            row_position = len(manifest["students"])
             manifest["students"].append(row)
         row.update(
             {
@@ -215,25 +245,42 @@ class RecordService:
                 "phone_numbers": phones,
             }
         )
-        return row["id"]
+        if row_position is None:
+            raise RuntimeError("No se pudo determinar la posición del estudiante.")
+        return RecordMutation(row_position, row)
 
     def set_student_active(
         self, manifest: dict[str, Any], student_id: str, active: bool
-    ) -> None:
-        student = next(
-            (item for item in manifest["students"] if item["id"] == student_id),
+    ) -> RecordMutation:
+        position = next(
+            (
+                index
+                for index, item in enumerate(manifest["students"])
+                if item["id"] == student_id
+            ),
             None,
         )
-        if student is None:
+        if position is None:
             raise ValueError("Selecciona un estudiante válido.")
+        student = manifest["students"][position]
         student["active"] = active
+        return RecordMutation(position, student)
 
     def save_enrollment(
         self, manifest: dict[str, Any], source_id: str, fields: dict[str, Any]
-    ) -> str:
-        row = next(
-            (item for item in manifest["enrollments"] if item["id"] == source_id),
+    ) -> RecordMutation:
+        row_position = next(
+            (
+                index
+                for index, item in enumerate(manifest["enrollments"])
+                if item["id"] == source_id
+            ),
             None,
+        )
+        row = (
+            manifest["enrollments"][row_position]
+            if row_position is not None
+            else None
         )
         if source_id and row is None:
             raise ValueError("La matrícula seleccionada ya no existe.")
@@ -381,6 +428,7 @@ class RecordService:
                 "record_image_hash": "",
                 "record_image_quality": 80,
             }
+            row_position = len(manifest["enrollments"])
             manifest["enrollments"].append(row)
         if not record_code:
             row["record_image"] = None
@@ -400,7 +448,9 @@ class RecordService:
                 "active": enrollment_active,
             }
         )
-        return row["id"]
+        if row_position is None:
+            raise RuntimeError("No se pudo determinar la posición de la matrícula.")
+        return RecordMutation(row_position, row)
 
     @staticmethod
     def remove_unused_attachments(manifest: dict[str, Any]) -> None:

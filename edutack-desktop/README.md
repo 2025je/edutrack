@@ -58,7 +58,7 @@ El código de aplicación vive en `src/edutrack_desktop/`, organizado por capas:
 
 ## Pruebas y mediciones
 
-Desde `edutack-desktop`, ejecuta `uv run pytest tests -q` para la suite, incluidas las pruebas QML en modo offscreen del asistente, del atajo global Ctrl+M y de la edición de matrículas con búsqueda limitada de estudiantes. El benchmark reproducible de búsqueda, carga, guardado incremental y paquetes se ejecuta con `uv run python tests/benchmark_desktop.py`; crea sus bases temporales y reporta el tamaño de datos, la plataforma y la mediana de cinco operaciones. Las mediciones dependen del equipo y no son una comparación antes/después.
+Desde `edutack-desktop`, ejecuta `uv run pytest tests -q` para la suite, incluidas las pruebas QML en modo offscreen del asistente, del atajo global Ctrl+M y de la edición de matrículas con búsqueda limitada de estudiantes. Los benchmarks pytest optativos de búsqueda/paginación SQLite, guardado incremental y paquetes `.edutrack` se ejecutan con `uv run pytest -m performance --benchmark-only -q`; prueban conjuntos de 1.000, 10.000 y 50.000 registros cuando corresponde y no se incluyen en la suite habitual. Las mediciones dependen del equipo y no establecen umbrales de aprobación. El benchmark reproducible de búsqueda, carga y transferencia sigue disponible con `uv run python tests/benchmark_desktop.py`; crea sus bases temporales y reporta las medianas de cinco operaciones.
 
 ## Crear el instalador de Windows
 

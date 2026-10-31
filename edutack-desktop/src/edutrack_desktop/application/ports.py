@@ -2,6 +2,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from edutrack_desktop.domain.record_service import RecordMutation
+
 
 class WorkspaceStore(Protocol):
     path: Path
@@ -15,7 +17,7 @@ class WorkspaceStore(Protocol):
     ) -> None: ...
 
     async def save_records(
-        self, manifest: dict[str, Any], changes: dict[str, list[Any]]
+        self, manifest: dict[str, Any], changes: dict[str, list[RecordMutation]]
     ) -> None: ...
 
     async def search_students(
@@ -27,6 +29,13 @@ class WorkspaceStore(Protocol):
         query: str,
         status_filter_index: int,
         course_filter_id: int,
+        page_index: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int, int]: ...
+
+    async def course_page(
+        self,
+        query: str,
         page_index: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int, int]: ...
@@ -71,7 +80,7 @@ class RecordServicePort(Protocol):
         enrollment_fee: str,
         monthly_fee: str,
         capacity: str,
-    ) -> int: ...
+    ) -> RecordMutation: ...
 
     def update_course(
         self,
@@ -85,9 +94,11 @@ class RecordServicePort(Protocol):
         monthly_fee: str,
         capacity: str,
         active: bool,
-    ) -> None: ...
+    ) -> RecordMutation: ...
 
-    def create_promoter(self, manifest: dict[str, Any], name: str) -> int: ...
+    def create_promoter(
+        self, manifest: dict[str, Any], name: str
+    ) -> RecordMutation: ...
 
     def save_student(
         self,
@@ -97,11 +108,15 @@ class RecordServicePort(Protocol):
         first_name: str,
         document_number: str,
         phone_text: str,
-    ) -> str: ...
+    ) -> RecordMutation: ...
+
+    def set_student_active(
+        self, manifest: dict[str, Any], student_id: str, active: bool
+    ) -> RecordMutation: ...
 
     def save_enrollment(
         self, manifest: dict[str, Any], source_id: str, fields: dict[str, Any]
-    ) -> str: ...
+    ) -> RecordMutation: ...
 
     def remove_unused_attachments(self, manifest: dict[str, Any]) -> None: ...
 

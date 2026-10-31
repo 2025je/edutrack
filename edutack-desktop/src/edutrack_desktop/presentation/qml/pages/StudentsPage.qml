@@ -14,6 +14,7 @@ Rectangle {
     property var theme
     property alias studentSearchText: studentSearch.text
     property var selectedStudent: null
+    property var studentEditorItem: null
     property string currentView: "list"
 
     function openStudentEditor(student) {
@@ -414,14 +415,50 @@ Rectangle {
         }
     }
 
-    StudentEditorPage {
+    Loader {
+        id: studentEditorLoader
+        objectName: "studentEditorLoader"
         anchors.fill: parent
-        visible: studentsPage.currentView === "edit"
-        backendObject: studentsPage.backendObject
-        student: studentsPage.selectedStudent
-        theme: studentsPage.theme
-        onCancelRequested: studentsPage.closeStudentEditor()
-        onSaveSucceeded: studentsPage.closeStudentEditor()
+        active: studentsPage.currentView === "edit"
+        asynchronous: true
+        sourceComponent: Component {
+            StudentEditorPage {
+                anchors.fill: parent
+                backendObject: studentsPage.backendObject
+                theme: studentsPage.theme
+                onCancelRequested: studentsPage.closeStudentEditor()
+                onSaveSucceeded: studentsPage.closeStudentEditor()
+            }
+        }
+        onLoaded: {
+            studentsPage.studentEditorItem = item
+            studentsPage.studentEditorItem.student = studentsPage.selectedStudent
+        }
+        onStatusChanged: {
+            if (status === Loader.Null) {
+                studentsPage.studentEditorItem = null
+            } else if (status === Loader.Error) {
+                studentsPage.studentEditorItem = null
+                console.error("No se pudo cargar el editor de estudiantes: "
+                              + errorString())
+                studentsPage.closeStudentEditor()
+            }
+        }
+    }
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: studentEditorLoader.status === Loader.Loading
+
+        BusyIndicator {
+            Layout.alignment: Qt.AlignHCenter
+            running: studentEditorLoader.status === Loader.Loading
+        }
+
+        Label {
+            text: "Cargando editor de estudiantes..."
+            color: studentsPage.windowController.secondaryTextColor
+        }
     }
 
 }

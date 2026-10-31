@@ -57,6 +57,12 @@ class CourseRecord(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     schedule: Mapped[str] = mapped_column(String(100), nullable=False)
     group_name: Mapped[str] = mapped_column("group", String(100), nullable=False)
+    search_text: Mapped[str] = mapped_column(
+        String(500, collation="NOCASE"),
+        nullable=False,
+        default="",
+        server_default="",
+    )
     start_date: Mapped[str] = mapped_column(String(10), nullable=False)
     enrollment_fee: Mapped[str] = mapped_column(String(20), nullable=False)
     monthly_fee: Mapped[str] = mapped_column(String(20), nullable=False)

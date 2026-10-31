@@ -18,7 +18,10 @@ from edutrack_desktop.infrastructure.app_settings import DesktopSettings
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.transfer import read_package
 from edutrack_desktop.presentation.backend import DesktopBackend
-from edutrack_desktop.presentation.list_models import EnrollmentListModel
+from edutrack_desktop.presentation.list_models import (
+    CourseListModel,
+    EnrollmentListModel,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -336,6 +339,104 @@ def test_student_list_model_filters_and_refreshes_after_saving(tmp_path):
     backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
     assert model.totalCount == 4
     assert model.matchingCount == 1
+
+
+def test_course_list_model_searches_accent_insensitively_and_counts_active_students(
+    tmp_path,
+):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Matemáticas",
+        "Mañana",
+        "1",
+        "2026-01-05",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    backend.createCourse(
+        "Inglés",
+        "Tarde",
+        "2",
+        "2026-02-02",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    assert backend.saveStudent(
+        "",
+        "PÉREZ",
+        "ANA",
+        "12345678",
+        "987654321",
+    )
+    student_id = backend.selectedStudent["id"]
+    assert backend.saveEnrollment(
+        "",
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "enrollment_date": "2026-01-05",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+        },
+    )
+
+    model = backend.courseListModel
+    assert isinstance(model, QAbstractListModel)
+    model.activate()
+    assert model.totalCount == 2
+    assert model.matchingCount == 2
+
+    model.setQuery("matematicas manana")
+    assert model.matchingCount == 1
+    assert model.rowCount() == 1
+    course_group = model.rowAt(0)
+    assert course_group["courses"][0]["id"] == course_id
+    assert course_group["courses"][0]["student_count"] == 1
+
+    model.setQuery("2026-02")
+    assert model.matchingCount == 1
+    assert model.rowAt(0)["courses"][0]["name"].casefold() == "inglés".casefold()
+
+
+def test_course_list_model_paginates_before_grouping():
+    rows = [
+        {
+            "id": index,
+            "name": f"Curso {index}",
+            "schedule": "Mañana",
+            "group": "1",
+            "start_date": "2026-01-05",
+            "student_count": 0,
+            "capacity": 20,
+            "active": True,
+        }
+        for index in range(1, 4)
+    ]
+
+    def page_provider(query, page_index, page_size):
+        matching = [
+            row for row in rows if query.lower() in row["name"].lower()
+        ]
+        start = page_index * page_size
+        return matching[start : start + page_size], len(rows), len(matching)
+
+    model = CourseListModel(page_provider, page_size=2)
+    model.activate()
+
+    assert model.totalCount == 3
+    assert model.matchingCount == 3
+    assert model.pageCount == 2
+    assert [row["id"] for row in model.rowAt(0)["courses"]] == [1, 2]
+
+    model.setPageIndex(1)
+    assert [row["id"] for row in model.rowAt(0)["courses"]] == [3]
+    model.setQuery("Curso 2")
+    assert model.pageIndex == 0
+    assert model.matchingCount == 1
+    assert model.rowAt(0)["courses"][0]["id"] == 2
 
 
 def test_enrollment_list_model_filters_status_and_pages_rows():

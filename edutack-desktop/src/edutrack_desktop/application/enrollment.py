@@ -2,6 +2,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from edutrack_desktop.domain.record_service import RecordMutation
+
 from .ports import RecordServicePort
 
 
@@ -11,6 +13,8 @@ class EnrollmentCreation:
     student_id: str
     enrollment_id: str
     student_created: bool
+    student_change: RecordMutation | None
+    enrollment_change: RecordMutation
 
 
 class CreateEnrollmentUseCase:
@@ -41,13 +45,14 @@ class CreateEnrollmentUseCase:
         working = deepcopy(manifest)
         student_id = str(student_fields.get("id") or "").strip()
         student_created = False
+        student_change = None
         if student_id:
             if not any(
                 item["id"] == student_id for item in working["students"]
             ):
                 raise ValueError("Selecciona un estudiante válido.")
         else:
-            student_id = self._record_service.save_student(
+            student_change = self._record_service.save_student(
                 working,
                 "",
                 str(student_fields.get("last_name") or ""),
@@ -55,14 +60,20 @@ class CreateEnrollmentUseCase:
                 str(student_fields.get("document_number") or ""),
                 str(student_fields.get("phone_text") or ""),
             )
+            student_id = str(student_change.record["id"])
             student_created = True
 
         fields = dict(enrollment_fields)
         fields["student_id"] = student_id
-        enrollment_id = self._record_service.save_enrollment(working, "", fields)
+        enrollment_change = self._record_service.save_enrollment(
+            working, "", fields
+        )
+        enrollment_id = str(enrollment_change.record["id"])
         return EnrollmentCreation(
             manifest=working,
             student_id=student_id,
             enrollment_id=enrollment_id,
             student_created=student_created,
+            student_change=student_change,
+            enrollment_change=enrollment_change,
         )

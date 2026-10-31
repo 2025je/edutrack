@@ -293,6 +293,15 @@ def test_main_ctrl_m_opens_enrollment_wizard_after_lazy_loading(
         root.setProperty("visible", True)
         QTest.qWait(200)
         gui_application.processEvents()
+        assert _find_visual_item(
+            root,
+            "campusSetupPageLoader",
+        ).property("item") is None
+        assert _find_visual_item(
+            root,
+            "appDialogsLoader",
+        ).property("item") is None
+        assert root.findChild(QObject, "studentsPage") is None
 
         QTest.keyClick(
             root,
@@ -305,6 +314,7 @@ def test_main_ctrl_m_opens_enrollment_wizard_after_lazy_loading(
         assert root.property("selectedWorkspaceSection") == "Matrículas"
         wizard = _find_visual_item(root, "enrollmentWizardPage")
         assert wizard.property("currentStep") == 1
+        assert root.findChild(QObject, "studentsPage") is None
     finally:
         root_objects = engine.rootObjects()
         if root_objects:
@@ -386,11 +396,58 @@ def test_main_restores_and_persists_selected_workspace_section(
         QTest.qWait(250)
         assert second_root.property("selectedWorkspaceSection") == "Cursos"
         _find_visual_item(second_root, "coursesPanel")
+        course_editor_loader = _find_visual_item(
+            second_root,
+            "courseEditorLoader",
+        )
+        assert course_editor_loader.property("item") is None
+        course_details_loader = _find_visual_item(
+            second_root,
+            "courseDetailsLoader",
+        )
+        assert course_details_loader.property("item") is None
         courses_button = _find_visual_item(
             second_root,
             "workspaceSectionButton_Cursos",
         )
         assert courses_button.property("selected") is True
+        courses_page = _find_visual_item(second_root, "coursesPanel")
+        edit_button = _find_visual_item(
+            second_root,
+            "editCourseButtonCompact_" + str(course_id),
+        )
+        assert edit_button.isVisible()
+        button_position = edit_button.mapToItem(
+            courses_page,
+            QPointF(0, 0),
+        )
+        assert button_position.x() >= 0
+        assert (
+            button_position.x() + edit_button.width()
+            <= courses_page.width()
+        ), {
+            "button_x": button_position.x(),
+            "button_width": edit_button.width(),
+            "page_width": courses_page.width(),
+        }
+        courses_page.setProperty("selectedCourse", backend.courses[0])
+        backend.selectCourse(course_id)
+        courses_page.setProperty("currentView", "details")
+        QTest.qWait(250)
+        assert course_details_loader.property("item") is not None
+        courses_page.setProperty("currentView", "list")
+        QTest.qWait(50)
+        assert course_details_loader.property("item") is None
+
+        courses_page.setProperty("currentView", "edit")
+        QTest.qWait(250)
+        assert courses_page.property("currentView") == "edit", {
+            "course_editor_status": course_editor_loader.property("status"),
+        }
+        _find_visual_item(second_root, "courseEditorPage")
+        courses_page.setProperty("currentView", "list")
+        QTest.qWait(50)
+        assert course_editor_loader.property("item") is None
 
         students_button = _find_visual_item(
             second_root,
@@ -401,6 +458,11 @@ def test_main_restores_and_persists_selected_workspace_section(
         assert _find_visual_item(second_root, "studentRow_" + student_id)
 
         students_page = _find_visual_item(second_root, "studentsPage")
+        student_editor_loader = _find_visual_item(
+            second_root,
+            "studentEditorLoader",
+        )
+        assert student_editor_loader.property("item") is None
         student_search = _find_visual_item(second_root, "studentSearch")
         status_filter = _find_visual_item(second_root, "studentStatusFilter")
         course_filter = _find_visual_item(second_root, "studentCourseFilter")
@@ -465,6 +527,7 @@ def test_main_restores_and_persists_selected_workspace_section(
         QTest.qWait(100)
         students_page = _find_visual_item(second_root, "studentsPage")
         assert students_page.property("currentView") == "edit"
+        assert student_editor_loader.property("item") is not None
         student_last_name = _find_visual_item(
             second_root,
             "studentLastNameField",
@@ -780,6 +843,7 @@ def test_main_closes_after_opening_and_closing_a_saved_campus(
             root,
             _find_visual_item(root, "closeCampusButton"),
         )
+        QTest.qWait(100)
         dialog = root.findChild(QObject, "closeCampusDialog")
         assert dialog is not None
         assert dialog.property("visible")

@@ -10,142 +10,33 @@ Rectangle {
     property var windowController
     property var theme
     property var selectedCourse: null
+    property var courseDetailsItem: null
+    property var courseEditorItem: null
     property string currentView: "list"
-    property string appliedCourseSearchText: ""
-    readonly property var filteredCourses: {
-        var query = root.appliedCourseSearchText.trim().toLocaleLowerCase()
-        return root.backendObject.courses.filter(function(course) {
-            if (!query)
-                return true
-            return [
-                course.name,
-                course.schedule,
-                course.group,
-                course.start_date
-            ].join(" ").toLocaleLowerCase().indexOf(query) >= 0
-        })
-    }
+    readonly property var courseListModel: root.backendObject.courseListModel
 
     function focusSearch() {
         courseSearch.forceActiveFocus()
-    }
-
-    function parseStartDate(value) {
-        var dateText = String(value || "")
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText))
-            return null
-
-        var parts = dateText.split("-")
-        var parsed = new Date(Date.UTC(
-            Number(parts[0]),
-            Number(parts[1]) - 1,
-            Number(parts[2])
-        ))
-        if (parsed.getUTCFullYear() !== Number(parts[0])
-                || parsed.getUTCMonth() !== Number(parts[1]) - 1
-                || parsed.getUTCDate() !== Number(parts[2]))
-            return null
-        return parsed
-    }
-
-    function dateKey(value) {
-        var month = ("0" + (value.getUTCMonth() + 1)).slice(-2)
-        var day = ("0" + value.getUTCDate()).slice(-2)
-        return value.getUTCFullYear() + "-" + month + "-" + day
-    }
-
-    function weekRangeLabel(start, end) {
-        var months = [
-            "enero", "febrero", "marzo", "abril", "mayo", "junio",
-            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-        ]
-        var startDay = start.getUTCDate()
-        var endDay = end.getUTCDate()
-        var startMonth = months[start.getUTCMonth()]
-        var endMonth = months[end.getUTCMonth()]
-        var startYear = start.getUTCFullYear()
-        var endYear = end.getUTCFullYear()
-
-        if (startYear === endYear && start.getUTCMonth() === end.getUTCMonth())
-            return startDay + " al " + endDay + " de " + endMonth + " de " + endYear
-        if (startYear === endYear)
-            return startDay + " de " + startMonth + " al " + endDay + " de "
-                    + endMonth + " de " + endYear
-        return startDay + " de " + startMonth + " de " + startYear + " al "
-                + endDay + " de " + endMonth + " de " + endYear
-    }
-
-    readonly property var weeklyGroups: {
-        var groupsByDate = {}
-        var groups = []
-        var ungroupedCourses = []
-        var courses = root.filteredCourses
-
-        courses.forEach(function(course) {
-            var courseDate = root.parseStartDate(course.start_date)
-            if (courseDate === null) {
-                ungroupedCourses.push(course)
-                return
-            }
-
-            var daysSinceMonday = (courseDate.getUTCDay() + 6) % 7
-            var weekStart = new Date(courseDate.getTime() - daysSinceMonday * 86400000)
-            var weekEnd = new Date(weekStart.getTime() + 6 * 86400000)
-            var startKey = root.dateKey(weekStart)
-            var group = groupsByDate[startKey]
-            if (!group) {
-                group = {
-                    label: root.weekRangeLabel(weekStart, weekEnd),
-                    startDate: startKey,
-                    courses: []
-                }
-                groupsByDate[startKey] = group
-                groups.push(group)
-            }
-            group.courses.push(course)
-        })
-
-        var compareCourses = function(left, right) {
-            var byStartDate = String(right.start_date || "")
-                              .localeCompare(String(left.start_date || ""))
-            if (byStartDate !== 0)
-                return byStartDate
-            var byName = String(left.name).localeCompare(String(right.name))
-            if (byName !== 0)
-                return byName
-            var bySchedule = String(left.schedule).localeCompare(String(right.schedule))
-            if (bySchedule !== 0)
-                return bySchedule
-            return String(left.group).localeCompare(String(right.group))
-        }
-        groups.sort(function(left, right) {
-            return right.startDate.localeCompare(left.startDate)
-        })
-        groups.forEach(function(group, index) {
-            group.label = "SEMANA " + (index + 1) + ": del " + group.label
-            group.courses.sort(compareCourses)
-        })
-
-        var result = groups
-        if (ungroupedCourses.length > 0) {
-            ungroupedCourses.sort(compareCourses)
-            result.push({
-                label: "Semana no definida",
-                courses: ungroupedCourses
-            })
-        }
-        return result
     }
 
     radius: 0
     color: theme.surface
     border.color: theme.outline
     visible: windowController.selectedWorkspaceSection === "Cursos"
+    onVisibleChanged: {
+        if (visible)
+            root.courseListModel.activate()
+    }
+
+    Component.onCompleted: {
+        if (visible)
+            root.courseListModel.activate()
+    }
 
     Timer {
         id: courseSearchTimer
         interval: 120
-        onTriggered: root.appliedCourseSearchText = courseSearch.text
+        onTriggered: root.courseListModel.setQuery(courseSearch.text)
     }
 
     ColumnLayout {
@@ -171,10 +62,11 @@ Rectangle {
             }
 
             Label {
-                text: root.filteredCourses.length === root.backendObject.courses.length
-                      ? root.filteredCourses.length + " cursos"
-                      : root.filteredCourses.length + " de "
-                        + root.backendObject.courses.length + " cursos"
+                text: root.courseListModel.matchingCount
+                      === root.courseListModel.totalCount
+                      ? root.courseListModel.totalCount + " cursos"
+                      : root.courseListModel.matchingCount + " de "
+                        + root.courseListModel.totalCount + " cursos"
                 color: root.theme.secondaryText
                 font.family: "Roboto"
                 font.pixelSize: 14
@@ -198,8 +90,8 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.filteredCourses.length === 0
-            text: root.backendObject.courses.length === 0
+            visible: root.courseListModel.matchingCount === 0
+            text: root.courseListModel.totalCount === 0
                   ? "No hay cursos registrados."
                   : "No se encontraron cursos con ese filtro."
             horizontalAlignment: Text.AlignHCenter
@@ -213,7 +105,7 @@ Rectangle {
             id: coursesFlickable
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: root.filteredCourses.length > 0
+            visible: root.courseListModel.matchingCount > 0
             clip: true
             contentWidth: width
             contentHeight: coursesContent.implicitHeight
@@ -228,18 +120,21 @@ Rectangle {
                 spacing: 20
 
                 Repeater {
-                    model: root.weeklyGroups
+                    model: root.courseListModel
 
                     delegate: ColumnLayout {
-                        required property var modelData
+                        required property string weekLabel
+                        required property var courses
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.maximumWidth: coursesFlickable.width
                         spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
 
                             Label {
-                                text: modelData.label
+                                text: weekLabel
                                 color: root.theme.secondaryText
                                 font.family: "Roboto"
                                 font.pixelSize: 13
@@ -253,7 +148,7 @@ Rectangle {
                             }
 
                             Label {
-                                text: modelData.courses.length + " cursos"
+                                text: courses.length + " cursos"
                                 color: root.theme.secondaryText
                                 font.family: "Roboto"
                                 font.pixelSize: 12
@@ -261,7 +156,7 @@ Rectangle {
                         }
 
                         Repeater {
-                            model: modelData.courses
+                            model: courses
 
                             delegate: Rectangle {
                                 id: courseCard
@@ -269,26 +164,136 @@ Rectangle {
                                 readonly property bool full: modelData.capacity > 0
                                                                && modelData.student_count
                                                                   >= modelData.capacity
+                                readonly property bool compact:
+                                    coursesFlickable.width < 820
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 76
+                                Layout.minimumWidth: 0
+                                Layout.maximumWidth: coursesFlickable.width
+                                Layout.preferredHeight: compact ? 124 : 76
                                 radius: 10
                                 color: full ? root.theme.successSurface
                                             : root.theme.raisedSurface
                                 border.color: full ? root.theme.success
                                                    : root.theme.outline
 
-                                RowLayout {
+                                ColumnLayout {
                                     anchors.fill: parent
-                                    anchors.leftMargin: 16
-                                    anchors.rightMargin: 16
-                                    spacing: 16
+                                    anchors.margins: courseCard.compact ? 10 : 12
+                                    spacing: courseCard.compact ? 5 : 0
 
-                                    ColumnLayout {
+                                    RowLayout {
+                                        visible: !courseCard.compact
                                         Layout.fillWidth: true
-                                        Layout.minimumWidth: 0
-                                        spacing: 4
+                                        spacing: 10
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
+                                            spacing: 4
+
+                                            Label {
+                                                Layout.minimumWidth: 0
+                                                Layout.fillWidth: true
+                                                text: modelData.name
+                                                color: root.theme.primaryText
+                                                font.family: "Roboto"
+                                                font.pixelSize: 15
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Label {
+                                                Layout.minimumWidth: 0
+                                                Layout.fillWidth: true
+                                                text: modelData.schedule
+                                                color: root.theme.secondaryText
+                                                font.family: "Roboto"
+                                                font.pixelSize: 13
+                                                elide: Text.ElideRight
+                                            }
+                                        }
 
                                         Label {
+                                            Layout.preferredWidth: 76
+                                            text: "Grupo " + modelData.group
+                                            color: root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 13
+                                            elide: Text.ElideRight
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.preferredWidth: 150
+                                            Layout.minimumWidth: 125
+                                            spacing: 4
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: "Inicio: " + modelData.start_date
+                                                color: root.theme.secondaryText
+                                                font.family: "Roboto"
+                                                font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: modelData.student_count
+                                                      + " / "
+                                                      + modelData.capacity
+                                                      + " estudiantes"
+                                                color: courseCard.full
+                                                       ? root.theme.success
+                                                       : root.theme.secondaryText
+                                                font.family: "Roboto"
+                                                font.pixelSize: 12
+                                                font.bold: courseCard.full
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+
+                                        Label {
+                                            text: modelData.active ? "Activo" : "Inactivo"
+                                            color: modelData.active
+                                                   ? root.theme.success
+                                                   : root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 12
+                                        }
+
+                                        Button {
+                                            Layout.preferredWidth: 68
+                                            text: "Ver"
+                                            onClicked: {
+                                                root.backendObject.selectCourse(
+                                                    courseCard.modelData.id
+                                                )
+                                                root.selectedCourse = courseCard.modelData
+                                                root.currentView = "details"
+                                            }
+                                        }
+
+                                        Button {
+                                            objectName: "editCourseButtonWide_"
+                                                        + modelData.id
+                                            Layout.preferredWidth: 78
+                                            text: "Editar"
+                                            onClicked: {
+                                                root.backendObject.selectCourse(
+                                                    courseCard.modelData.id
+                                                )
+                                                root.selectedCourse = courseCard.modelData
+                                                root.currentView = "edit"
+                                            }
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        visible: courseCard.compact
+                                        Layout.fillWidth: true
+
+                                        Label {
+                                            Layout.minimumWidth: 0
                                             Layout.fillWidth: true
                                             text: modelData.name
                                             color: root.theme.primaryText
@@ -299,42 +304,42 @@ Rectangle {
                                         }
 
                                         Label {
+                                            text: "Grupo " + modelData.group
+                                            color: root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 13
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        visible: courseCard.compact
+                                        Layout.fillWidth: true
+
+                                        Label {
                                             Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: modelData.schedule
                                             color: root.theme.secondaryText
                                             font.family: "Roboto"
                                             font.pixelSize: 13
                                             elide: Text.ElideRight
                                         }
-                                    }
-
-                                    Label {
-                                        Layout.preferredWidth: 100
-                                        Layout.minimumWidth: 100
-                                        Layout.maximumWidth: 100
-                                        text: "Grupo " + modelData.group
-                                        color: root.theme.secondaryText
-                                        font.family: "Roboto"
-                                        font.pixelSize: 13
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.preferredWidth: 210
-                                        Layout.minimumWidth: 210
-                                        Layout.maximumWidth: 210
-                                        spacing: 4
 
                                         Label {
-                                            Layout.fillWidth: true
                                             text: "Inicio: " + modelData.start_date
                                             color: root.theme.secondaryText
                                             font.family: "Roboto"
                                             font.pixelSize: 12
-                                            elide: Text.ElideRight
                                         }
+                                    }
+
+                                    RowLayout {
+                                        visible: courseCard.compact
+                                        Layout.fillWidth: true
 
                                         Label {
                                             Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: modelData.student_count
                                                   + " / "
                                                   + modelData.capacity
@@ -347,46 +352,40 @@ Rectangle {
                                             font.bold: courseCard.full
                                             elide: Text.ElideRight
                                         }
-                                    }
 
-                                    Label {
-                                        Layout.preferredWidth: 80
-                                        Layout.minimumWidth: 80
-                                        Layout.maximumWidth: 80
-                                        text: modelData.active ? "Activo" : "Inactivo"
-                                        color: modelData.active
-                                               ? root.theme.success
-                                               : root.theme.secondaryText
-                                        font.family: "Roboto"
-                                        font.pixelSize: 12
-                                        horizontalAlignment: Text.AlignRight
-                                    }
-
-                                    Button {
-                                        Layout.preferredWidth: 80
-                                        Layout.minimumWidth: 80
-                                        Layout.maximumWidth: 80
-                                        text: "Ver"
-                                        onClicked: {
-                                            root.backendObject.selectCourse(
-                                                courseCard.modelData.id
-                                            )
-                                            root.selectedCourse = courseCard.modelData
-                                            root.currentView = "details"
+                                        Label {
+                                            text: modelData.active ? "Activo" : "Inactivo"
+                                            color: modelData.active
+                                                   ? root.theme.success
+                                                   : root.theme.secondaryText
+                                            font.family: "Roboto"
+                                            font.pixelSize: 12
                                         }
-                                    }
 
-                                    Button {
-                                        Layout.preferredWidth: 96
-                                        Layout.minimumWidth: 96
-                                        Layout.maximumWidth: 96
-                                        text: "Editar"
-                                        onClicked: {
-                                            root.backendObject.selectCourse(
-                                                courseCard.modelData.id
-                                            )
-                                            root.selectedCourse = courseCard.modelData
-                                            root.currentView = "edit"
+                                        Button {
+                                            Layout.preferredWidth: 64
+                                            text: "Ver"
+                                            onClicked: {
+                                                root.backendObject.selectCourse(
+                                                    courseCard.modelData.id
+                                                )
+                                                root.selectedCourse = courseCard.modelData
+                                                root.currentView = "details"
+                                            }
+                                        }
+
+                                        Button {
+                                            objectName: "editCourseButtonCompact_"
+                                                        + modelData.id
+                                            Layout.preferredWidth: 76
+                                            text: "Editar"
+                                            onClicked: {
+                                                root.backendObject.selectCourse(
+                                                    courseCard.modelData.id
+                                                )
+                                                root.selectedCourse = courseCard.modelData
+                                                root.currentView = "edit"
+                                            }
                                         }
                                     }
                                 }
@@ -397,33 +396,127 @@ Rectangle {
             }
 
         }
-    }
 
-    CourseDetailsPage {
-        anchors.fill: parent
-        visible: root.currentView === "details"
-        course: root.selectedCourse
-        students: root.backendObject.courseStudents
-        theme: root.theme
-        onBackRequested: {
-            root.selectedCourse = null
-            root.currentView = "list"
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.courseListModel.pageCount > 1
+
+            Button {
+                text: "Anterior"
+                enabled: root.courseListModel.pageIndex > 0
+                onClicked: root.courseListModel.setPageIndex(
+                               root.courseListModel.pageIndex - 1
+                           )
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Página " + (root.courseListModel.pageIndex + 1)
+                      + " de " + root.courseListModel.pageCount
+                color: root.theme.secondaryText
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Button {
+                text: "Siguiente"
+                enabled: root.courseListModel.pageIndex
+                         < root.courseListModel.pageCount - 1
+                onClicked: root.courseListModel.setPageIndex(
+                               root.courseListModel.pageIndex + 1
+                           )
+            }
         }
     }
 
-    CourseEditorPage {
+    Loader {
+        id: courseDetailsLoader
+        objectName: "courseDetailsLoader"
         anchors.fill: parent
-        visible: root.currentView === "edit"
-        backendObject: root.backendObject
-        course: root.selectedCourse
-        theme: root.theme
-        onCancelRequested: {
-            root.selectedCourse = null
-            root.currentView = "list"
+        active: root.currentView === "details"
+        asynchronous: true
+        sourceComponent: Component {
+            CourseDetailsPage {
+                anchors.fill: parent
+                theme: root.theme
+                onBackRequested: {
+                    root.selectedCourse = null
+                    root.currentView = "list"
+                }
+            }
         }
-        onSaveSucceeded: {
-            root.selectedCourse = null
-            root.currentView = "list"
+        onLoaded: {
+            root.courseDetailsItem = item
+            root.courseDetailsItem.course = root.selectedCourse
+            root.courseDetailsItem.students = root.backendObject.courseStudents
+        }
+        onStatusChanged: {
+            if (status === Loader.Null) {
+                root.courseDetailsItem = null
+            } else if (status === Loader.Error) {
+                root.courseDetailsItem = null
+                console.error("No se pudo cargar el detalle del curso: "
+                              + errorString())
+                root.selectedCourse = null
+                root.currentView = "list"
+            }
+        }
+    }
+
+    Loader {
+        id: courseEditorLoader
+        objectName: "courseEditorLoader"
+        anchors.fill: parent
+        active: root.currentView === "edit"
+        asynchronous: true
+        sourceComponent: Component {
+            CourseEditorPage {
+                anchors.fill: parent
+                backendObject: root.backendObject
+                theme: root.theme
+                onCancelRequested: {
+                    root.selectedCourse = null
+                    root.currentView = "list"
+                }
+                onSaveSucceeded: {
+                    root.selectedCourse = null
+                    root.currentView = "list"
+                }
+            }
+        }
+        onLoaded: {
+            root.courseEditorItem = item
+            root.courseEditorItem.course = root.selectedCourse
+        }
+        onStatusChanged: {
+            if (status === Loader.Null) {
+                root.courseEditorItem = null
+            } else if (status === Loader.Error) {
+                root.courseEditorItem = null
+                console.error("No se pudo cargar el editor de cursos: "
+                              + errorString())
+                root.selectedCourse = null
+                root.currentView = "list"
+            }
+        }
+    }
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: (root.currentView === "details"
+                  && courseDetailsLoader.status === Loader.Loading)
+                 || (root.currentView === "edit"
+                     && courseEditorLoader.status === Loader.Loading)
+
+        BusyIndicator {
+            Layout.alignment: Qt.AlignHCenter
+            running: parent.visible
+        }
+
+        Label {
+            text: root.currentView === "edit"
+                  ? "Cargando editor de cursos..."
+                  : "Cargando curso..."
+            color: root.windowController.secondaryTextColor
         }
     }
 }

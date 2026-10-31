@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -157,6 +157,89 @@ def course_rows(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
         key=lambda row: str(row.get("start_date", "")),
         reverse=True,
     )
+
+
+def course_week_groups(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups_by_start: dict[date, dict[str, Any]] = {}
+    ungrouped_courses: list[dict[str, Any]] = []
+
+    for course in courses:
+        start_date = str(course.get("start_date") or "")
+        try:
+            parsed_date = date.fromisoformat(start_date)
+        except ValueError:
+            ungrouped_courses.append(course)
+            continue
+        if parsed_date.isoformat() != start_date:
+            ungrouped_courses.append(course)
+            continue
+
+        week_start = parsed_date - timedelta(days=parsed_date.weekday())
+        group = groups_by_start.setdefault(
+            week_start,
+            {
+                "start_date": week_start.isoformat(),
+                "label": "",
+                "courses": [],
+            },
+        )
+        group["courses"].append(course)
+
+    def sort_courses(rows: list[dict[str, Any]]) -> None:
+        rows.sort(key=lambda course: str(course.get("group") or ""))
+        rows.sort(key=lambda course: str(course.get("schedule") or ""))
+        rows.sort(key=lambda course: str(course.get("name") or ""))
+        rows.sort(
+            key=lambda course: str(course.get("start_date") or ""),
+            reverse=True,
+        )
+
+    def week_range_label(start: date, end: date) -> str:
+        months = (
+            "enero",
+            "febrero",
+            "marzo",
+            "abril",
+            "mayo",
+            "junio",
+            "julio",
+            "agosto",
+            "septiembre",
+            "octubre",
+            "noviembre",
+            "diciembre",
+        )
+        if start.year == end.year and start.month == end.month:
+            return f"{start.day} al {end.day} de {months[end.month - 1]} de {end.year}"
+        if start.year == end.year:
+            return (
+                f"{start.day} de {months[start.month - 1]} al {end.day} de "
+                f"{months[end.month - 1]} de {end.year}"
+            )
+        return (
+            f"{start.day} de {months[start.month - 1]} de {start.year} al "
+            f"{end.day} de {months[end.month - 1]} de {end.year}"
+        )
+
+    groups = []
+    for week_start in sorted(groups_by_start, reverse=True):
+        group = groups_by_start[week_start]
+        week_end = week_start + timedelta(days=6)
+        group["label"] = (
+            "SEMANA: del " + week_range_label(week_start, week_end)
+        )
+        sort_courses(group["courses"])
+        groups.append(group)
+
+    if ungrouped_courses:
+        sort_courses(ungrouped_courses)
+        groups.append(
+            {
+                "label": "Semana no definida",
+                "courses": ungrouped_courses,
+            }
+        )
+    return groups
 
 
 def dashboard_summary(
