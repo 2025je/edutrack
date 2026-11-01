@@ -250,6 +250,22 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     assert backend.errorMessage == "Matrícula guardada en este dispositivo."
 
 
+def test_qml_wizard_searches_sqlite_without_a_loaded_manifest(
+    enrollment_wizard, gui_application
+):
+    _view, root, backend = enrollment_wizard
+    backend.manifest = None
+
+    search = _item(root, "enrollmentStudentSearch")
+    search.setProperty("text", "perez ana")
+    QTest.qWait(300)
+    _wait_for_search(root, "searchPending", gui_application)
+
+    results = _variant(root.property("searchResults"))
+    assert len(results) == 1
+    assert results[0]["label"] == "PEREZ ANA"
+
+
 def test_qml_wizard_validates_new_student_and_cancels_with_escape(
     enrollment_wizard, gui_application
 ):

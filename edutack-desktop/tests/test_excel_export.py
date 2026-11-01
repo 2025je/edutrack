@@ -1,10 +1,29 @@
+import asyncio
 from datetime import datetime
 
 from openpyxl import load_workbook
-from PySide6.QtCore import QCoreApplication, QUrl
+from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, QUrl
 
+from benchmark_data import build_course_search_manifest
 from edutrack_desktop.infrastructure.excel_export import export_register
 from edutrack_desktop.presentation.backend import DesktopBackend
+
+
+def _await_register_export(backend, output_path):
+    results = []
+    loop = QEventLoop()
+
+    def finished(succeeded, message):
+        results.append((succeeded, message))
+        loop.quit()
+
+    backend.registerExportFinished.connect(finished)
+    started = backend.exportRegister(QUrl.fromLocalFile(str(output_path)).toString())
+    if started and not results:
+        QTimer.singleShot(10000, loop.quit)
+        loop.exec()
+    backend.registerExportFinished.disconnect(finished)
+    return started, results
 
 
 def test_export_register_groups_courses_by_type_in_separate_sheets(tmp_path):
@@ -181,16 +200,68 @@ def test_export_register_groups_courses_by_type_in_separate_sheets(tmp_path):
     workbook.close()
 
 
-def test_backend_exports_register_to_selected_file(tmp_path):
+def test_backend_exports_register_to_selected_file(monkeypatch, tmp_path):
     application = QCoreApplication.instance()
     if application is None:
         application = QCoreApplication([])
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede inicial", "Av. Principal 123")
+    manifest = build_course_search_manifest(2)
+    manifest["promoters"] = [
+        {"id": 1, "server_id": None, "name": "PROMOTOR SQL", "active": True}
+    ]
+    manifest["enrollments"][0]["promoter_ids"] = [1]
+    store = backend.store
+    assert store is not None
+    asyncio.run(store.save(manifest))
+    load_calls = 0
+    load = store.load
+
+    async def tracked_load():
+        nonlocal load_calls
+        load_calls += 1
+        return await load()
+
+    monkeypatch.setattr(store, "load", tracked_load)
     output = tmp_path / "registro.xlsx"
+    expected_output = tmp_path / "expected.xlsx"
+    export_register(manifest, expected_output)
+    backend.manifest = None
 
-    assert backend.exportRegister(QUrl.fromLocalFile(str(output)).toString())
+    started, results = _await_register_export(backend, output)
 
+    assert started is True
+    assert results
+    succeeded, message = results[0]
+    assert succeeded is True
+    assert "correctamente" in message
     workbook = load_workbook(output, read_only=True)
-    assert workbook.sheetnames == ["Cursos"]
+    expected_workbook = load_workbook(expected_output, read_only=True)
+    assert workbook.sheetnames == expected_workbook.sheetnames
+    assert {
+        sheet.title: list(sheet.values) for sheet in workbook.worksheets
+    } == {
+        sheet.title: list(sheet.values) for sheet in expected_workbook.worksheets
+    }
+    assert load_calls == 0
     workbook.close()
+    expected_workbook.close()
+
+
+def test_backend_reports_register_export_errors(tmp_path):
+    application = QCoreApplication.instance()
+    if application is None:
+        application = QCoreApplication([])
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "Av. Principal 123")
+    backend.manifest = None
+    output = tmp_path / "existing-directory"
+    output.mkdir()
+
+    started, results = _await_register_export(backend, output)
+
+    assert started is True
+    assert results
+    succeeded, message = results[0]
+    assert succeeded is False
+    assert "No se pudo exportar el registro" in message

@@ -745,7 +745,8 @@ mantenga `self.manifest`: solo necesitan el store abierto y consultan
 `LocalStore.search_students()` en SQLite. Se conserva el comportamiento de
 límite, resultados de matrículas activas y entrega asíncrona existente. La
 prueba arquitectónica cubre una búsqueda por documento con
-`backend.manifest = None`.
+`backend.manifest = None`; también se verifica desde el asistente QML que la
+búsqueda asíncrona encuentra al estudiante bajo la misma condición.
 
 La suite completa pasó **119 pruebas, 20 benchmarks optativos excluidos**;
 Ruff y mypy pasan para los módulos revisados. La prueba QML del asistente
@@ -755,5 +756,139 @@ el layout. Su estado de diagnóstico se captura antes del clic porque QML puede
 destruir el delegado al seleccionar.
 
 Este corte no elimina la carga completa ni las dependencias de manifiesto del
-CRUD, selección, sincronización o exportación. No cambia el esquema SQLite ni
-el formato `.edutrack`; la migración de matrícula atómica sigue pendiente.
+CRUD restante, selección, sincronización o exportación. No cambia el esquema
+SQLite ni el formato `.edutrack`.
+
+## 22. Fase 2 incremental — creación SQL de matrícula (2026-11-01)
+
+`CreateEnrollmentUseCase` ahora puede persistir una matrícula a través de
+`WorkspaceStore.create_enrollment()`. La operación consulta en SQLite solo el
+estudiante seleccionado o candidatos con el mismo nombre normalizado, el curso,
+los promotores seleccionados y matrículas que puedan entrar en conflicto. Con
+ese contexto acotado reutiliza las validaciones de `RecordService` y escribe el
+nuevo estudiante (si aplica) y la matrícula en una transacción SQLAlchemy única.
+Los listados paginados tampoco requieren que `backend.manifest` esté cargado.
+
+Las pruebas cubren creación con `manifest=None`, matrícula de un estudiante ya
+persistido, rechazo de duplicado y rollback de estudiante y matrícula cuando un
+trigger de SQLite rechaza el INSERT. Se conserva temporalmente la proyección en
+memoria cuando el manifiesto ya está cargado, porque selección y otras
+superficies todavía dependen de él; retirarla requiere migrar esas lecturas y
+exportación/sincronización, no simplemente dejarla desactualizada.
+
+Validación: suite Desktop **124 pruebas pasadas, 20 benchmarks optativos
+excluidos**; Ruff y mypy pasan en los módulos afectados. No se midió rendimiento
+en este corte y no se afirma una mejora de latencia. La carga completa al inicio,
+el CRUD restante, las lecturas de selección y los flujos de transferencia aún
+impiden considerar SQLite como única fuente de verdad.
+
+## 23. Fase 2 incremental — snapshots SQL para transferencia (2026-11-01)
+
+La exportación de paquetes carga el snapshot desde `WorkspaceStore` en el worker
+de `exportPackageAsync`; el método síncrono `exportPackage` también genera su
+snapshot desde SQLite. La previsualización de importación obtiene el snapshot
+local dentro del worker, y la confirmación conserva su relectura y comparación
+antes de guardar. Así, estos límites de intercambio no necesitan que
+`backend.manifest` esté presente. Se conserva el formato y las versiones
+existentes de `.edutrack`.
+
+Las pruebas validan exportación síncrona y asíncrona con `manifest=None`, el
+registro del fallo de escritura en el historial y el rechazo de una importación
+si SQLite cambia después de la vista previa. El snapshot completo sigue siendo
+materializado temporalmente para construir el paquete o comparar una
+importación; las lecturas de formularios, selección, CRUD restante y Excel aún
+dependen de la copia en memoria. El método síncrono de exportación tampoco se
+ejecuta en worker; la ruta usada por QML sí es asíncrona.
+
+Validación de esta etapa: suite Desktop **128 pruebas pasadas, 20 benchmarks
+optativos excluidos**; Ruff y mypy pasan en los módulos fuente y pruebas
+afectados. No se midió rendimiento en este corte y no se afirma una mejora.
+
+## 24. Fase 2 incremental — exportación de registro desde SQLite (2026-11-01)
+
+`exportRegister` ya no requiere `backend.manifest` ni ejecuta consultas o
+generación del libro en el hilo de Qt. El worker obtiene una proyección
+específica desde `WorkspaceStore.register_export_data()`: cursos, matrículas
+asociadas, estudiantes referenciados y promotores usados. No carga adjuntos ni
+otras tablas operativas, y el estado de actividad y el resultado se notifican
+al backend/QML. El formato y contenido del libro se mantienen mediante
+`export_register`.
+
+La prueba de integración exporta con `manifest=None`, compara los valores de
+las hojas con la exportación de referencia y confirma que no se llama a
+`WorkspaceStore.load()`. También se cubre el error de escritura. La proyección
+necesita materializar los registros que aparecen en el libro; no se midió el
+rendimiento y no se afirma una mejora. El CRUD restante y el inicio siguen
+dependiendo del manifiesto, por lo que SQLite aún no es la única fuente
+operativa.
+
+Validación de esta etapa: suite Desktop **129 pruebas pasadas, 20 benchmarks
+optativos excluidos**; Ruff y mypy pasan en los módulos fuente afectados.
+
+## 25. Fase 2 incremental — escritura SQL de cursos (2026-11-01)
+
+`createCourse`, `saveCourse` y `saveCourseAsync` ya no requieren el manifiesto
+ni llaman a `save_records`. `WorkspaceStore.create_course` y
+`WorkspaceStore.update_course` obtienen el contexto de cursos desde SQLite,
+conservan la normalización y validación de duplicados de `RecordService`, y
+persisten cada cambio dentro de una transacción. La ruta usada por el editor
+QML corre con `AsyncQueryWorker`; los adaptadores síncronos se conservan para
+compatibilidad y no deben usarse para consultas voluminosas desde la interfaz.
+La proyección en memoria solo se sincroniza tras confirmar la escritura cuando
+aún está cargada. No se modifican el esquema ni `.edutrack`.
+
+Las pruebas cubren creación y actualización con `manifest=None`, persistencia,
+rechazo de duplicados y manejo de errores; el editor QML conserva su señal de
+finalización. El inicio y otras operaciones CRUD todavía dependen del
+manifiesto.
+
+Validación de esta etapa: suite Desktop **132 pruebas pasadas, 20 benchmarks
+optativos excluidos**; Ruff y mypy pasan en los módulos fuente afectados. No se
+midió rendimiento en este corte.
+
+## 26. Fase 2 incremental — escritura SQL de estudiantes (2026-11-01)
+
+`saveStudent` y `setStudentActive` ya escriben directamente en SQLite y pueden
+operar con `backend.manifest=None`. `WorkspaceStore.save_student` consulta los
+candidatos por nombre mediante las columnas de búsqueda normalizadas y entrega
+solo ese contexto a `RecordService` para conservar las reglas de duplicados y
+validación; `set_student_active` actualiza el registro seleccionado. Ambas
+escrituras usan transacciones, y la proyección en memoria solo se sincroniza
+después de confirmar el cambio cuando ya estaba cargada. `_run_store_write`
+mantiene los estados y señales de guardado para estas rutas síncronas.
+
+`EXPLAIN QUERY PLAN` para la consulta de candidatos confirmó el uso de
+`ix_desktop_students_first_name_search`; el apellido se aplica como filtro
+adicional. Esto verifica el índice usado por el plan, pero no mide latencia. Las
+pruebas cubren alta, edición, duplicados, activación y operación sin manifiesto.
+La edición de matrículas, promotores, adjuntos, el inicio y otras lecturas CRUD
+aún dependen del manifiesto.
+
+Validación de esta etapa: suite Desktop **133 pruebas pasadas, 20 benchmarks
+optativos excluidos**; Ruff y mypy pasan en los módulos fuente afectados. No se
+midió rendimiento en este corte.
+
+## 27. Fase 2 incremental — edición SQL de matrículas
+
+`saveEnrollment` ya crea y actualiza matrículas mediante `WorkspaceStore` y una
+transacción SQLite, incluso con `backend.manifest=None`. Para mantener las
+reglas de `RecordService`, el store construye un contexto acotado con el
+estudiante, curso, promotores, matrícula objetivo y candidatos de conflicto
+consultados en SQL; no reconstruye el manifiesto completo. La proyección cargada
+solo se actualiza después del commit. Al quitar el código de ficha, la limpieza
+de referencias e `attachment_data` también se persiste en la misma transacción.
+
+Se añadieron regresiones para alta, edición, matrícula duplicada, rechazo de
+datos inválidos sin cambio parcial y limpieza de adjuntos con el manifiesto
+desconectado. Se conserva el formato de intercambio y las reglas de negocio. La
+selección y otras operaciones de matrícula aún tienen dependencias del
+manifiesto; el inicio todavía lo carga, por lo que SQLite no es aún la única
+fuente operativa en toda la aplicación.
+
+Validación: suite Desktop **134 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los tres módulos fuente modificados y Ruff pasa para
+los códigos E4/E7/E9/F en los archivos afectados. El chequeo Ruff completo de
+esos archivos informa 15 hallazgos de estilo/modernización fuera de esta ruta.
+El chequeo mypy completo sigue informando siete errores en `excel_export.py` y
+`logging_config.py` (stubs externos y tipado del procesador); no se modificaron
+en esta etapa. No se midió rendimiento.

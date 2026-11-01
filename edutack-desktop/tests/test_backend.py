@@ -148,6 +148,22 @@ def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
     assert package["enrollments"][0]["promoter_ids"] == [promoter_id]
 
 
+def test_backend_exports_package_from_sql_when_manifest_is_not_loaded(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "Av. Principal 123")
+    backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+    expected_bundle_id = backend.manifest["bundle_id"]
+    backend.manifest = None
+
+    output = tmp_path / "sede.edutrack"
+    backend.exportPackage(str(output))
+
+    package = read_package(output)
+    assert package["campus_name"] == "Sede inicial"
+    assert package["bundle_id"] == expected_bundle_id
+    assert package["students"][0]["last_name"] == "PÉREZ"
+
+
 def test_edit_existing_and_add_student_and_enrollment(tmp_path):
     path = tmp_path / "workspace.sqlite3"
     student_id = str(uuid.uuid4())
@@ -316,6 +332,48 @@ def test_student_can_be_deactivated_and_activated(tmp_path):
 
     assert not backend.setStudentActive("missing-student", True)
     assert "Selecciona un estudiante válido" in backend.errorMessage
+
+
+def test_student_save_and_activation_use_sqlite_without_a_manifest(
+    tmp_path, monkeypatch
+):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    store = backend.store
+    assert store is not None
+    load = store.load
+    load_calls = []
+
+    async def tracked_load():
+        load_calls.append(True)
+        return await load()
+
+    monkeypatch.setattr(store, "load", tracked_load)
+    backend.manifest = None
+
+    assert backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+    student = backend.searchStudents("Pérez")[0]
+    student_id = student["id"]
+    assert backend.saveStudent(
+        student_id, "Pérez", "Ana María", "12345678", "987654321, 912345678"
+    )
+    assert not backend.saveStudent(
+        "", "Pérez", "Ana María", "87654321", "923456789"
+    )
+    assert "Ya existe un estudiante" in backend.errorMessage
+    assert backend.setStudentActive(student_id, False)
+    assert not backend.setStudentActive("missing-student", True)
+    assert "Selecciona un estudiante válido" in backend.errorMessage
+    assert load_calls == []
+
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    saved_student = next(
+        item for item in persisted["students"] if item["id"] == student_id
+    )
+    assert saved_student["first_name"] == "ANA MARÍA"
+    assert saved_student["phone_numbers"] == ["987654321", "912345678"]
+    assert saved_student["active"] is False
 
 
 def test_student_pages_filter_and_refresh_after_saving(tmp_path):
@@ -765,6 +823,37 @@ def test_save_course_updates_validates_and_persists(tmp_path):
     assert persisted_course["active"] is False
 
 
+def test_course_create_and_sync_update_use_sqlite_without_a_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.manifest = None
+
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    assert course_id > 0
+    assert backend.saveCourse(
+        course_id,
+        "Cocina avanzada",
+        "Lunes 9:00",
+        "1",
+        "2026-02-02",
+        "35",
+        "55.50",
+        "12",
+        False,
+    )
+
+    store = backend.store
+    assert store is not None
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    course = next(item for item in persisted["courses"] if item["id"] == course_id)
+    assert course["name"] == "COCINA AVANZADA"
+    assert course["monthly_fee"] == "55.50"
+    assert course["active"] is False
+
+
 def test_save_course_async_persists_and_signals_completion(tmp_path):
     path = tmp_path / "workspace.sqlite3"
     backend = DesktopBackend(path)
@@ -810,6 +899,106 @@ def test_save_course_async_persists_and_signals_completion(tmp_path):
     assert persisted_course["name"] == "COCINA AVANZADA"
 
 
+def test_save_course_async_persists_without_a_loaded_manifest(tmp_path, monkeypatch):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    store = backend.store
+    assert store is not None
+    load = store.load
+    load_calls = []
+
+    async def tracked_load():
+        load_calls.append(True)
+        return await load()
+
+    monkeypatch.setattr(store, "load", tracked_load)
+    backend.manifest = None
+    loop = QEventLoop()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    completed = []
+    backend.courseSaveFinished.connect(
+        lambda saved: (completed.append(saved), loop.quit())
+    )
+
+    assert backend.saveCourseAsync(
+        course_id,
+        "Cocina avanzada",
+        "Lunes 9:00",
+        "1",
+        "2026-02-02",
+        "35.00",
+        "55.00",
+        "12",
+        True,
+    )
+    timeout.start(5000)
+    if not completed:
+        loop.exec()
+    timeout.stop()
+
+    assert completed == [True]
+    assert load_calls == []
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    course = next(item for item in persisted["courses"] if item["id"] == course_id)
+    assert course["name"] == "COCINA AVANZADA"
+    assert course["monthly_fee"] == "55.00"
+
+
+def test_save_course_async_rejects_duplicate_without_a_loaded_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    existing_id = backend.createCourse(
+        "Pastelería", "Tarde", "2", "2026-01-02", "40.00", "60.00", "15"
+    )
+    backend.manifest = None
+    loop = QEventLoop()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    completed = []
+    backend.courseSaveFinished.connect(
+        lambda saved: (completed.append(saved), loop.quit())
+    )
+
+    assert backend.saveCourseAsync(
+        course_id,
+        "Pastelería",
+        "Tarde",
+        "2",
+        "2026-01-02",
+        "40.00",
+        "60.00",
+        "15",
+        True,
+    )
+    timeout.start(5000)
+    if not completed:
+        loop.exec()
+    timeout.stop()
+
+    assert completed == [False]
+    assert "Ya existe un curso" in backend.errorMessage
+    store = backend.store
+    assert store is not None
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    assert next(item for item in persisted["courses"] if item["id"] == course_id)[
+        "name"
+    ] == "COCINA"
+    assert next(
+        item for item in persisted["courses"] if item["id"] == existing_id
+    )["name"] == "PASTELERÍA"
+
+
 def test_save_course_async_reports_persistence_errors(tmp_path, monkeypatch):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
@@ -818,10 +1007,10 @@ def test_save_course_async_reports_persistence_errors(tmp_path, monkeypatch):
     )
     backend.selectCourse(course_id)
 
-    async def fail_save_records(_manifest, _record_changes):
+    async def fail_update_course(*_args, **_kwargs):
         raise OSError("disco lleno")
 
-    monkeypatch.setattr(backend.store, "save_records", fail_save_records)
+    monkeypatch.setattr(backend.store, "update_course", fail_update_course)
     loop = QEventLoop()
     timeout = QTimer()
     timeout.setSingleShot(True)
@@ -1024,6 +1213,97 @@ def test_saving_enrollment_without_ficha_or_promoter_fields_preserves_existing_v
     assert enrollment["record_image_quality"] == 60
     assert enrollment["promoter_ids"] == [promoter_id]
     assert enrollment["active"] is False
+
+
+def test_save_enrollment_updates_sqlite_without_a_loaded_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
+    )
+    promoter_id = backend.createPromoter("Promotor local")
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    student_id = backend.selectedStudent["id"]
+    store = backend.store
+    assert store is not None
+    backend.manifest = None
+
+    fields = {
+        "student_id": student_id,
+        "course_id": course_id,
+        "enrollment_date": "2026-01-02",
+        "enrollment_fee": "100.00",
+        "monthly_fee": "80.00",
+        "record_code": "42",
+        "record_image_quality": 60,
+        "promoter_ids": [promoter_id],
+    }
+    assert backend.saveEnrollment("", fields)
+    enrollment_id = backend._selected_enrollment_id
+    assert enrollment_id
+    assert not backend.saveEnrollment("", fields)
+    assert "ya está matriculado" in backend.errorMessage
+    assert not backend.saveEnrollment(
+        enrollment_id,
+        {
+            **fields,
+            "record_code": "43",
+            "enrollment_date": "fecha inválida",
+        },
+    )
+
+    assert backend.saveEnrollment(
+        enrollment_id,
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "enrollment_date": "2026-01-02",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "active": False,
+        },
+    )
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    enrollment = next(
+        item for item in persisted["enrollments"] if item["id"] == enrollment_id
+    )
+    assert enrollment["record_code"] == 42
+    assert enrollment["record_image_quality"] == 60
+    assert enrollment["promoter_ids"] == [promoter_id]
+    assert enrollment["active"] is False
+
+    backend.manifest = persisted
+    image_path = tmp_path / "record.png"
+    image = QImage(3, 3, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.blue)
+    assert image.save(str(image_path), "PNG")
+    backend.attachEnrollmentImage(str(image_path))
+    with_attachment = asyncio.run(store.load())
+    assert with_attachment is not None
+    assert with_attachment["_attachment_data"]
+
+    backend.manifest = None
+    assert backend.saveEnrollment(
+        enrollment_id,
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "enrollment_date": "2026-01-02",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "record_code": "",
+        },
+    )
+    without_attachment = asyncio.run(store.load())
+    assert without_attachment is not None
+    enrollment = next(
+        item
+        for item in without_attachment["enrollments"]
+        if item["id"] == enrollment_id
+    )
+    assert enrollment["record_image"] is None
+    assert without_attachment["_attachment_data"] == {}
 
 
 def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):

@@ -18,7 +18,7 @@ from edutrack_desktop.infrastructure.backup import (
     verify_sqlite_backup,
 )
 from edutrack_desktop.infrastructure.store import LocalStore
-from edutrack_desktop.infrastructure.transfer import write_package
+from edutrack_desktop.infrastructure.transfer import read_package, write_package
 from edutrack_desktop.presentation.backend import DesktopBackend
 
 
@@ -352,6 +352,58 @@ def _await_signal(signal, start_operation):
     return result[0]
 
 
+def test_backend_async_package_export_reads_sql_without_a_manifest(tmp_path):
+    backend = DesktopBackend(
+        tmp_path / "workspace.sqlite3",
+        catalog_path=tmp_path / "campuses.json",
+    )
+    backend.createWorkspace("Sede inicial", "")
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    assert backend.manifest is not None
+    expected_bundle_id = backend.manifest["bundle_id"]
+    assert backend.store is not None
+    backend.manifest = None
+    package_path = tmp_path / "exported.edutrack"
+
+    succeeded, message = _await_signal(
+        backend.syncExportFinished,
+        lambda: backend.exportPackageAsync(str(package_path)),
+    )
+
+    assert succeeded is True
+    assert "correctamente" in message
+    package = read_package(package_path)
+    assert package["bundle_id"] == expected_bundle_id
+    assert package["students"][0]["last_name"] == "PÉREZ"
+    history = asyncio.run(backend.store.list_sync_history())
+    assert len(history) == 1
+    assert history[0]["operation"] == "export"
+
+
+def test_backend_records_failed_async_export_from_sql_snapshot(tmp_path):
+    backend = DesktopBackend(
+        tmp_path / "workspace.sqlite3",
+        catalog_path=tmp_path / "campuses.json",
+    )
+    backend.createWorkspace("Sede inicial", "")
+    backend.manifest = None
+    assert backend.store is not None
+    package_path = tmp_path / "existing-directory"
+    package_path.mkdir()
+
+    succeeded, error = _await_signal(
+        backend.syncExportFinished,
+        lambda: backend.exportPackageAsync(str(package_path)),
+    )
+
+    assert succeeded is False
+    assert error
+    history = asyncio.run(backend.store.list_sync_history())
+    assert len(history) == 1
+    assert history[0]["operation"] == "export"
+    assert history[0]["status"] == "failed"
+
+
 def test_backend_previews_then_atomically_imports_with_backup_and_history(
     manifest, tmp_path
 ):
@@ -365,6 +417,7 @@ def test_backend_previews_then_atomically_imports_with_backup_and_history(
     incoming["bundle_id"] = str(uuid.uuid4())
     package_path = tmp_path / "updated.edutrack"
     write_package(package_path, incoming)
+    backend.manifest = None
 
     succeeded, preview, error = _await_signal(
         backend.syncPreviewFinished,
@@ -372,6 +425,7 @@ def test_backend_previews_then_atomically_imports_with_backup_and_history(
     )
     assert succeeded is True
     assert error == ""
+    assert preview is not None
     assert preview["can_import"] is True
     assert backend.syncInProgress is False
 
@@ -381,12 +435,52 @@ def test_backend_previews_then_atomically_imports_with_backup_and_history(
     )
     assert succeeded is True
     assert error == ""
+    assert backend.store is not None
     assert Path(result["backup_path"]).is_file()
     assert asyncio.run(backend.store.load()) == incoming
     history = asyncio.run(backend.store.list_sync_history())
     assert len(history) == 1
     assert history[0]["operation"] == "import"
     assert history[0]["bundle_id"] == incoming["bundle_id"]
+
+
+def test_import_confirmation_rejects_sqlite_changes_after_preview(
+    manifest, tmp_path
+):
+    database_path = tmp_path / "workspace.sqlite3"
+    store = LocalStore(database_path)
+    asyncio.run(store.save(manifest))
+    backend = DesktopBackend(
+        database_path,
+        catalog_path=tmp_path / "campuses.json",
+    )
+    incoming = deepcopy(manifest)
+    incoming["bundle_id"] = str(uuid.uuid4())
+    package_path = tmp_path / "updated.edutrack"
+    write_package(package_path, incoming)
+    backend.manifest = None
+
+    succeeded, preview, error = _await_signal(
+        backend.syncPreviewFinished,
+        lambda: backend.preparePackageImport(str(package_path)),
+    )
+    assert succeeded is True
+    assert preview is not None
+    assert preview["can_import"] is True
+    assert error == ""
+
+    changed = asyncio.run(store.load())
+    changed["campus_address"] = "Cambio posterior a la vista previa"
+    asyncio.run(store.save(changed))
+
+    succeeded, _result, error = _await_signal(
+        backend.syncImportFinished,
+        backend.confirmPackageImport,
+    )
+
+    assert succeeded is False
+    assert "La sede cambió después de la vista previa" in error
+    assert asyncio.run(store.load()) == changed
 
 
 def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path):
@@ -441,5 +535,6 @@ def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path
     assert succeeded is True
     assert error == ""
     assert Path(restored["recovery_backup"]).is_file()
+    assert backend.store is not None
     assert asyncio.run(backend.store.load()) == manifest
     assert len(backend.students) == 1

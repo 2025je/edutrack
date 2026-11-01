@@ -23,6 +23,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.sql.elements import ColumnElement
 import structlog
 
+from ..application.ports import RecordServicePort
 from ..domain.record_service import RecordMutation
 from .models import (
     CourseRecord,
@@ -71,6 +72,19 @@ def _student_values(
     }
 
 
+def _student_context_item(student: StudentRecord) -> dict[str, Any]:
+    return {
+        "id": student.id,
+        "server_id": student.server_id,
+        "base_hash": student.base_hash,
+        "last_name": student.last_name,
+        "first_name": student.first_name,
+        "document_number": student.document_number,
+        "phone_numbers": student.phone_numbers,
+        "active": student.active,
+    }
+
+
 def _course_values(
     item: dict[str, Any], workspace_id: int, position: int
 ) -> dict[str, Any]:
@@ -90,6 +104,26 @@ def _course_values(
         "monthly_fee": item["monthly_fee"],
         "capacity": item["capacity"],
         "active": item["active"],
+    }
+
+
+def _course_context(records: Sequence[CourseRecord]) -> dict[str, Any]:
+    return {
+        "courses": [
+            {
+                "id": course.id,
+                "server_id": course.server_id,
+                "name": course.name,
+                "schedule": course.schedule,
+                "group": course.group_name,
+                "start_date": course.start_date,
+                "enrollment_fee": course.enrollment_fee,
+                "monthly_fee": course.monthly_fee,
+                "capacity": course.capacity,
+                "active": course.active,
+            }
+            for course in records
+        ]
     }
 
 
@@ -136,6 +170,26 @@ def _enrollment_values(
         "record_image": item["record_image"],
         "record_image_hash": item["record_image_hash"],
         "record_image_quality": item["record_image_quality"],
+    }
+
+
+def _enrollment_context_item(enrollment: EnrollmentRecord) -> dict[str, Any]:
+    return {
+        "id": enrollment.id,
+        "server_id": enrollment.server_id,
+        "base_hash": enrollment.base_hash,
+        "student_id": enrollment.student_id,
+        "student_server_id": enrollment.student_server_id,
+        "course_id": enrollment.course_id,
+        "enrollment_date": enrollment.enrollment_date,
+        "promoter_ids": enrollment.promoter_ids,
+        "enrollment_fee": enrollment.enrollment_fee,
+        "monthly_fee": enrollment.monthly_fee,
+        "record_code": enrollment.record_code,
+        "active": enrollment.active,
+        "record_image": enrollment.record_image,
+        "record_image_hash": enrollment.record_image_hash,
+        "record_image_quality": enrollment.record_image_quality,
     }
 
 
@@ -229,6 +283,460 @@ class LocalStore:
     async def load(self):
         await self.initialize()
         return await self._load()
+
+    async def register_export_data(self) -> dict[str, Any] | None:
+        await self.initialize()
+        async with self.session_factory() as session:
+            if await session.get(Workspace, 1) is None:
+                return None
+
+            courses = (
+                await session.scalars(
+                    select(CourseRecord).order_by(CourseRecord.position)
+                )
+            ).all()
+            course_ids = [course.id for course in courses]
+            enrollments = (
+                await session.scalars(
+                    select(EnrollmentRecord)
+                    .where(EnrollmentRecord.course_id.in_(course_ids))
+                    .order_by(EnrollmentRecord.position)
+                )
+            ).all() if course_ids else []
+            student_ids = {
+                enrollment.student_id
+                for enrollment in enrollments
+                if enrollment.student_id is not None
+            }
+            students = (
+                await session.scalars(
+                    select(StudentRecord).where(StudentRecord.id.in_(student_ids))
+                )
+            ).all() if student_ids else []
+            promoter_ids = {
+                promoter_id
+                for enrollment in enrollments
+                for promoter_id in enrollment.promoter_ids
+            }
+            promoters = (
+                await session.scalars(
+                    select(PromoterRecord).where(PromoterRecord.id.in_(promoter_ids))
+                )
+            ).all() if promoter_ids else []
+
+            return {
+                "courses": [
+                    {
+                        "id": course.id,
+                        "name": course.name,
+                        "schedule": course.schedule,
+                        "group": course.group_name,
+                        "start_date": course.start_date,
+                        "enrollment_fee": course.enrollment_fee,
+                        "monthly_fee": course.monthly_fee,
+                        "capacity": course.capacity,
+                        "active": course.active,
+                    }
+                    for course in courses
+                ],
+                "enrollments": [
+                    {
+                        "id": enrollment.id,
+                        "student_id": enrollment.student_id,
+                        "course_id": enrollment.course_id,
+                        "enrollment_date": enrollment.enrollment_date,
+                        "promoter_ids": enrollment.promoter_ids,
+                        "enrollment_fee": enrollment.enrollment_fee,
+                        "monthly_fee": enrollment.monthly_fee,
+                        "record_code": enrollment.record_code,
+                        "active": enrollment.active,
+                    }
+                    for enrollment in enrollments
+                ],
+                "students": [
+                    {
+                        "id": student.id,
+                        "last_name": student.last_name,
+                        "first_name": student.first_name,
+                        "document_number": student.document_number,
+                        "phone_numbers": student.phone_numbers,
+                        "active": student.active,
+                    }
+                    for student in students
+                ],
+                "promoters": [
+                    {"id": promoter.id, "name": promoter.name}
+                    for promoter in promoters
+                ],
+            }
+
+    async def update_course(
+        self,
+        course_id: int,
+        name: str,
+        schedule: str,
+        group_name: str,
+        start_date: str,
+        enrollment_fee: str,
+        monthly_fee: str,
+        capacity: str,
+        active: bool,
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+
+            course_records = (
+                await session.scalars(
+                    select(CourseRecord).order_by(CourseRecord.position)
+                )
+            ).all()
+            mutation = record_service.update_course(
+                _course_context(course_records),
+                course_id,
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+                active,
+            )
+            course = next(
+                (
+                    item
+                    for item in course_records
+                    if item.id == course_id
+                ),
+                None,
+            )
+            if course is None:
+                raise RuntimeError("El curso seleccionado ya no está disponible.")
+            for key, value in _course_values(
+                mutation.record, workspace.id, course.position
+            ).items():
+                setattr(course, key, value)
+            return dict(mutation.record)
+
+    async def create_course(
+        self,
+        name: str,
+        schedule: str,
+        group_name: str,
+        start_date: str,
+        enrollment_fee: str,
+        monthly_fee: str,
+        capacity: str,
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+            course_records = (
+                await session.scalars(
+                    select(CourseRecord).order_by(CourseRecord.position)
+                )
+            ).all()
+            mutation = record_service.create_course(
+                _course_context(course_records),
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+            )
+            session.add(
+                CourseRecord(
+                    **_course_values(
+                        mutation.record, workspace.id, mutation.position
+                    )
+                )
+            )
+            return dict(mutation.record)
+
+    async def save_student(
+        self,
+        source_id: str,
+        last_name: str,
+        first_name: str,
+        document_number: str,
+        phone_text: str,
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+
+            target = (
+                await session.get(StudentRecord, source_id) if source_id else None
+            )
+            normalized_last_name = normalize_search_text(last_name.strip().upper())
+            normalized_first_name = normalize_search_text(first_name.strip().upper())
+            candidates_statement = select(StudentRecord).where(
+                StudentRecord.last_name_search == normalized_last_name,
+                StudentRecord.first_name_search == normalized_first_name,
+            )
+            if source_id:
+                candidates_statement = candidates_statement.where(
+                    StudentRecord.id != source_id
+                )
+            candidates = (
+                await session.scalars(candidates_statement)
+            ).all()
+            context_students = [_student_context_item(item) for item in candidates]
+            if target is not None:
+                context_students.append(_student_context_item(target))
+
+            mutation = record_service.save_student(
+                {"students": context_students},
+                source_id,
+                last_name,
+                first_name,
+                document_number,
+                phone_text,
+            )
+            if target is None:
+                last_position = await session.scalar(
+                    select(func.max(StudentRecord.position))
+                )
+                position = int(last_position if last_position is not None else -1) + 1
+                session.add(
+                    StudentRecord(
+                        **_student_values(mutation.record, workspace.id, position)
+                    )
+                )
+            else:
+                for key, value in _student_values(
+                    mutation.record, workspace.id, target.position
+                ).items():
+                    setattr(target, key, value)
+            return dict(mutation.record)
+
+    async def set_student_active(
+        self,
+        student_id: str,
+        active: bool,
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        async with self.session_factory.begin() as session:
+            student = await session.get(StudentRecord, student_id)
+            context = {
+                "students": (
+                    [_student_context_item(student)] if student is not None else []
+                )
+            }
+            mutation = record_service.set_student_active(
+                context,
+                student_id,
+                active,
+            )
+            if student is None:
+                raise RuntimeError("El estudiante seleccionado ya no está disponible.")
+            student.active = mutation.record["active"]
+            return dict(mutation.record)
+
+    async def save_enrollment(
+        self,
+        source_id: str,
+        fields: dict[str, Any],
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        if not isinstance(fields, dict):
+            raise TypeError("Los datos de la matrícula no tienen un formato válido.")
+
+        student_id = str(fields.get("student_id") or "").strip() or None
+        raw_course_id = fields.get("course_id")
+        try:
+            course_id = (
+                int(raw_course_id)
+                if raw_course_id is not None and raw_course_id != ""
+                else None
+            )
+        except (TypeError, ValueError):
+            course_id = None
+
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+            target = (
+                await session.get(EnrollmentRecord, source_id) if source_id else None
+            )
+            student = (
+                await session.get(StudentRecord, student_id) if student_id else None
+            )
+            course = (
+                await session.get(CourseRecord, course_id)
+                if course_id is not None
+                else None
+            )
+
+            raw_promoter_ids = fields.get(
+                "promoter_ids",
+                target.promoter_ids if target is not None else [],
+            )
+            promoter_ids: set[int] = set()
+            if isinstance(raw_promoter_ids, (list, tuple)):
+                for value in raw_promoter_ids:
+                    try:
+                        promoter_ids.add(int(value))
+                    except (TypeError, ValueError):
+                        continue
+            promoters = (
+                list(
+                    (
+                        await session.scalars(
+                            select(PromoterRecord).where(
+                                PromoterRecord.id.in_(promoter_ids)
+                            )
+                        )
+                    ).all()
+                )
+                if promoter_ids
+                else []
+            )
+
+            conditions = []
+            if student_id and course_id is not None:
+                conditions.append(
+                    and_(
+                        EnrollmentRecord.student_id == student_id,
+                        EnrollmentRecord.course_id == course_id,
+                    )
+                )
+
+            code_text = str(
+                fields.get(
+                    "record_code",
+                    target.record_code if target is not None else "",
+                )
+                or ""
+            ).strip()
+            date_text = str(fields.get("enrollment_date", "")).strip()
+            candidate_code = None
+            if len(code_text) <= 50 and code_text.isascii() and code_text.isdigit():
+                candidate_code = int(code_text)
+            if candidate_code is not None:
+                try:
+                    candidate_date = date.fromisoformat(date_text)
+                except ValueError:
+                    candidate_date = None
+                if (
+                    candidate_date is not None
+                    and candidate_date.isoformat() == date_text
+                    and 0 < candidate_code <= 2_147_483_647
+                ):
+                    conditions.append(
+                        and_(
+                            EnrollmentRecord.record_code == candidate_code,
+                            EnrollmentRecord.enrollment_date == date_text,
+                        )
+                    )
+
+            conflicting_enrollments = (
+                list(
+                    (
+                        await session.scalars(
+                            select(EnrollmentRecord).where(or_(*conditions))
+                        )
+                    ).all()
+                )
+                if conditions
+                else []
+            )
+            enrollment_context = {
+                item.id: _enrollment_context_item(item)
+                for item in conflicting_enrollments
+            }
+            if target is not None:
+                enrollment_context.setdefault(
+                    target.id, _enrollment_context_item(target)
+                )
+
+            attachments_to_clean = not code_text
+            if attachments_to_clean:
+                image_references = (
+                    await session.execute(
+                        select(EnrollmentRecord.id, EnrollmentRecord.record_image)
+                        .where(EnrollmentRecord.record_image.is_not(None))
+                    )
+                ).all()
+                for enrollment_id, image_path in image_references:
+                    if enrollment_id not in enrollment_context:
+                        enrollment_context[enrollment_id] = {
+                            "id": enrollment_id,
+                            "record_image": image_path,
+                        }
+
+            manifest_context = {
+                "students": (
+                    [_student_context_item(student)] if student is not None else []
+                ),
+                "courses": _course_context([course])["courses"]
+                if course is not None
+                else [],
+                "promoters": [
+                    {
+                        "id": promoter.id,
+                        "name": promoter.name,
+                        "active": promoter.active,
+                    }
+                    for promoter in promoters
+                ],
+                "enrollments": list(enrollment_context.values()),
+                "_attachment_data": workspace.attachment_data or {},
+            }
+            mutation = record_service.save_enrollment(
+                manifest_context,
+                source_id,
+                fields,
+            )
+            position = (
+                target.position
+                if target is not None
+                else int(
+                    await session.scalar(
+                        select(func.coalesce(func.max(EnrollmentRecord.position), -1))
+                    )
+                    or -1
+                )
+                + 1
+            )
+            values = _enrollment_values(mutation.record, workspace.id, position)
+            if target is None:
+                session.add(EnrollmentRecord(**values))
+            else:
+                for key, value in values.items():
+                    setattr(target, key, value)
+
+            attachments_changed = False
+            if attachments_to_clean:
+                attachment_data = manifest_context["_attachment_data"]
+                if attachment_data != workspace.attachment_data:
+                    workspace.attachment_data = attachment_data
+                    attachments_changed = True
+
+            return {
+                "record": dict(mutation.record),
+                "attachments_changed": attachments_changed,
+                "attachment_data": (
+                    manifest_context["_attachment_data"]
+                    if attachments_changed
+                    else None
+                ),
+            }
 
     async def search_students(self, query: str, limit: int = 20):
         await self.initialize()
@@ -1213,6 +1721,260 @@ class LocalStore:
             course_count=len(courses),
             promoter_count=len(promoters),
         )
+
+    async def create_enrollment(
+        self,
+        student_fields: dict[str, Any],
+        enrollment_fields: dict[str, Any],
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        if not isinstance(student_fields, dict) or not isinstance(
+            enrollment_fields, dict
+        ):
+            raise ValueError("Los datos de la matrícula no tienen un formato válido.")
+
+        def student_values(record: StudentRecord) -> dict[str, Any]:
+            return {
+                "id": record.id,
+                "server_id": record.server_id,
+                "base_hash": record.base_hash,
+                "last_name": record.last_name,
+                "first_name": record.first_name,
+                "document_number": record.document_number,
+                "phone_numbers": record.phone_numbers,
+                "active": record.active,
+            }
+
+        def course_values(record: CourseRecord) -> dict[str, Any]:
+            return {
+                "id": record.id,
+                "server_id": record.server_id,
+                "name": record.name,
+                "schedule": record.schedule,
+                "group": record.group_name,
+                "start_date": record.start_date,
+                "enrollment_fee": record.enrollment_fee,
+                "monthly_fee": record.monthly_fee,
+                "capacity": record.capacity,
+                "active": record.active,
+            }
+
+        def promoter_values(record: PromoterRecord, version: int) -> dict[str, Any]:
+            return {
+                "id": record.id,
+                "server_id": (
+                    record.server_id
+                    if record.server_id is not None or version == 3
+                    else record.id
+                ),
+                "name": record.name,
+                "active": record.active,
+            }
+
+        def enrollment_values(record: EnrollmentRecord) -> dict[str, Any]:
+            return {
+                "id": record.id,
+                "student_id": record.student_id,
+                "course_id": record.course_id,
+                "enrollment_date": record.enrollment_date,
+                "record_code": record.record_code,
+            }
+
+        student_id = str(student_fields.get("id") or "").strip()
+        raw_course_id = enrollment_fields.get("course_id")
+        course_id: int | None = None
+        if raw_course_id is not None and raw_course_id != "":
+            try:
+                course_id = int(raw_course_id)
+            except (TypeError, ValueError):
+                course_id = None
+
+        raw_promoter_ids = enrollment_fields.get("promoter_ids", [])
+        promoter_ids: set[int] = set()
+        if isinstance(raw_promoter_ids, (list, tuple)):
+            for value in raw_promoter_ids:
+                try:
+                    promoter_ids.add(int(value))
+                except (TypeError, ValueError):
+                    continue
+
+        conditions = []
+        if student_id and course_id is not None:
+            conditions.append(
+                and_(
+                    EnrollmentRecord.student_id == student_id,
+                    EnrollmentRecord.course_id == course_id,
+                )
+            )
+        code_text = str(enrollment_fields.get("record_code") or "").strip()
+        candidate_code = None
+        if code_text.isascii() and code_text.isdigit():
+            try:
+                candidate_code = int(code_text)
+            except ValueError:
+                candidate_code = None
+        date_text = str(enrollment_fields.get("enrollment_date") or "").strip()
+        if candidate_code is not None:
+            try:
+                candidate_date = date.fromisoformat(date_text)
+            except ValueError:
+                candidate_date = None
+            if (
+                candidate_date is not None
+                and candidate_date.isoformat() == date_text
+                and 0 < candidate_code <= 2_147_483_647
+            ):
+                conditions.append(
+                    and_(
+                        EnrollmentRecord.record_code == candidate_code,
+                        EnrollmentRecord.enrollment_date == date_text,
+                    )
+                )
+
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+
+            if student_id:
+                student_records = list(
+                    (
+                        await session.scalars(
+                            select(StudentRecord).where(StudentRecord.id == student_id)
+                        )
+                    ).all()
+                )
+            else:
+                last_name = str(student_fields.get("last_name") or "").strip()
+                first_name = str(student_fields.get("first_name") or "").strip()
+                if last_name and first_name:
+                    student_records = list(
+                        (
+                            await session.scalars(
+                                select(StudentRecord).where(
+                                    StudentRecord.last_name_search
+                                    == normalize_search_text(last_name),
+                                    StudentRecord.first_name_search
+                                    == normalize_search_text(first_name),
+                                )
+                            )
+                        ).all()
+                    )
+                else:
+                    student_records = []
+
+            course_record = None
+            if course_id is not None:
+                course_record = await session.get(CourseRecord, course_id)
+
+            if promoter_ids:
+                promoter_records = list(
+                    (
+                        await session.scalars(
+                            select(PromoterRecord).where(
+                                PromoterRecord.id.in_(promoter_ids)
+                            )
+                        )
+                    ).all()
+                )
+            else:
+                promoter_records = []
+
+            if conditions:
+                conflicting_enrollments = list(
+                    (
+                        await session.scalars(
+                            select(EnrollmentRecord).where(or_(*conditions))
+                        )
+                    ).all()
+                )
+            else:
+                conflicting_enrollments = []
+
+            manifest_context = {
+                "students": [student_values(record) for record in student_records],
+                "courses": [course_values(course_record)]
+                if course_record is not None
+                else [],
+                "promoters": [
+                    promoter_values(record, workspace.version)
+                    for record in promoter_records
+                ],
+                "enrollments": [
+                    enrollment_values(record)
+                    for record in conflicting_enrollments
+                ],
+                "_attachment_data": {},
+            }
+
+            student_created = not student_id
+            student_change = None
+            if student_created:
+                student_change = record_service.save_student(
+                    manifest_context,
+                    "",
+                    str(student_fields.get("last_name") or ""),
+                    str(student_fields.get("first_name") or ""),
+                    str(student_fields.get("document_number") or ""),
+                    str(student_fields.get("phone_text") or ""),
+                )
+                student_id = str(student_change.record["id"])
+
+            fields = dict(enrollment_fields)
+            fields["student_id"] = student_id
+            enrollment_change = record_service.save_enrollment(
+                manifest_context,
+                "",
+                fields,
+            )
+
+            if student_change is not None:
+                position = await session.scalar(
+                    select(func.coalesce(func.max(StudentRecord.position), -1))
+                )
+                session.add(
+                    StudentRecord(
+                        **_student_values(
+                            student_change.record,
+                            workspace.id,
+                            int(position if position is not None else -1) + 1,
+                        )
+                    )
+                )
+                await session.flush()
+
+            position = await session.scalar(
+                select(func.coalesce(func.max(EnrollmentRecord.position), -1))
+            )
+            session.add(
+                EnrollmentRecord(
+                    **_enrollment_values(
+                        enrollment_change.record,
+                        workspace.id,
+                        int(position if position is not None else -1) + 1,
+                    )
+                )
+            )
+            await session.flush()
+
+            student_record = next(
+                item
+                for item in manifest_context["students"]
+                if item["id"] == student_id
+            )
+
+        audit_logger.info(
+            "database.enrollment_created",
+            student_created=student_created,
+        )
+        return {
+            "student_id": student_id,
+            "enrollment_id": str(enrollment_change.record["id"]),
+            "student_created": student_created,
+            "student_record": student_record,
+            "enrollment_record": enrollment_change.record,
+        }
 
     async def _save(self, manifest, sync_history_event=None):
         async with self.session_factory.begin() as session:

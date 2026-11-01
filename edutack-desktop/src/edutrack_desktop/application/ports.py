@@ -10,6 +10,8 @@ class WorkspaceStore(Protocol):
 
     async def load(self) -> dict[str, Any] | None: ...
 
+    async def register_export_data(self) -> dict[str, Any] | None: ...
+
     async def save(self, manifest: dict[str, Any]) -> None: ...
 
     async def save_with_sync_history(
@@ -19,6 +21,63 @@ class WorkspaceStore(Protocol):
     async def save_records(
         self, manifest: dict[str, Any], changes: dict[str, list[RecordMutation]]
     ) -> None: ...
+
+    async def create_enrollment(
+        self,
+        student_fields: dict[str, Any],
+        enrollment_fields: dict[str, Any],
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
+    async def update_course(
+        self,
+        course_id: int,
+        name: str,
+        schedule: str,
+        group_name: str,
+        start_date: str,
+        enrollment_fee: str,
+        monthly_fee: str,
+        capacity: str,
+        active: bool,
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
+    async def create_course(
+        self,
+        name: str,
+        schedule: str,
+        group_name: str,
+        start_date: str,
+        enrollment_fee: str,
+        monthly_fee: str,
+        capacity: str,
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
+    async def save_student(
+        self,
+        source_id: str,
+        last_name: str,
+        first_name: str,
+        document_number: str,
+        phone_text: str,
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
+    async def set_student_active(
+        self,
+        student_id: str,
+        active: bool,
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
+    async def save_enrollment(
+        self,
+        source_id: str,
+        fields: dict[str, Any],
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
 
     async def search_students(
         self, query: str, limit: int = 20

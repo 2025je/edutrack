@@ -139,11 +139,12 @@ class _SyncOperationWorker(QRunnable):
             KeyError,
             TypeError,
         ) as exc:
-            event = (
-                "backup.operation_failed"
-                if self._operation_name.startswith("backup_")
-                else "sync.operation_failed"
-            )
+            if self._operation_name.startswith("backup_"):
+                event = "backup.operation_failed"
+            elif self._operation_name == "register_export":
+                event = "workspace.register_export_failed"
+            else:
+                event = "sync.operation_failed"
             logger.error(
                 event,
                 operation=self._operation_name,
@@ -217,6 +218,7 @@ class DesktopBackend(QObject):
     syncPreviewFinished = Signal(bool, object, str)
     syncImportFinished = Signal(bool, object, str)
     syncExportFinished = Signal(bool, str)
+    registerExportFinished = Signal(bool, str)
     studentSearchFinished = Signal(int, list, str)
     backupStateChanged = Signal()
     backupDirectoryChanged = Signal()
@@ -244,8 +246,7 @@ class DesktopBackend(QObject):
         self._student_search_request_id = 0
         self._student_search_workers: dict[int, AsyncQueryWorker] = {}
         self._save_in_progress = False
-        self._course_save_worker: _WorkspaceSaveWorker | None = None
-        self._course_save_task: asyncio.Task[None] | None = None
+        self._course_save_worker: AsyncQueryWorker | None = None
         self._course_save_in_progress = False
         self._pending_course_save_id: int | None = None
         self._load_in_progress = False
@@ -513,7 +514,7 @@ class DesktopBackend(QObject):
         Coroutine[Any, Any, tuple[list[dict[str, Any]], int, int]]
         | tuple[list[dict[str, Any]], int, int]
     ):
-        if not self.manifest or self.store is None:
+        if self.store is None:
             return [], 0, 0
         return self.store.student_page(
             query,
@@ -532,7 +533,7 @@ class DesktopBackend(QObject):
         Coroutine[Any, Any, tuple[list[dict[str, Any]], int, int]]
         | tuple[list[dict[str, Any]], int, int]
     ):
-        if not self.manifest or self.store is None:
+        if self.store is None:
             return [], 0, 0
         return self.store.course_page(query, page_index, page_size)
 
@@ -547,7 +548,7 @@ class DesktopBackend(QObject):
         Coroutine[Any, Any, tuple[list[dict[str, Any]], int, int]]
         | tuple[list[dict[str, Any]], int, int]
     ):
-        if not self.manifest or self.store is None:
+        if self.store is None:
             return [], 0, 0
         return self.store.enrollment_page(
             query,
@@ -1325,6 +1326,12 @@ class DesktopBackend(QObject):
             return
 
         if not succeeded:
+            if operation_name == "register_export":
+                message = f"No se pudo exportar el registro: {error}"
+                self._set_error(message)
+                self.registerExportFinished.emit(False, message)
+                return
+
             operation = (
                 "import" if operation_name in ("preview", "import") else "export"
             )
@@ -1412,6 +1419,17 @@ class DesktopBackend(QObject):
             }
             self.syncStateChanged.emit()
             self.syncImportFinished.emit(True, result_data, "")
+            return
+
+        if operation_name == "register_export":
+            if not isinstance(result, str):
+                message = "No se pudo exportar el registro: resultado no válido."
+                self._set_error(message)
+                self.registerExportFinished.emit(False, message)
+                return
+            message = f"Registro exportado correctamente: {result}"
+            self._set_error(message)
+            self.registerExportFinished.emit(True, message)
             return
 
         if operation_name == "export":
@@ -1546,6 +1564,19 @@ class DesktopBackend(QObject):
             self.savingStateChanged.emit()
             self.activityStateChanged.emit()
         return True, ""
+
+    def _run_store_write(self, operation: Coroutine[Any, Any, Any]) -> Any:
+        self._save_in_progress = True
+        self._activity_message = "Guardando cambios en la base de datos..."
+        self.savingStateChanged.emit()
+        self.activityStateChanged.emit()
+        try:
+            return self._run_async(operation)
+        finally:
+            self._save_in_progress = False
+            self._activity_message = ""
+            self.savingStateChanged.emit()
+            self.activityStateChanged.emit()
 
     def _load_manifest(self, store):
         if self.isBusy:
@@ -1857,14 +1888,13 @@ class DesktopBackend(QObject):
 
     @Slot(str, result=bool)
     def preparePackageImport(self, package_path):
-        if self.store is None or self.manifest is None:
+        if self.store is None:
             self._set_error("Primero abre una sede local.")
             return False
         if self.isBusy:
             self._set_error("Espera a que termine la operación en curso.")
             return False
 
-        local_snapshot = deepcopy(self.manifest)
         store = self.store
         local_path = self._local_path(package_path)
         self._pending_import_manifest = None
@@ -1872,6 +1902,9 @@ class DesktopBackend(QObject):
         self._pending_import_preview = {}
 
         def prepare():
+            local_snapshot = run_async_operation(store.load())
+            if local_snapshot is None:
+                raise PackageError("La sede local no tiene un espacio de trabajo.")
             incoming = read_package(local_path)
             if not self._same_campus(local_snapshot, incoming):
                 raise PackageError(
@@ -1986,7 +2019,7 @@ class DesktopBackend(QObject):
 
     @Slot(str, result=bool)
     def exportPackageAsync(self, path):
-        if self.store is None or self.manifest is None:
+        if self.store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
@@ -1995,26 +2028,30 @@ class DesktopBackend(QObject):
             self._set_error("Espera a que termine la operación en curso.")
             return False
 
-        output = deepcopy(self.manifest)
-        if not self.isNewCampus:
-            output["bundle_id"] = str(uuid.uuid4())
-        bundle_id = str(output["bundle_id"])
-        event = self._sync_history_event(
-            "export",
-            bundle_id,
-            "success",
-            {
-                "students": len(output["students"]),
-                "enrollments": len(output["enrollments"]),
-                "courses": len(output["courses"]),
-                "promoters": len(output["promoters"]),
-            },
-            "Paquete de sincronización exportado.",
-        )
         local_path = self._local_path(path)
         store = self.store
+        metadata: dict[str, Any] = {"history_event": None}
 
         def export_package():
+            output = run_async_operation(store.load())
+            if output is None:
+                raise ValueError("La sede local no tiene un espacio de trabajo.")
+            if output.get("campus_mode") != "new":
+                output["bundle_id"] = str(uuid.uuid4())
+            bundle_id = str(output["bundle_id"])
+            event = self._sync_history_event(
+                "export",
+                bundle_id,
+                "success",
+                {
+                    "students": len(output["students"]),
+                    "enrollments": len(output["enrollments"]),
+                    "courses": len(output["courses"]),
+                    "promoters": len(output["promoters"]),
+                },
+                "Paquete de sincronización exportado.",
+            )
+            metadata["history_event"] = event
             write_package(local_path, output)
             try:
                 run_async_operation(store.record_sync_history(event))
@@ -2033,7 +2070,7 @@ class DesktopBackend(QObject):
             "export",
             export_package,
             "Generando paquete de sincronización…",
-            {"history_event": event},
+            metadata,
         )
 
     @Slot(str, result=bool)
@@ -2283,19 +2320,21 @@ class DesktopBackend(QObject):
 
     @Slot(str)
     def exportPackage(self, path):
-        if not self.manifest:
+        if self.store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
             return
         try:
-            output = dict(self.manifest)
-            if not self.isNewCampus:
+            output = self._run_async(self.store.load())
+            if output is None:
+                raise ValueError("La sede local no tiene un espacio de trabajo.")
+            if output.get("campus_mode") != "new":
                 output["bundle_id"] = str(uuid.uuid4())
             write_package(self._local_path(path), output)
             message = (
                 "Paquete inicial de sede generado correctamente."
-                if self.isNewCampus
+                if output.get("campus_mode") == "new"
                 else "Archivo de sincronización generado correctamente."
             )
             history_event = self._sync_history_event(
@@ -2322,7 +2361,14 @@ class DesktopBackend(QObject):
             if not history_saved:
                 message += " No se pudo guardar el historial local."
             self._set_error(message)
-        except (PackageError, OSError, ValueError) as exc:
+        except (
+            PackageError,
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            ValueError,
+        ) as exc:
             logger.error(
                 "sync.package_export_failed",
                 error_type=exc.__class__.__name__,
@@ -2331,23 +2377,46 @@ class DesktopBackend(QObject):
 
     @Slot(str, result=bool)
     def exportRegister(self, path):
-        if not self.manifest:
+        store = self.store
+        if store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
             return False
         output_path = Path(self._local_path(path))
-        try:
-            export_register(self.manifest, output_path)
-        except (OSError, TypeError, ValueError) as exc:
-            logger.error(
-                "workspace.register_export_failed",
-                error_type=exc.__class__.__name__,
+
+        def export_from_sqlite():
+            export_data = run_async_operation(store.register_export_data())
+            if not isinstance(export_data, dict):
+                raise RuntimeError("No hay una sede disponible para exportar.")
+            export_register(export_data, output_path)
+            return output_path.name
+
+        return self._start_sync_operation(
+            "register_export",
+            export_from_sqlite,
+            "Exportando registro de cursos...",
+        )
+
+    def _sync_course_projection(self, course: dict[str, Any]) -> None:
+        course_id = int(course["id"])
+        if self.manifest is not None:
+            existing_course = next(
+                (
+                    item
+                    for item in self.manifest["courses"]
+                    if item["id"] == course_id
+                ),
+                None,
             )
-            self._set_error(f"No se pudo exportar el registro: {exc}")
-            return False
-        self._set_error(f"Registro exportado correctamente: {output_path.name}")
-        return True
+            if existing_course is None:
+                self.manifest["courses"].append(course)
+            else:
+                existing_course.update(course)
+        self._selected_course_id = course_id
+        self._invalidate_student_rows()
+        self.dataChanged.emit()
+        self.selectionChanged.emit()
 
     @Slot(str, str, str, str, str, str, str, result=int)
     def createCourse(
@@ -2360,14 +2429,18 @@ class DesktopBackend(QObject):
         monthly_fee,
         capacity,
     ):
-        if not self.manifest:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return 0
+        store = self.store
+        if store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
             return 0
         try:
-            mutation = self._record_service.create_course(
-                self.manifest,
+            course = self._run_store_write(
+                store.create_course(
                 name,
                 schedule,
                 group_name,
@@ -2375,18 +2448,30 @@ class DesktopBackend(QObject):
                 enrollment_fee,
                 monthly_fee,
                 capacity,
+                self._record_service,
+                )
             )
-            course_id = int(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("course.create", exc)
             self._set_error(str(exc) or "Revisa los datos del curso.")
             return 0
-        self._selected_course_id = course_id
-        if not self._save({"courses": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.course_create_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo guardar el curso localmente: {exc}")
             return 0
-        self.selectionChanged.emit()
+        self._sync_course_projection(course)
         self._set_error("Curso guardado localmente.")
-        return course_id
+        return int(course["id"])
 
     @Slot(int, str, str, str, str, str, str, str, bool, result=bool)
     def saveCourse(
@@ -2401,14 +2486,18 @@ class DesktopBackend(QObject):
         capacity,
         active,
     ):
-        if self.store is None or not self.manifest:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return False
+        store = self.store
+        if store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
             return False
         try:
-            mutation = self._record_service.update_course(
-                self.manifest,
+            course = self._run_store_write(
+                store.update_course(
                 source_id,
                 name,
                 schedule,
@@ -2418,15 +2507,28 @@ class DesktopBackend(QObject):
                 monthly_fee,
                 capacity,
                 active,
+                self._record_service,
+                )
             )
         except ValueError as exc:
             self._log_validation_failure("course.update", exc)
             self._set_error(str(exc) or "Revisa los datos del curso.")
             return False
-        self._selected_course_id = source_id
-        if not self._save({"courses": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.course_update_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudieron guardar los cambios localmente: {exc}")
             return False
-        self.selectionChanged.emit()
+        self._sync_course_projection(course)
         self._set_error("Curso actualizado correctamente en este dispositivo.")
         return True
 
@@ -2446,29 +2548,11 @@ class DesktopBackend(QObject):
         if self.isBusy:
             self._set_error("Ya hay un guardado en curso.")
             return False
-        if self.store is None or not self.manifest:
+        store = self.store
+        if store is None:
             self._set_error(
                 "Primero abre una sede o crea una nueva en este dispositivo."
             )
-            return False
-
-        updated_manifest = deepcopy(self.manifest)
-        try:
-            mutation = self._record_service.update_course(
-                updated_manifest,
-                source_id,
-                name,
-                schedule,
-                group_name,
-                start_date,
-                enrollment_fee,
-                monthly_fee,
-                capacity,
-                active,
-            )
-        except ValueError as exc:
-            self._log_validation_failure("course.update", exc)
-            self._set_error(str(exc) or "Revisa los datos del curso.")
             return False
 
         self._pending_course_save_id = source_id
@@ -2478,50 +2562,50 @@ class DesktopBackend(QObject):
         self.courseSaveStateChanged.emit()
         self.savingStateChanged.emit()
         self.activityStateChanged.emit()
-        changes = {"courses": [mutation]}
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            worker = _WorkspaceSaveWorker(
-                self.store, updated_manifest, record_changes=changes
-            )
-            worker.signals.finished.connect(self._finish_course_save)
-            self._course_save_worker = worker
-            self._save_pool.start(worker)
-        else:
-            self._course_save_task = loop.create_task(
-                self._save_course_manifest(self.store, updated_manifest, changes)
-            )
+        operation = store.update_course(
+            source_id,
+            name,
+            schedule,
+            group_name,
+            start_date,
+            enrollment_fee,
+            monthly_fee,
+            capacity,
+            active,
+            self._record_service,
+        )
+        worker = AsyncQueryWorker(source_id, operation)
+        worker.signals.finished.connect(self._finish_course_update)
+        self._course_save_worker = worker
+        self._save_pool.start(worker)
         return True
 
-    async def _save_course_manifest(
+    @Slot(int, object, str, str)
+    def _finish_course_update(
         self,
-        store: WorkspaceStore,
-        manifest: dict[str, Any],
-        record_changes: dict[str, list[RecordMutation]],
-    ):
-        try:
-            await store.save_records(manifest, record_changes)
-        except (
-            OSError,
-            RuntimeError,
-            SQLAlchemyError,
-            ValueError,
-            KeyError,
-            TypeError,
-        ) as exc:
+        _request_id: int,
+        course: object,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        if error_type:
             logger.error(
-                "workspace.save_failed",
-                error_type=exc.__class__.__name__,
+                "workspace.course_update_failed",
+                error_type=error_type,
+                error=error_message,
             )
-            self._finish_course_save(False, None, str(exc) or exc.__class__.__name__)
+            self._finish_course_save(False, None, error_message)
             return
-        self._finish_course_save(True, manifest, "")
+        if not isinstance(course, dict):
+            self._finish_course_save(
+                False, None, "La actualización del curso devolvió datos no válidos."
+            )
+            return
+        self._finish_course_save(True, course, "")
 
     @Slot(bool, object, str)
-    def _finish_course_save(self, succeeded, manifest, message):
+    def _finish_course_save(self, succeeded, course, message):
         self._course_save_worker = None
-        self._course_save_task = None
         self._course_save_in_progress = False
         self._save_in_progress = False
         self._activity_message = ""
@@ -2530,12 +2614,8 @@ class DesktopBackend(QObject):
         self.activityStateChanged.emit()
         course_id = self._pending_course_save_id
         self._pending_course_save_id = None
-        if succeeded and manifest is not None and course_id is not None:
-            self.manifest = manifest
-            self._selected_course_id = course_id
-            self._invalidate_student_rows()
-            self.dataChanged.emit()
-            self.selectionChanged.emit()
+        if succeeded and isinstance(course, dict) and course_id is not None:
+            self._sync_course_projection(course)
             self._backup_items = []
             self.backupDirectoryChanged.emit()
             self.backupStateChanged.emit()
@@ -2543,7 +2623,7 @@ class DesktopBackend(QObject):
         else:
             self._set_error(message or "No se pudieron guardar los cambios localmente.")
         self.courseSaveFinished.emit(
-            succeeded and manifest is not None and course_id is not None
+            succeeded and isinstance(course, dict) and course_id is not None
         )
 
     @Slot(str, result=int)
@@ -2656,51 +2736,109 @@ class DesktopBackend(QObject):
         self.selectionChanged.emit()
         self._set_error("Se quitará la imagen al sincronizar con la web.")
 
+    def _sync_student_projection(
+        self, student: dict[str, Any], *, select_student: bool = False
+    ) -> None:
+        student_id = str(student["id"])
+        if self.manifest is not None:
+            existing_student = next(
+                (
+                    item
+                    for item in self.manifest["students"]
+                    if item["id"] == student_id
+                ),
+                None,
+            )
+            if existing_student is None:
+                self.manifest["students"].append(student)
+            else:
+                existing_student.update(student)
+        if select_student:
+            self._selected_student_id = student_id
+        self._invalidate_student_rows()
+        self.dataChanged.emit()
+        self.selectionChanged.emit()
+
     @Slot(str, str, str, str, str, result=bool)
     def saveStudent(
         self, source_id, last_name, first_name, document_number, phone_text
     ):
-        if not self.manifest:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return False
+        store = self.store
+        if store is None:
             self._set_error("Primero abre el archivo de una sede.")
             return False
         try:
-            mutation = self._record_service.save_student(
-                self.manifest,
+            student = self._run_store_write(
+                store.save_student(
                 source_id,
                 last_name,
                 first_name,
                 document_number,
                 phone_text,
+                self._record_service,
+                )
             )
-            student_id = str(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("student.save", exc)
             self._set_error(str(exc))
             return False
-        self._selected_student_id = student_id
-        if not self._save({"students": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.student_save_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo guardar el estudiante localmente: {exc}")
             return False
-        self.selectionChanged.emit()
+        self._sync_student_projection(student, select_student=True)
         self._set_error("Estudiante guardado en este dispositivo.")
         return True
 
     @Slot(str, bool, result=bool)
     def setStudentActive(self, source_id, active):
-        if not self.manifest:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return False
+        store = self.store
+        if store is None:
             self._set_error("Primero abre el archivo de una sede.")
             return False
         try:
-            mutation = self._record_service.set_student_active(
-                self.manifest,
-                source_id,
-                active,
+            student = self._run_store_write(
+                store.set_student_active(
+                    source_id,
+                    active,
+                    self._record_service,
+                )
             )
         except ValueError as exc:
             self._log_validation_failure("student.set_active", exc)
             self._set_error(str(exc))
             return False
-        if not self._save({"students": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.student_activation_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo actualizar el estado del estudiante: {exc}")
             return False
+        self._sync_student_projection(student)
         state = "activado" if active else "desactivado"
         self._set_error(f"Estudiante {state} correctamente en este dispositivo.")
         return True
@@ -2708,33 +2846,42 @@ class DesktopBackend(QObject):
     @Slot("QVariantMap", "QVariantMap", result="QVariantMap")
     def createEnrollment(self, student_fields, enrollment_fields):
         failure = {"ok": False}
-        if self.store is None or not self.manifest:
+        if self.store is None:
             self._set_error("Primero abre el archivo de una sede.")
             return failure
         try:
-            result = self._create_enrollment_use_case.execute(
-                self.manifest,
-                student_fields,
-                enrollment_fields,
+            result = self._run_async(
+                self._create_enrollment_use_case.execute_and_persist(
+                    self.store,
+                    student_fields,
+                    enrollment_fields,
+                )
             )
         except ValueError as exc:
             self._log_validation_failure("enrollment.create", exc)
             self._set_error(str(exc) or "Revisa los datos de la matrícula.")
             return failure
-        succeeded, error = self._persist_manifest(
-            self.store,
-            result.manifest,
-            {
-                "students": (
-                    [result.student_change] if result.student_change is not None else []
-                ),
-                "enrollments": [result.enrollment_change],
-            },
-        )
-        if not succeeded:
-            self._set_error(f"No se pudieron guardar los cambios localmente: {error}")
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            logger.error(
+                "workspace.enrollment_create_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(
+                f"No se pudieron guardar localmente los cambios: "
+                f"{str(exc) or exc.__class__.__name__}"
+            )
             return failure
-        self.manifest = result.manifest
+
+        if self.manifest is not None:
+            if result.student_created:
+                self.manifest["students"].append(result.student_record)
+            self.manifest["enrollments"].append(result.enrollment_record)
         self._selected_student_id = result.student_id
         self._selected_enrollment_id = result.enrollment_id
         self._invalidate_student_rows()
@@ -2750,26 +2897,77 @@ class DesktopBackend(QObject):
 
     @Slot(str, "QVariantMap", result=bool)
     def saveEnrollment(self, source_id, fields):
-        if not self.manifest:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return False
+        store = self.store
+        if store is None:
             self._set_error("Primero abre el archivo de una sede.")
             return False
         if not isinstance(fields, dict):
             self._set_error("Los datos de la matrícula no tienen un formato válido.")
             return False
         try:
-            mutation = self._record_service.save_enrollment(
-                self.manifest,
-                source_id,
-                fields,
+            result = self._run_store_write(
+                store.save_enrollment(
+                    source_id,
+                    fields,
+                    self._record_service,
+                )
             )
-            enrollment_id = str(mutation.record["id"])
         except ValueError as exc:
             self._log_validation_failure("enrollment.save", exc)
             self._set_error(str(exc) or "Revisa los datos de la matrícula.")
             return False
-        self._selected_enrollment_id = enrollment_id
-        if not self._save({"enrollments": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.enrollment_save_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo guardar la matrícula localmente: {exc}")
             return False
+
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("record"), dict)
+            or not isinstance(result.get("attachments_changed"), bool)
+        ):
+            self._set_error(
+                "La actualización de la matrícula devolvió datos no válidos."
+            )
+            return False
+        enrollment = result["record"]
+        if self.manifest is not None:
+            existing_enrollment = next(
+                (
+                    item
+                    for item in self.manifest["enrollments"]
+                    if item["id"] == enrollment["id"]
+                ),
+                None,
+            )
+            if existing_enrollment is None:
+                self.manifest["enrollments"].append(enrollment)
+            else:
+                existing_enrollment.update(enrollment)
+            if result["attachments_changed"]:
+                attachment_data = result.get("attachment_data")
+                if not isinstance(attachment_data, dict):
+                    self._set_error(
+                        "Los adjuntos actualizados de la matrícula no son válidos."
+                    )
+                    return False
+                self.manifest["_attachment_data"] = attachment_data
+        self._selected_enrollment_id = str(enrollment["id"])
+        self._invalidate_student_rows()
+        self.dataChanged.emit()
         self.selectionChanged.emit()
         self._set_error("Matrícula guardada en este dispositivo.")
         return True

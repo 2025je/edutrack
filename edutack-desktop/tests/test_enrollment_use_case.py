@@ -1,3 +1,5 @@
+import asyncio
+import sqlite3
 import uuid
 
 import pytest
@@ -278,6 +280,134 @@ def test_backend_create_enrollment_failure_leaves_no_partial_student(tmp_path):
     assert backend.manifest["students"] == []
     assert backend.manifest["enrollments"] == []
     assert backend.errorMessage
+
+
+def test_backend_create_enrollment_uses_sqlite_without_a_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "")
+    course_id = backend.createCourse(
+        "Matemáticas",
+        "Mañana",
+        "1",
+        "2026-01-01",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    backend.manifest = None
+
+    result = backend.createEnrollment(
+        {
+            "last_name": "Pérez",
+            "first_name": "Ana",
+            "document_number": "12345678",
+            "phone_text": "987654321",
+        },
+        _enrollment_fields(course_id=course_id),
+    )
+
+    assert result["ok"] is True
+    assert result["student_created"] is True
+    assert backend.manifest is None
+    persisted = asyncio.run(backend.store.load())
+    assert len(persisted["students"]) == 1
+    assert len(persisted["enrollments"]) == 1
+    assert persisted["enrollments"][0]["student_id"] == result["student_id"]
+
+
+def test_backend_create_enrollment_rejects_duplicate_student_from_sqlite(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "")
+    course_id = backend.createCourse(
+        "Matemáticas",
+        "Mañana",
+        "1",
+        "2026-01-01",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+
+    result = backend.createEnrollment(
+        {
+            "last_name": "pÉrez",
+            "first_name": "ana",
+            "document_number": "87654321",
+            "phone_text": "987111222",
+        },
+        _enrollment_fields(course_id=course_id),
+    )
+
+    assert result["ok"] is False
+    assert "Ya existe un estudiante" in backend.errorMessage
+    persisted = asyncio.run(backend.store.load())
+    assert len(persisted["students"]) == 1
+    assert persisted["enrollments"] == []
+
+
+def test_backend_create_enrollment_uses_existing_student_from_sqlite(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "")
+    course_id = backend.createCourse(
+        "Matemáticas",
+        "Mañana",
+        "1",
+        "2026-01-01",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+    student_id = backend.selectedStudent["id"]
+    backend.manifest = None
+
+    result = backend.createEnrollment(
+        {"id": student_id},
+        _enrollment_fields(course_id=course_id),
+    )
+
+    assert result["ok"] is True
+    assert result["student_created"] is False
+    persisted = asyncio.run(backend.store.load())
+    assert len(persisted["students"]) == 1
+    assert len(persisted["enrollments"]) == 1
+    assert persisted["enrollments"][0]["student_id"] == student_id
+
+
+def test_backend_create_enrollment_rolls_back_student_on_sql_failure(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "")
+    course_id = backend.createCourse(
+        "Matemáticas",
+        "Mañana",
+        "1",
+        "2026-01-01",
+        "100.00",
+        "80.00",
+        "20",
+    )
+    with sqlite3.connect(backend.store.path) as connection:
+        connection.execute(
+            "CREATE TRIGGER reject_enrollment_insert "
+            "BEFORE INSERT ON desktop_enrollments "
+            "BEGIN SELECT RAISE(ABORT, 'test enrollment failure'); END"
+        )
+
+    result = backend.createEnrollment(
+        {
+            "last_name": "Pérez",
+            "first_name": "Ana",
+            "document_number": "12345678",
+            "phone_text": "987654321",
+        },
+        _enrollment_fields(course_id=course_id),
+    )
+
+    assert result["ok"] is False
+    persisted = asyncio.run(backend.store.load())
+    assert persisted["students"] == []
+    assert persisted["enrollments"] == []
 
 
 def test_backend_create_enrollment_requires_open_workspace(tmp_path):
