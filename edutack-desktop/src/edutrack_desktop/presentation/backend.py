@@ -210,6 +210,7 @@ else:
 
 class DesktopBackend(QObject):
     dataChanged = Signal()
+    dashboardSummaryChanged = Signal()
     selectionChanged = Signal()
     errorChanged = Signal()
     syncStateChanged = Signal()
@@ -303,7 +304,11 @@ class DesktopBackend(QObject):
         self._student_filter_cache_rows: list[dict[str, Any]] = []
         self._enrollment_rows_cache: list[dict[str, Any]] | None = None
         self._course_rows_cache: list[dict[str, Any]] | None = None
-        self._dashboard_summary_cache: dict[str, Any] | None = None
+        self._dashboard_summary_cache = dashboard_summary(None)
+        self._dashboard_summary_requested = False
+        self._dashboard_summary_dirty = False
+        self._dashboard_summary_request_id = 0
+        self._dashboard_summary_workers: dict[int, AsyncQueryWorker] = {}
         if self.catalog and self.catalog.records and not closed_on_start:
             candidates = [self.catalog.active_path] + [
                 record["path"]
@@ -354,7 +359,7 @@ class DesktopBackend(QObject):
         self._student_list_model.queryFailed.connect(self._on_student_page_failed)
         self._course_list_model.queryFailed.connect(self._on_course_page_failed)
         self._enrollment_list_model.queryFailed.connect(self._on_enrollment_page_failed)
-        self.dataChanged.connect(self._refresh_list_models)
+        self.dataChanged.connect(self._on_data_changed)
         if not defer_initialize:
             try:
                 asyncio.get_running_loop()
@@ -479,6 +484,19 @@ class DesktopBackend(QObject):
         self._course_list_model.refreshIfLoaded()
         self._enrollment_list_model.refreshIfLoaded()
 
+    def _on_data_changed(self) -> None:
+        self._refresh_list_models()
+        if self.store is None:
+            self._dashboard_summary_request_id += 1
+            self._dashboard_summary_requested = False
+            self._dashboard_summary_dirty = False
+            self._dashboard_summary_cache = dashboard_summary(None)
+            self.dashboardSummaryChanged.emit()
+            return
+        if self._dashboard_summary_requested:
+            self._dashboard_summary_dirty = True
+            self._request_dashboard_summary()
+
     def _all_student_rows(self) -> list[dict[str, Any]]:
         if self._student_rows_cache is None:
             self._student_rows_cache = student_rows(self.manifest)
@@ -581,7 +599,6 @@ class DesktopBackend(QObject):
         self._student_filter_cache_rows = []
         self._enrollment_rows_cache = None
         self._course_rows_cache = None
-        self._dashboard_summary_cache = None
 
     @Slot(str, result=int)
     def matchingStudentCount(self, query):
@@ -599,7 +616,7 @@ class DesktopBackend(QObject):
     @Slot(str, result="QVariantList")
     @Slot(str, int, result="QVariantList")
     def searchStudents(self, query, limit=20):
-        if not self.manifest or self.store is None:
+        if self.store is None:
             return []
         if isinstance(limit, bool) or limit < 1 or limit > 100:
             limit = 20
@@ -625,7 +642,7 @@ class DesktopBackend(QObject):
     def searchStudentsAsync(self, query: str, limit: int = 20) -> int:
         self._student_search_request_id += 1
         request_id = self._student_search_request_id
-        if not self.manifest or self.store is None:
+        if self.store is None:
             QTimer.singleShot(
                 0,
                 lambda: self.studentSearchFinished.emit(request_id, [], ""),
@@ -690,22 +707,82 @@ class DesktopBackend(QObject):
             self._course_rows_cache = course_rows(self.manifest)
         return self._course_rows_cache
 
-    @Property("QVariantMap", notify=dataChanged)
+    @Property("QVariantMap", notify=dashboardSummaryChanged)
     def dashboardSummary(self):
-        if self._dashboard_summary_cache is None:
-            self._dashboard_summary_cache = dashboard_summary(self.manifest)
+        if self.store is not None and not self._dashboard_summary_requested:
+            self._request_dashboard_summary()
         return self._dashboard_summary_cache
 
     @Slot(result=bool)
     def refreshDashboardSummary(self):
-        if (
-            self._dashboard_summary_cache is None
-            or self._dashboard_summary_cache["summary_date"] == date.today().isoformat()
-        ):
+        if self.store is None:
             return False
-        self._dashboard_summary_cache = dashboard_summary(self.manifest)
-        self.dataChanged.emit()
+        if self._dashboard_summary_cache["summary_date"] == date.today().isoformat():
+            return False
+        return self._request_dashboard_summary()
+
+    def _request_dashboard_summary(self) -> bool:
+        if self.store is None:
+            return False
+        if self._dashboard_summary_workers:
+            self._dashboard_summary_dirty = True
+            return True
+        self._dashboard_summary_requested = True
+        self._dashboard_summary_dirty = False
+        self._dashboard_summary_request_id += 1
+        request_id = self._dashboard_summary_request_id
+        try:
+            operation = self.store.dashboard_summary()
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            TypeError,
+            KeyError,
+        ) as exc:
+            self._finish_dashboard_summary(
+                request_id,
+                None,
+                type(exc).__name__,
+                str(exc),
+            )
+            return False
+        worker = AsyncQueryWorker(request_id, operation)
+        worker.signals.finished.connect(self._finish_dashboard_summary)
+        self._dashboard_summary_workers[request_id] = worker
+        self._query_pool.start(worker)
         return True
+
+    @Slot(int, object, str, str)
+    def _finish_dashboard_summary(
+        self,
+        request_id: int,
+        summary: object,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self._dashboard_summary_workers.pop(request_id, None)
+        if request_id != self._dashboard_summary_request_id:
+            return
+        if error_type:
+            logger.error(
+                "workspace.dashboard_summary_failed",
+                error_type=error_type,
+                error=error_message,
+            )
+            self._set_error("No se pudo actualizar el resumen desde la base local.")
+            if self._dashboard_summary_dirty:
+                self._request_dashboard_summary()
+            return
+        if not isinstance(summary, dict):
+            self._set_error("El resumen de la base local devolvió datos no válidos.")
+            return
+        self._dashboard_summary_cache = summary
+        if self._dashboard_summary_dirty:
+            self._request_dashboard_summary()
+            return
+        self.dashboardSummaryChanged.emit()
 
     @Property("QVariantList", notify=selectionChanged)
     def courseStudents(self):

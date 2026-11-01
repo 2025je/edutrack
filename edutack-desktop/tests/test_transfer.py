@@ -14,6 +14,7 @@ from alembic.config import Config
 from sqlalchemy import event, inspect, select
 
 from edutrack_desktop.domain.record_service import RecordMutation
+from edutrack_desktop.application.presenters import dashboard_summary
 from edutrack_desktop.infrastructure.models import CourseRecord, StudentRecord
 from edutrack_desktop.infrastructure.search import normalize_search_text
 from edutrack_desktop.infrastructure.store import LocalStore
@@ -131,6 +132,42 @@ def test_local_store_persists_workspace(manifest, tmp_path):
             )
 
     asyncio.run(verify_store())
+
+
+def test_local_store_dashboard_summary_matches_manifest_projection(manifest, tmp_path):
+    store = LocalStore(tmp_path / "dashboard.sqlite3")
+    data = deepcopy(manifest)
+    data["courses"][0]["capacity"] = 1
+    pending_course = deepcopy(data["enrollments"][0])
+    pending_course.update(
+        {
+            "id": str(uuid.uuid4()),
+            "course_id": None,
+            "enrollment_date": "2026-01-03",
+            "record_code": None,
+        }
+    )
+    pending_student = deepcopy(data["enrollments"][0])
+    pending_student.update(
+        {
+            "id": str(uuid.uuid4()),
+            "student_id": None,
+            "enrollment_date": "2026-01-04",
+            "record_code": None,
+        }
+    )
+    data["enrollments"].extend((pending_course, pending_student))
+
+    async def verify_summary():
+        try:
+            await store.save(data)
+            actual = await store.dashboard_summary(today="2026-01-02")
+            expected = dashboard_summary(data, today="2026-01-02")
+            assert actual == expected
+        finally:
+            await store.dispose()
+
+    asyncio.run(verify_summary())
 
 
 def test_local_store_save_updates_rows_without_replacing_tables(manifest, tmp_path):

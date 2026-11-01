@@ -96,9 +96,12 @@ def _wait_for_visual_item(window, object_name, gui_application):
     for _ in range(100):
         gui_application.processEvents()
         try:
-            return _find_visual_item(window, object_name)
+            item = _find_visual_item(window, object_name)
         except AssertionError:
-            QTest.qWait(10)
+            item = None
+        if item is not None and item.width() > 0 and item.height() > 0:
+            return item
+        QTest.qWait(10)
     raise AssertionError(f"QML item {object_name!r} was not loaded.")
 
 
@@ -155,9 +158,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
         "search_results": results,
     }
     option = _wait_for_visual_item(view, "enrollmentStudentOption", gui_application)
-    _click(view, option)
-    selected_student = root.property("selectedStudent")
-    assert selected_student is not None, {
+    option_state = {
         "option_visible": option.isVisible(),
         "option_enabled": option.isEnabled(),
         "option_size": (option.width(), option.height()),
@@ -167,6 +168,9 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
         "result_list_visible": result_list.isVisible(),
         "result_list_height": result_list.height(),
     }
+    _click(view, option)
+    selected_student = root.property("selectedStudent")
+    assert selected_student is not None, option_state
     assert selected_student["id"] == backend.students[0]["id"]
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
@@ -569,14 +573,16 @@ def test_main_restores_and_persists_selected_workspace_section(
         QTest.qWait(350)
         assert second_root.property("selectedWorkspaceSection") == "Matrículas"
         _wait_for_model(backend.enrollmentListModel, gui_application, 1)
-        assert _find_visual_item(
+        assert _wait_for_visual_item(
             second_root,
             "enrollmentRow_" + enrollment_id,
-        ), (
+            gui_application,
+        )
+        assert (
             backend.enrollmentListModel.totalCount,
             backend.enrollmentListModel.matchingCount,
             backend.enrollmentListModel.isLoading,
-        )
+        ) == (1, 1, False)
 
         sync_button = _find_visual_item(
             second_root,

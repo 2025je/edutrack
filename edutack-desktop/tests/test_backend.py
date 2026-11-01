@@ -41,6 +41,27 @@ def _wait_for_model(model):
     assert errors == []
 
 
+def _wait_for_dashboard_summary(backend, expected_student_count):
+    deadline = time.monotonic() + 5
+    while (
+        backend.dashboardSummary["student_count"] != expected_student_count
+        and time.monotonic() < deadline
+    ):
+        QCoreApplication.instance().processEvents()
+        time.sleep(0.002)
+    QCoreApplication.instance().processEvents()
+    assert backend.dashboardSummary["student_count"] == expected_student_count
+
+
+def _wait_for_dashboard_summary_idle(backend):
+    deadline = time.monotonic() + 5
+    while backend._dashboard_summary_workers and time.monotonic() < deadline:
+        QCoreApplication.instance().processEvents()
+        time.sleep(0.002)
+    QCoreApplication.instance().processEvents()
+    assert not backend._dashboard_summary_workers
+
+
 def test_desktop_settings_configure_default_storage_paths(tmp_path):
     created_paths = []
 
@@ -556,7 +577,7 @@ def test_dashboard_summary_cache_updates_and_workspace_refresh_reloads(tmp_path)
 
     assert backend.dashboardSummary["student_count"] == 0
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
-    assert backend.dashboardSummary["student_count"] == 1
+    _wait_for_dashboard_summary(backend, 1)
 
     external_manifest = deepcopy(backend.manifest)
     external_manifest["campus_address"] = "Dirección actualizada"
@@ -565,6 +586,16 @@ def test_dashboard_summary_cache_updates_and_workspace_refresh_reloads(tmp_path)
     assert backend.manifest["campus_address"] == ""
     assert backend.refreshWorkspace()
     assert backend.manifest["campus_address"] == "Dirección actualizada"
+    _wait_for_dashboard_summary_idle(backend)
+
+
+def test_dashboard_summary_reads_sqlite_without_a_loaded_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    backend.manifest = None
+
+    _wait_for_dashboard_summary(backend, 1)
 
 
 def test_search_students_normalizes_limits_and_reports_enrollments(tmp_path):
@@ -611,6 +642,15 @@ def test_search_students_normalizes_limits_and_reports_enrollments(tmp_path):
     # Sin sede abierta no devuelve resultados.
     closed = DesktopBackend(tmp_path / "otra.sqlite3", defer_initialize=True)
     assert closed.searchStudents("pere") == []
+
+
+def test_search_students_reads_sqlite_without_a_loaded_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
+    backend.manifest = None
+
+    assert backend.searchStudents("1234")[0]["label"] == "PÉREZ ANA"
 
 
 def test_course_validation_normalizes_identity_and_enforces_web_amount_limit(tmp_path):

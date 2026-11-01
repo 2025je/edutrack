@@ -24,6 +24,8 @@ class WorkspaceStore(Protocol):
         self, query: str, limit: int = 20
     ) -> list[dict[str, Any]]: ...
 
+    async def dashboard_summary(self, today: str | None = None) -> dict[str, Any]: ...
+
     async def student_page(
         self,
         query: str,

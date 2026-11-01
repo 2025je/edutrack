@@ -1,5 +1,6 @@
 import json
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -270,6 +271,235 @@ class LocalStore:
                 session, [student.id for student in students]
             )
             return [self._student_row(student, active_courses) for student in students]
+
+    async def dashboard_summary(
+        self, today: str | None = None
+    ) -> dict[str, Any]:
+        await self.initialize()
+        summary_date = today or date.today().isoformat()
+        student_course_counts = (
+            select(
+                EnrollmentRecord.course_id.label("course_id"),
+                func.count(func.distinct(EnrollmentRecord.student_id)).label(
+                    "student_count"
+                ),
+            )
+            .join(StudentRecord, StudentRecord.id == EnrollmentRecord.student_id)
+            .where(
+                EnrollmentRecord.active.is_(True),
+                StudentRecord.active.is_(True),
+                EnrollmentRecord.course_id.is_not(None),
+            )
+            .group_by(EnrollmentRecord.course_id)
+            .subquery()
+        )
+
+        student_count = (
+            select(func.count()).select_from(StudentRecord).scalar_subquery()
+        )
+        active_student_count = (
+            select(func.count())
+            .select_from(StudentRecord)
+            .where(StudentRecord.active.is_(True))
+            .scalar_subquery()
+        )
+        course_count = select(func.count()).select_from(CourseRecord).scalar_subquery()
+        active_course_count = (
+            select(func.count())
+            .select_from(CourseRecord)
+            .where(CourseRecord.active.is_(True))
+            .scalar_subquery()
+        )
+        enrollment_count = (
+            select(func.count()).select_from(EnrollmentRecord).scalar_subquery()
+        )
+        active_enrollment_count = (
+            select(func.count())
+            .select_from(EnrollmentRecord)
+            .where(
+                EnrollmentRecord.active.is_(True),
+                EnrollmentRecord.student_id.is_not(None),
+                EnrollmentRecord.course_id.is_not(None),
+            )
+            .scalar_subquery()
+        )
+        today_enrollment_count = (
+            select(func.count())
+            .select_from(EnrollmentRecord)
+            .where(EnrollmentRecord.enrollment_date == summary_date)
+            .scalar_subquery()
+        )
+        pending_enrollment_count = (
+            select(func.count())
+            .select_from(EnrollmentRecord)
+            .where(
+                or_(
+                    EnrollmentRecord.student_id.is_(None),
+                    EnrollmentRecord.course_id.is_(None),
+                )
+            )
+            .scalar_subquery()
+        )
+        full_course_count = (
+            select(func.count(CourseRecord.id))
+            .outerjoin(
+                student_course_counts,
+                student_course_counts.c.course_id == CourseRecord.id,
+            )
+            .where(
+                CourseRecord.capacity > 0,
+                func.coalesce(student_course_counts.c.student_count, 0)
+                >= CourseRecord.capacity,
+            )
+            .scalar_subquery()
+        )
+
+        async with self.session_factory() as session:
+            stats = (
+                await session.execute(
+                    select(
+                        student_count.label("student_count"),
+                        active_student_count.label("active_students"),
+                        course_count.label("course_count"),
+                        active_course_count.label("active_courses"),
+                        enrollment_count.label("enrollment_count"),
+                        active_enrollment_count.label("active_enrollments"),
+                        today_enrollment_count.label("today_enrollments"),
+                        pending_enrollment_count.label("pending_enrollments"),
+                        full_course_count.label("full_courses"),
+                    )
+                )
+            ).mappings().one()
+            course_rows = (
+                await session.execute(
+                    select(
+                        CourseRecord.id.label("id"),
+                        CourseRecord.server_id.label("server_id"),
+                        CourseRecord.name.label("name"),
+                        CourseRecord.schedule.label("schedule"),
+                        CourseRecord.group_name.label("group"),
+                        CourseRecord.start_date.label("start_date"),
+                        CourseRecord.enrollment_fee.label("enrollment_fee"),
+                        CourseRecord.monthly_fee.label("monthly_fee"),
+                        CourseRecord.capacity.label("capacity"),
+                        CourseRecord.active.label("active"),
+                        func.coalesce(
+                            student_course_counts.c.student_count, 0
+                        ).label("student_count"),
+                    )
+                    .outerjoin(
+                        student_course_counts,
+                        student_course_counts.c.course_id == CourseRecord.id,
+                    )
+                    .order_by(
+                        func.coalesce(
+                            student_course_counts.c.student_count, 0
+                        ).desc(),
+                        CourseRecord.start_date.desc(),
+                        CourseRecord.position.desc(),
+                    )
+                    .limit(6)
+                )
+            ).mappings().all()
+            recent_rows = (
+                await session.execute(
+                    select(
+                        EnrollmentRecord,
+                        StudentRecord.last_name,
+                        StudentRecord.first_name,
+                        CourseRecord.name.label("course_name"),
+                        CourseRecord.schedule.label("course_schedule"),
+                        CourseRecord.group_name.label("course_group"),
+                    )
+                    .outerjoin(
+                        StudentRecord,
+                        StudentRecord.id == EnrollmentRecord.student_id,
+                    )
+                    .outerjoin(
+                        CourseRecord,
+                        CourseRecord.id == EnrollmentRecord.course_id,
+                    )
+                    .order_by(
+                        EnrollmentRecord.enrollment_date.desc(),
+                        EnrollmentRecord.position.desc(),
+                    )
+                    .limit(6)
+                )
+            ).all()
+
+        occupancy_rows = [
+            {
+                **dict(row),
+                "label": (
+                    f"{row['name']} · {row['schedule']} · Grupo {row['group']}"
+                ),
+            }
+            for row in course_rows
+        ]
+        recent_enrollments = []
+        for (
+            enrollment,
+            last_name,
+            first_name,
+            course_name,
+            course_schedule,
+            course_group,
+        ) in recent_rows:
+            pending_student = last_name is None
+            pending_course = course_name is None
+            student_label = (
+                " ".join(part for part in (last_name, first_name) if part)
+                if not pending_student
+                else "Sin estudiante"
+            )
+            course_label = (
+                f"{course_name} · {course_schedule} · Grupo {course_group}"
+                if not pending_course
+                else "Pendiente de curso"
+            )
+            recent_enrollments.append(
+                {
+                    "id": enrollment.id,
+                    "server_id": enrollment.server_id,
+                    "base_hash": enrollment.base_hash,
+                    "student_id": enrollment.student_id,
+                    "student_server_id": enrollment.student_server_id,
+                    "course_id": enrollment.course_id,
+                    "enrollment_date": enrollment.enrollment_date,
+                    "promoter_ids": enrollment.promoter_ids,
+                    "enrollment_fee": enrollment.enrollment_fee,
+                    "monthly_fee": enrollment.monthly_fee,
+                    "record_code": enrollment.record_code,
+                    "active": enrollment.active,
+                    "record_image": enrollment.record_image,
+                    "record_image_hash": enrollment.record_image_hash,
+                    "record_image_quality": enrollment.record_image_quality,
+                    "student_label": (
+                        student_label
+                        if not pending_student
+                        else "Pendiente de estudiante"
+                    ),
+                    "course_label": course_label,
+                    "pending_student": pending_student,
+                    "pending_course": pending_course,
+                    "label": f"{student_label} — {course_label}",
+                }
+            )
+
+        return {
+            "summary_date": summary_date,
+            "student_count": int(stats["student_count"] or 0),
+            "active_students": int(stats["active_students"] or 0),
+            "course_count": int(stats["course_count"] or 0),
+            "active_courses": int(stats["active_courses"] or 0),
+            "full_courses": int(stats["full_courses"] or 0),
+            "enrollment_count": int(stats["enrollment_count"] or 0),
+            "active_enrollments": int(stats["active_enrollments"] or 0),
+            "today_enrollments": int(stats["today_enrollments"] or 0),
+            "pending_enrollments": int(stats["pending_enrollments"] or 0),
+            "course_occupancy_rows": occupancy_rows,
+            "recent_enrollments": recent_enrollments,
+        }
 
     @staticmethod
     async def _active_courses(

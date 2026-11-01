@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark_data import build_course_search_manifest, build_manifest
+from edutrack_desktop.application.presenters import dashboard_summary
 from edutrack_desktop.domain.record_service import RecordMutation
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.logging_config import configure_logging
@@ -91,6 +92,22 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             )
             incremental_save_samples.append(time.perf_counter() - started)
 
+        await store.dashboard_summary()
+        sql_dashboard_samples = []
+        python_dashboard_samples = []
+        for _ in range(ITERATIONS):
+            started = time.perf_counter()
+            sql_summary = await store.dashboard_summary()
+            sql_dashboard_samples.append(time.perf_counter() - started)
+            if sql_summary["student_count"] != size:
+                raise RuntimeError("El resumen SQL de estudiantes es incorrecto.")
+
+            started = time.perf_counter()
+            python_summary = dashboard_summary(manifest)
+            python_dashboard_samples.append(time.perf_counter() - started)
+            if python_summary["student_count"] != size:
+                raise RuntimeError("El resumen Python de estudiantes es incorrecto.")
+
         return {
             "students": size,
             "initial_save_ms_including_migrations": initial_save_ms,
@@ -102,6 +119,12 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             ),
             "one_record_incremental_save_median_ms": median_milliseconds(
                 incremental_save_samples
+            ),
+            "sql_dashboard_summary_median_ms": median_milliseconds(
+                sql_dashboard_samples
+            ),
+            "manifest_dashboard_summary_median_ms": median_milliseconds(
+                python_dashboard_samples
             ),
         }
     finally:

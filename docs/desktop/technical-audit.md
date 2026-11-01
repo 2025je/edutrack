@@ -593,3 +593,167 @@ verificó corregida con el loop selector. El fixture de pruebas mantiene activa
 la aplicación Qt al cerrar y reabrir ventanas; la prueba QML de matrículas
 espera también a que el modelo y su delegado estén listos. La última suite
 completa pasó: 115 pruebas, con 20 benchmarks optativos excluidos.
+
+## 19. Reauditoría de fuente de verdad y línea base (2026-11-01)
+
+Esta revisión se realizó sobre el árbol actual, sin cambios de código funcional.
+La suite Desktop ejecutada con `uv run pytest tests -q` pasó **116 pruebas** y
+excluyó **20 benchmarks** por la configuración normal de pytest. También se
+ejecutó `uv run python tests/benchmark_desktop.py` en Windows 11 / Python
+3.14.4; los valores siguientes son medianas de cinco repeticiones, no objetivos
+ni una comparación antes/después:
+
+| Estudiantes | Guardado inicial + migraciones (ms) | Apertura + carga completa (ms) | Carga completa (ms) | Búsqueda directa SQL (ms) | Página SQL con búsqueda (ms) | Guardado incremental de 1 registro (ms) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1.000 | 286,59 | 76,55 | 31,23 | 8,84 | 15,28 | 17,85 |
+| 10.000 | 1.173,62 | 242,25 | 231,16 | 8,42 | 35,34 | 18,98 |
+| 50.000 | 5.445,05 | 1.067,22 | 1.076,20 | 7,86 | 87,42 | 15,37 |
+
+La búsqueda SQL de cursos midió 11,73 / 12,22 / 12,87 ms para 1.000 /
+10.000 / 50.000 cursos. El paquete de 2.000 estudiantes ocupó 69.572 bytes y
+su exportación/importación midió 21,33 / 20,31 ms. Las cifras varían respecto
+de ejecuciones históricas de este documento; no deben interpretarse como una
+mejora o regresión porcentual entre máquinas o revisiones.
+
+### Estado observado del manifiesto
+
+SQLite ya conserva las tablas de estudiantes, cursos, promotores y matrículas;
+`LocalStore.save_records()` escribe mutaciones seleccionadas en una transacción,
+y los listados paginados y la búsqueda del asistente consultan SQLite. Sin
+embargo, el manifiesto **sigue siendo una copia operativa permanente en memoria**
+y el requisito de SQLite como única fuente de verdad todavía no se cumple:
+
+| Uso | Clasificación | Estado y dirección de migración |
+|---|---|---|
+| `transfer.py`: leer, validar y escribir `.edutrack` | Importación/exportación | Uso correcto; conservar versiones 2/3, identidades, hashes y validación. |
+| `backend.py::initialize`, `refreshWorkspace`, `openPackage` y cambios de sede | Operativo | `store.load()` reconstruye todos los registros y los asigna a `self.manifest`. Sustituir cargas de operación normal por metadatos/consultas acotadas; mantener lectura completa solo en flujos de intercambio y compatibilidad. |
+| `backend.py` CRUD y `domain/record_service.py` | Operativo | Estudiantes, cursos y matrículas se validan y modifican en el manifiesto; `save_records()` persiste después las mutaciones. Mover validación/orquestación a servicios que reciban IDs/datos y ejecuten repositorios SQL en transacciones. |
+| `application/enrollment.py::CreateEnrollmentUseCase` | Operativo | Copia el manifiesto con `deepcopy`, usa `RecordService` y persiste estudiante y matrícula mediante `save_records()`. La atomicidad ya está cubierta por pruebas; conservar reglas y transacción al sustituir la copia por operaciones SQL. |
+| `application/presenters.py` y properties de `backend.py` | Operativo | Presenters y dashboard recorren las colecciones completas; selección de filas también busca en memoria. Trasladar proyecciones, conteos y selección a consultas SQL. Los modelos paginados existentes ya son una base reutilizable. |
+| `backend.py` importación/sincronización | Estado local + intercambio | El paquete entrante puede ser temporal, pero el snapshot local se copia desde el manifiesto. En la migración, obtener el estado local necesario desde SQLite y preservar preview, revalidación, backup e historial atómico. |
+| `backend.py` exportación de paquete y `excel_export.py` | Exportación | Actualmente ambos parten del manifiesto retenido. Generar el snapshot de salida bajo demanda desde consultas SQLite y liberarlo al terminar. |
+| `campus_catalog.py` | Configuración local persistente | `campuses.json` registra rutas/nombres y sede activa; no duplica filas de negocio, pero se debe decidir si entra en la definición estricta de configuración operativa. Si migra, importar el catálogo existente sin perder ni reubicar bases. |
+
+`Workspace` conserva metadatos del formato/paquete y adjuntos JSON; `SyncHistoryRecord`
+persiste el historial. La aplicación Desktop no tiene modelos ni flujo de pagos:
+la auditoría anterior los considera responsabilidad de EduTrack Web. Incorporar
+pagos al cliente offline ampliaría el modelo/sincronización y requiere decisión
+de alcance antes de modificar el contrato actual.
+
+### Hallazgos priorizados y dependencias
+
+1. **P1 — Fuente de verdad no conforme:** `backend.py` mantiene el manifiesto
+   completo desde el inicio; `store.py::_load()` materializa todas las tablas;
+   los servicios de dominio y presenters dependen de la misma estructura.
+   Consecuencia medida: abrir/cargar 50.000 estudiantes tomó 1.067 ms y una
+   carga completa repetida 1.076 ms. La búsqueda directa sí se mantuvo entre
+   7,86 y 8,84 ms; la página con búsqueda pasó de 15,28 a 87,42 ms. Migrar
+   primero los contratos Store/servicios y los CRUD, y después dashboard,
+   selección, sincronización y exportación.
+2. **P1 — Búsqueda parcialmente escalable:** la consulta dedicada tiene buen
+   comportamiento en esta medición, pero la búsqueda paginada contiene
+   condiciones `LIKE` con comodín inicial. Revisar `EXPLAIN QUERY PLAN` sobre
+   los casos reales antes de cambiar índices o añadir FTS5; no afirmar que los
+   índices B-tree aceleran búsquedas por subcadena.
+3. **P2 — Operaciones síncronas y asíncronas mixtas:** los listados usan
+   `AsyncQueryWorker`, `QThreadPool`, `asyncio.Runner` y descartan resultados
+   obsoletos. En cambio, `_run_async()` ejecuta operaciones de slots dentro de
+   un `QEventLoop` anidado. Mantener `NullPool`, medir bloqueos/reentrancia y
+   migrar operaciones pesadas a workers sin compartir `AsyncSession`.
+4. **P2 — Datos persistentes fuera de SQLite:** el catálogo de sedes está en
+   JSON; confirmar si debe migrarse junto con la configuración persistente. El
+   `.coverage` de la raíz también estaba versionado y sin regla de exclusión;
+   se añadió a `.gitignore` y se retiró del índice sin borrar la copia local.
+5. **P2 — Alcance de pagos:** no hay persistencia ni operaciones de pagos en
+   Desktop. No añadir tablas ni inventar compatibilidad de sincronización sin
+   definir cómo se integran con Web.
+
+### Comportamiento que se conserva y compatibilidad
+
+- La creación conjunta de estudiante y matrícula ya tiene operación, guardado
+  transaccional y pruebas para rollback; el problema pendiente es su dependencia
+  del manifiesto, no la atomicidad actual.
+- Se conservan las tablas/migraciones existentes, la migración del workspace
+  JSON legado, `NullPool`, la búsqueda paginada, los backups verificados y el
+  historial de sincronización.
+- La importación confirmada revalida el snapshot y el `bundle_id`, crea backup
+  y guarda los registros con el historial en la ruta transaccional existente.
+- No cambiar el archivo `.edutrack` ni sus versiones. Las pruebas de round-trip,
+  versiones, duplicados, conflictos, rollback, backups y formularios QML deben
+  seguir pasando en cada etapa.
+
+### Orden recomendado de implementación
+
+1. Añadir pruebas arquitectónicas que fallen si el inicio carga todas las
+   colecciones o si CRUD depende de `self.manifest`; mantener el baseline de
+   benchmarks y añadir medición de memoria con datasets escalables.
+2. Introducir operaciones SQL específicas en `WorkspaceStore` y sus servicios;
+   migrar CRUD de estudiantes, cursos y matrículas, empezando por matrícula
+   atómica. Mantener `load/save` solo para compatibilidad de importación,
+   exportación y bases legadas durante la transición.
+3. Migrar presenters, dashboard, selecciones, sincronización y Excel para
+   consultar SQLite bajo demanda; generar manifiestos temporales únicamente en
+   los límites de transferencia.
+4. Resolver explícitamente configuración/catálogo y alcance de pagos antes de
+   alterar su persistencia o contrato.
+5. Comparar pruebas y benchmarks bajo el mismo comando, máquina y tamaños;
+   ampliar a 100.000 registros antes de afirmar soporte de ese volumen.
+
+## 20. Fase 2 incremental — resumen SQL (2026-11-01)
+
+El dashboard ya obtiene sus métricas directamente de `LocalStore.dashboard_summary()`.
+SQLite calcula los conteos y cursos completos; la consulta de ocupación ordena y
+limita a seis cursos, y la de matrículas recientes devuelve seis filas. No se
+materializan todas las colecciones para esta vista. El backend usa
+`AsyncQueryWorker` y una señal de notificación propia, de modo que la carga no
+ocupa el hilo de UI ni provoca la recarga incidental de los modelos de listas.
+Las respuestas antiguas se ignoran por ID de solicitud.
+
+Se añadieron pruebas que comparan la proyección SQL con la presentación previa
+para matrículas normales y pendientes, y que verifican que el resumen sigue
+leyendo SQLite cuando `backend.manifest` es `None`. La prueba QML que verifica
+la fila de matrícula espera ahora a que el delegado visual se cree; mantiene
+sus aserciones de cantidad y estado del modelo.
+
+Validación tras este cambio: suite Desktop **118 pruebas pasadas, 20 benchmarks
+optativos excluidos**; `ruff check` pasa; `mypy` pasa para `store.py`,
+`backend.py` y `ports.py`.
+
+El benchmark existente compara cinco ejecuciones del resumen SQL con cinco de
+la proyección en memoria sobre el mismo manifiesto, en Windows 11 / Python
+3.14.4:
+
+| Registros | Resumen SQL en worker (ms) | Proyección Python sobre manifiesto ya cargado (ms) |
+|---:|---:|---:|
+| 1.000 | 13,71 | 0,23 |
+| 10.000 | 19,02 | 3,07 |
+| 50.000 | 29,83 | 19,15 |
+
+En esta ejecución la consulta SQL fue más lenta que proyectar un manifiesto que
+ya está en memoria; **no se afirma una mejora de latencia**. La ventaja medida
+en diseño es acotar el resultado transferido y ejecutar el agregado fuera del
+hilo de UI. El benchmark no mide memoria ni incluye el coste de cargar el
+manifiesto para la proyección Python. Se debe conservar ambas mediciones al
+optimizar la consulta. Este cambio solo migra el dashboard: la inicialización,
+CRUD, selección, sincronización y exportación todavía mantienen dependencias
+operativas del manifiesto, así que SQLite aún no es la única fuente de verdad.
+
+## 21. Fase 2 incremental — búsqueda SQL sin manifiesto (2026-11-01)
+
+`searchStudents()` y `searchStudentsAsync()` ya no requieren que el backend
+mantenga `self.manifest`: solo necesitan el store abierto y consultan
+`LocalStore.search_students()` en SQLite. Se conserva el comportamiento de
+límite, resultados de matrículas activas y entrega asíncrona existente. La
+prueba arquitectónica cubre una búsqueda por documento con
+`backend.manifest = None`.
+
+La suite completa pasó **119 pruebas, 20 benchmarks optativos excluidos**;
+Ruff y mypy pasan para los módulos revisados. La prueba QML del asistente
+también espera a que el delegado tenga dimensiones utilizables antes de hacer
+clic, evitando interactuar con un item visible pero todavía sin ancho durante
+el layout. Su estado de diagnóstico se captura antes del clic porque QML puede
+destruir el delegado al seleccionar.
+
+Este corte no elimina la carga completa ni las dependencias de manifiesto del
+CRUD, selección, sincronización o exportación. No cambia el esquema SQLite ni
+el formato `.edutrack`; la migración de matrícula atómica sigue pendiente.
