@@ -39,6 +39,37 @@ from .search import normalize_search_text
 logger = structlog.get_logger(__name__)
 audit_logger = structlog.get_logger("edutrack_desktop.database")
 
+_WEB_MANAGED_ENROLLMENT_FIELDS = frozenset(
+    {
+        "promoter_ids",
+        "record_code",
+        "record_image",
+        "record_image_hash",
+        "record_image_quality",
+    }
+)
+
+
+def _editable_enrollment_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    promoter_ids = fields.get("promoter_ids")
+    record_code = str(fields.get("record_code") or "").strip()
+    image_quality = fields.get("record_image_quality")
+    if (
+        promoter_ids not in (None, [], ())
+        or record_code
+        or fields.get("record_image")
+        or fields.get("record_image_hash")
+        or image_quality not in (None, "", 80, "80")
+    ):
+        raise ValueError(
+            "Los promotores y las fichas se gestionan desde EduTrack Web."
+        )
+    return {
+        key: value
+        for key, value in fields.items()
+        if key not in _WEB_MANAGED_ENROLLMENT_FIELDS
+    }
+
 
 def _workspace_values(manifest: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -546,51 +577,6 @@ class LocalStore:
             )
             return dict(mutation.record)
 
-    async def create_promoter(
-        self,
-        name: str,
-        record_service: RecordServicePort,
-    ) -> int:
-        await self.initialize()
-        async with self.session_factory.begin() as session:
-            workspace = await session.get(Workspace, 1)
-            if workspace is None:
-                raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            promoter_names = (
-                await session.scalars(select(PromoterRecord.name))
-            ).all()
-            next_promoter_id = int(
-                await session.scalar(
-                    select(func.coalesce(func.max(PromoterRecord.id), 0))
-                )
-            ) + 1
-            next_position = int(
-                await session.scalar(select(func.count(PromoterRecord.id)))
-            )
-            context = {
-                "campus_mode": "new" if workspace.version == 3 else "existing",
-                "promoters": [
-                    {"name": promoter_name} for promoter_name in promoter_names
-                ],
-            }
-            mutation = record_service.create_promoter(
-                context,
-                name,
-                promoter_id=next_promoter_id,
-                position=next_position,
-            )
-            session.add(
-                PromoterRecord(
-                    **_promoter_values(
-                        mutation.record,
-                        workspace.id,
-                        mutation.position,
-                        workspace.version,
-                    )
-                )
-            )
-            return int(mutation.record["id"])
-
     async def save_student(
         self,
         source_id: str,
@@ -686,6 +672,7 @@ class LocalStore:
         await self.initialize()
         if not isinstance(fields, dict):
             raise TypeError("Los datos de la matrícula no tienen un formato válido.")
+        fields = _editable_enrollment_fields(fields)
 
         student_id = str(fields.get("student_id") or "").strip() or None
         raw_course_id = fields.get("course_id")
@@ -858,80 +845,6 @@ class LocalStore:
                     workspace.attachment_data = attachment_data
 
             return {"record": dict(mutation.record)}
-
-    async def update_enrollment_image(
-        self,
-        enrollment_id: str,
-        attachment_path: str | None,
-        image_hash: str | None,
-        encoded_content: str | None,
-    ) -> dict[str, Any]:
-        await self.initialize()
-        if not enrollment_id:
-            raise ValueError("Selecciona una matrícula válida.")
-        if attachment_path is None:
-            if image_hash is not None or encoded_content is not None:
-                raise ValueError("Los datos de la imagen de ficha no son válidos.")
-        elif (
-            image_hash is None
-            or len(image_hash) != 64
-            or any(character not in "0123456789abcdef" for character in image_hash)
-            or attachment_path != f"attachments/{image_hash}.jpg"
-            or not encoded_content
-        ):
-            raise ValueError("Los datos de la imagen de ficha no son válidos.")
-
-        async with self.session_factory.begin() as session:
-            workspace = await session.get(Workspace, 1)
-            enrollment = await session.get(EnrollmentRecord, enrollment_id)
-            if workspace is None:
-                raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            if enrollment is None:
-                raise ValueError("La matrícula seleccionada ya no existe.")
-            if workspace.attachment_data is not None and not isinstance(
-                workspace.attachment_data, dict
-            ):
-                raise RuntimeError("Los adjuntos guardados no tienen un formato válido.")
-
-            attachment_data = dict(workspace.attachment_data or {})
-            if attachment_path is None:
-                if not enrollment.record_image:
-                    raise ValueError(
-                        "La matrícula seleccionada no tiene imagen de ficha."
-                    )
-                enrollment.record_image = None
-                enrollment.record_image_hash = ""
-                referenced_paths = set(
-                    (
-                        await session.scalars(
-                            select(EnrollmentRecord.record_image).where(
-                                EnrollmentRecord.id != enrollment_id,
-                                EnrollmentRecord.record_image.is_not(None),
-                            )
-                        )
-                    ).all()
-                )
-                updated_attachment_data = {
-                    path: content
-                    for path, content in attachment_data.items()
-                    if path in referenced_paths
-                }
-                if updated_attachment_data != workspace.attachment_data:
-                    workspace.attachment_data = updated_attachment_data
-            else:
-                if not enrollment.record_code:
-                    raise ValueError(
-                        "Ingresa y guarda el código de ficha antes de adjuntar una imagen."
-                    )
-                if image_hash is None or not encoded_content:
-                    raise ValueError("Los datos de la imagen de ficha no son válidos.")
-                attachment_data[attachment_path] = encoded_content
-                if attachment_data != workspace.attachment_data:
-                    workspace.attachment_data = attachment_data
-                enrollment.record_image = attachment_path
-                enrollment.record_image_hash = image_hash
-
-            return {"record": _enrollment_context_item(enrollment)}
 
     async def search_students(self, query: str, limit: int = 20):
         await self.initialize()
@@ -1876,6 +1789,7 @@ class LocalStore:
             enrollment_fields, dict
         ):
             raise ValueError("Los datos de la matrícula no tienen un formato válido.")
+        enrollment_fields = _editable_enrollment_fields(enrollment_fields)
 
         def student_values(record: StudentRecord) -> dict[str, Any]:
             return {

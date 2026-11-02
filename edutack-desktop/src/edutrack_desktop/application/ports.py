@@ -53,12 +53,6 @@ class WorkspaceStore(Protocol):
         record_service: "RecordServicePort",
     ) -> dict[str, Any]: ...
 
-    async def create_promoter(
-        self,
-        name: str,
-        record_service: "RecordServicePort",
-    ) -> int: ...
-
     async def save_student(
         self,
         source_id: str,
@@ -81,14 +75,6 @@ class WorkspaceStore(Protocol):
         source_id: str,
         fields: dict[str, Any],
         record_service: "RecordServicePort",
-    ) -> dict[str, Any]: ...
-
-    async def update_enrollment_image(
-        self,
-        enrollment_id: str,
-        attachment_path: str | None,
-        image_hash: str | None,
-        encoded_content: str | None,
     ) -> dict[str, Any]: ...
 
     async def search_students(
@@ -188,15 +174,6 @@ class RecordServicePort(Protocol):
         monthly_fee: str,
         capacity: str,
         active: bool,
-    ) -> RecordMutation: ...
-
-    def create_promoter(
-        self,
-        manifest: dict[str, Any],
-        name: str,
-        *,
-        promoter_id: int | None = None,
-        position: int | None = None,
     ) -> RecordMutation: ...
 
     def save_student(

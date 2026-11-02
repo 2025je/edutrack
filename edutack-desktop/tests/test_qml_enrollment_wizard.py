@@ -244,6 +244,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     assert root.property("currentStep") == 4
     assert backend.manifest is None
     assert root.property("savedResult").toVariant()["student"] == "PEREZ ANA"
+    assert root.findChild(QObject, "enrollmentAttachImageButton") is None
     persisted = asyncio.run(backend.store.load())
     assert len(persisted["enrollments"]) == 1
     assert persisted["enrollments"][0]["record_code"] is None

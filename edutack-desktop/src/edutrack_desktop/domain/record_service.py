@@ -154,42 +154,6 @@ class RecordService:
         course["active"] = active
         return RecordMutation(position, course)
 
-    def create_promoter(
-        self,
-        manifest: dict[str, Any],
-        name: str,
-        *,
-        promoter_id: int | None = None,
-        position: int | None = None,
-    ) -> RecordMutation:
-        if manifest.get("campus_mode") != "new":
-            raise ValueError(
-                "Los promotores se crean desde Desktop al preparar una sede nueva."
-            )
-        name = name.strip().upper()
-        if not name or len(name) > 120:
-            raise ValueError("Ingresa un nombre de promotor válido.")
-        if any(
-            item["name"].strip().casefold() == name.casefold()
-            for item in manifest["promoters"]
-        ):
-            raise ValueError("Ya existe un promotor con ese nombre.")
-        if promoter_id is None:
-            promoter_id = (
-                max((int(item["id"]) for item in manifest["promoters"]), default=0)
-                + 1
-            )
-        record = {
-            "id": promoter_id,
-            "server_id": None,
-            "name": name,
-            "active": True,
-        }
-        if position is None:
-            position = len(manifest["promoters"])
-        manifest["promoters"].append(record)
-        return RecordMutation(position, record)
-
     def save_student(
         self,
         manifest: dict[str, Any],

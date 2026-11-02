@@ -340,6 +340,14 @@ def test_local_store_enrollment_crud_updates_only_target_row(
 ):
     store = LocalStore(tmp_path / "batched-save.sqlite3")
     enrollment = manifest["enrollments"][0]
+    attachment_hash = "c" * 64
+    attachment_path = f"attachments/{attachment_hash}.jpg"
+    enrollment.update(
+        record_image=attachment_path,
+        record_image_hash=attachment_hash,
+        record_image_quality=60,
+    )
+    manifest["_attachment_data"] = {attachment_path: "aW1wb3J0ZWQ="}
 
     async def verify_targeted_save():
         await store.save(manifest)
@@ -359,7 +367,6 @@ def test_local_store_enrollment_crud_updates_only_target_row(
                     "student_id": enrollment["student_id"],
                     "course_id": enrollment["course_id"],
                     "enrollment_date": enrollment["enrollment_date"],
-                    "promoter_ids": enrollment["promoter_ids"],
                     "enrollment_fee": enrollment["enrollment_fee"],
                     "monthly_fee": "90.00",
                 },

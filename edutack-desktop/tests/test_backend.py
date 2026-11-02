@@ -10,9 +10,7 @@ from PySide6.QtCore import (
     QEventLoop,
     QTimer,
     QUrl,
-    Qt,
 )
-from PySide6.QtGui import QImage
 
 from edutrack_desktop.infrastructure.app_settings import DesktopSettings
 from edutrack_desktop.infrastructure.store import LocalStore
@@ -145,7 +143,7 @@ def test_backend_startup_reads_workspace_metadata_without_loading_manifest(
         "students": 1,
         "enrollments": 0,
         "courses": 1,
-        "promoters": 2,
+        "promoters": 0,
     }
 
 
@@ -168,7 +166,6 @@ def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
         "80.00",
         "20",
     )
-    promoter_id = backend.createPromoter("Promotor local")
     backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
     student = backend.selectedStudent
     assert backend.saveEnrollment(
@@ -179,9 +176,6 @@ def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
             "enrollment_date": "2026-01-02",
             "enrollment_fee": "100.00",
             "monthly_fee": "80.00",
-            "record_code": "",
-            "record_image_quality": 80,
-            "promoter_ids": [promoter_id],
         },
     )
     backend.selectCourse(course_id)
@@ -206,10 +200,10 @@ def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
     assert package["bundle_id"] == initial_bundle_id
     assert package["courses"][0]["id"] == course_id
     assert package["courses"][0]["server_id"] is None
-    assert package["promoters"][-1]["id"] == promoter_id
+    assert package["promoters"] == []
     assert package["students"][0]["server_id"] is None
     assert package["enrollments"][0]["course_id"] == course_id
-    assert package["enrollments"][0]["promoter_ids"] == [promoter_id]
+    assert package["enrollments"][0]["promoter_ids"] == []
 
 
 def test_backend_exports_package_from_sql_when_manifest_is_not_loaded(tmp_path):
@@ -226,118 +220,6 @@ def test_backend_exports_package_from_sql_when_manifest_is_not_loaded(tmp_path):
     assert package["campus_name"] == "Sede inicial"
     assert package["bundle_id"] == expected_bundle_id
     assert package["students"][0]["last_name"] == "PÉREZ"
-
-
-def test_create_promoter_persists_to_sqlite_without_manifest(tmp_path):
-    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
-    backend.createWorkspace("Sede inicial", "Av. Principal 123")
-    store = backend.store
-    assert store is not None
-    backend.manifest = None
-
-    promoter_id = backend.createPromoter(" Promotor local ")
-
-    assert promoter_id > 0
-    assert backend.manifest is None
-    persisted = asyncio.run(store.load())
-    assert persisted is not None
-    promoter = next(
-        item for item in persisted["promoters"] if item["id"] == promoter_id
-    )
-    assert promoter == {
-        "id": promoter_id,
-        "server_id": None,
-        "name": "PROMOTOR LOCAL",
-        "active": True,
-    }
-    promoter_count = len(persisted["promoters"])
-
-    assert backend.createPromoter("promotor local") == 0
-    assert "Ya existe un promotor con ese nombre." in backend.errorMessage
-    persisted = asyncio.run(store.load())
-    assert persisted is not None
-    assert len(persisted["promoters"]) == promoter_count
-
-
-def test_create_promoter_keeps_manifest_unloaded(tmp_path):
-    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
-    backend.createWorkspace("Sede inicial", "Av. Principal 123")
-    store = backend.store
-    assert store is not None
-    assert backend.manifest is None
-
-    promoter_id = backend.createPromoter("Promotor local")
-
-    assert promoter_id > 0
-    assert backend.manifest is None
-    persisted = asyncio.run(store.load())
-    assert persisted is not None
-    assert any(item["id"] == promoter_id for item in persisted["promoters"])
-
-
-def test_create_promoter_passes_name_only_context_to_domain(tmp_path, monkeypatch):
-    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
-    backend.createWorkspace("Sede inicial", "Av. Principal 123")
-    store = backend.store
-    assert store is not None
-    manifest = asyncio.run(store.load())
-    assert manifest is not None
-    manifest["promoters"][0]["name"] = "Promotor objetivo"
-    asyncio.run(store.save(manifest))
-    record_service = backend._record_service
-    original_create_promoter = record_service.create_promoter
-    promoter_contexts = []
-
-    def capture_candidates(
-        manifest,
-        name,
-        *,
-        promoter_id=None,
-        position=None,
-    ):
-        promoter_contexts.append(manifest["promoters"])
-        return original_create_promoter(
-            manifest,
-            name,
-            promoter_id=promoter_id,
-            position=position,
-        )
-
-    monkeypatch.setattr(record_service, "create_promoter", capture_candidates)
-
-    assert backend.createPromoter(" promotor objetivo ") == 0
-
-    assert len(promoter_contexts) == 1
-    assert all(
-        set(promoter) == {"name"} for promoter in promoter_contexts[0]
-    )
-    assert any(
-        promoter["name"].casefold() == "promotor objetivo"
-        for promoter in promoter_contexts[0]
-    )
-    assert "Ya existe un promotor con ese nombre." in backend.errorMessage
-
-
-def test_create_promoter_keeps_existing_campus_restriction_without_manifest(
-    tmp_path,
-):
-    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
-    backend.createWorkspace("Sede inicial", "Av. Principal 123")
-    store = backend.store
-    assert store is not None
-    manifest = asyncio.run(store.load())
-    assert manifest is not None
-    manifest["version"] = 2
-    manifest.pop("campus_mode", None)
-    asyncio.run(store.save(manifest))
-    backend.manifest = None
-
-    assert backend.createPromoter("Promotor local") == 0
-    assert "se crean desde Desktop al preparar una sede nueva" in backend.errorMessage
-
-    persisted = asyncio.run(store.load())
-    assert persisted is not None
-    assert len(persisted["promoters"]) == len(manifest["promoters"])
 
 
 def test_edit_existing_and_add_student_and_enrollment(tmp_path):
@@ -419,15 +301,8 @@ def test_edit_existing_and_add_student_and_enrollment(tmp_path):
             "enrollment_date": "2026-01-02",
             "enrollment_fee": "100.00",
             "monthly_fee": "80.00",
-            "record_code": "5",
-            "promoter_ids": [],
         },
     )
-    image_path = tmp_path / "ficha.png"
-    image = QImage(3, 3, QImage.Format.Format_RGB32)
-    image.fill(Qt.GlobalColor.blue)
-    assert image.save(str(image_path), "PNG")
-    backend.attachEnrollmentImage(str(image_path))
     persisted = asyncio.run(backend.store.load())
     assert persisted is not None
     assert any(item["id"] == new_student["id"] for item in persisted["students"])
@@ -448,8 +323,7 @@ def test_edit_existing_and_add_student_and_enrollment(tmp_path):
     assert new_student["server_id"] is None
     assert len(updated["enrollments"]) == 1
     assert updated["enrollments"][0]["student_id"] == new_student["id"]
-    image_name = updated["enrollments"][0]["record_image"]
-    assert image_name in updated["_attachment_data"]
+    assert updated["enrollments"][0]["record_image"] is None
     assert "correctamente" in backend.errorMessage
 
 
@@ -1509,74 +1383,125 @@ def test_enrollment_validation_supports_pending_and_reserved_records(tmp_path):
     assert reserved["course_id"] == course_id
 
 
-def test_enrollment_validation_rejects_duplicate_pair_code_and_incompatible_promoters(
+def test_course_capacity_is_advisory_and_reservations_do_not_count_as_students(
     tmp_path,
 ):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
     course_id = backend.createCourse(
+        "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "1"
+    )
+
+    for last_name, first_name, phone, enrollment_date in (
+        ("Pérez", "Ana", "987654321", "2026-01-02"),
+        ("García", "Luis", "912345678", "2026-01-03"),
+    ):
+        assert backend.saveStudent("", last_name, first_name, "", phone)
+        student_id = backend.selectedStudent["id"]
+        assert backend.saveEnrollment(
+            "",
+            {
+                "student_id": student_id,
+                "course_id": course_id,
+                "enrollment_date": enrollment_date,
+                "enrollment_fee": "100.00",
+                "monthly_fee": "80.00",
+                "record_code": "",
+                "record_image_quality": 80,
+                "promoter_ids": [],
+            },
+        )
+
+    assert backend.saveEnrollment(
+        "",
+        {
+            "student_id": "",
+            "course_id": course_id,
+            "enrollment_date": "2026-01-04",
+            "enrollment_fee": "100.00",
+            "monthly_fee": "80.00",
+            "record_code": "",
+            "record_image_quality": 80,
+            "promoter_ids": [],
+        },
+    )
+
+    courses, _, _ = asyncio.run(backend.store.course_page("", 0, 20))
+    course = next(item for item in courses if item["id"] == course_id)
+    summary = asyncio.run(backend.store.dashboard_summary())
+    options = asyncio.run(backend.store.search_course_options("", False))
+
+    assert course["capacity"] == 1
+    assert course["student_count"] == 2
+    assert summary["full_courses"] == 1
+    assert any(option["id"] == course_id for option in options)
+
+
+def test_enrollment_validation_rejects_duplicate_student_course_pair(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
         "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
     )
-    promoter_id = backend.createPromoter("Promotor local")
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
     first_student_id = backend.selectedStudent["id"]
-    backend.saveStudent("", "García", "Luis", "", "912345678")
-    second_student_id = backend.selectedStudent["id"]
     fields = {
         "student_id": first_student_id,
         "course_id": course_id,
         "enrollment_date": "2026-01-02",
         "enrollment_fee": "100.00",
         "monthly_fee": "80.00",
-        "record_code": "42",
-        "record_image_quality": 80,
-        "promoter_ids": [],
     }
 
     assert backend.saveEnrollment("", fields)
     assert not backend.saveEnrollment("", fields)
     assert "ya está matriculado" in backend.errorMessage
 
-    assert not backend.saveEnrollment(
-        "",
+
+def test_desktop_create_enrollment_rejects_web_managed_fields(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "")
+    course_id = backend.createCourse(
+        "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
+    )
+    web_managed_fields = (
+        {"promoter_ids": [1]},
+        {"record_code": "55"},
         {
-            **fields,
-            "student_id": second_student_id,
-            "record_code": "43",
-            "promoter_ids": [1, promoter_id],
+            "record_image": f"attachments/{'a' * 64}.jpg",
+            "record_image_hash": "a" * 64,
         },
     )
-    assert "no se pueden combinar" in backend.errorMessage
 
-    assert not backend.saveEnrollment(
-        "",
-        {
-            **fields,
-            "student_id": second_student_id,
-            "record_code": "42",
-        },
-    )
-    assert "código de ficha ya está registrado" in backend.errorMessage
+    for managed_fields in web_managed_fields:
+        result = backend.createEnrollment(
+            {
+                "last_name": "Pérez",
+                "first_name": "Ana",
+                "document_number": "12345678",
+                "phone_text": "987654321",
+            },
+            {
+                "course_id": course_id,
+                "enrollment_date": "2026-01-02",
+                "enrollment_fee": "100.00",
+                "monthly_fee": "80.00",
+                **managed_fields,
+            },
+        )
+        assert result["ok"] is False
+        assert "EduTrack Web" in backend.errorMessage
+        workspace_info = asyncio.run(backend.store.workspace_info())
+        assert workspace_info["students"] == 0
+        assert workspace_info["enrollments"] == 0
 
-    assert not backend.saveEnrollment(
-        "",
-        {
-            **fields,
-            "record_code": "+43",
-        },
-    )
-    assert "solo números" in backend.errorMessage
 
-
-def test_saving_enrollment_without_ficha_or_promoter_fields_preserves_existing_values(
-    tmp_path,
-):
+def test_saving_enrollment_preserves_imported_web_managed_fields(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
     course_id = backend.createCourse(
         "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
     )
-    promoter_id = backend.createPromoter("Promotor local")
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
     student_id = backend.selectedStudent["id"]
     fields = {
@@ -1585,198 +1510,80 @@ def test_saving_enrollment_without_ficha_or_promoter_fields_preserves_existing_v
         "enrollment_date": "2026-01-02",
         "enrollment_fee": "100.00",
         "monthly_fee": "80.00",
-        "record_code": "42",
-        "record_image_quality": 60,
-        "promoter_ids": [promoter_id],
     }
-
     assert backend.saveEnrollment("", fields)
     enrollment_id = backend.selectedEnrollment["id"]
-    assert backend.saveEnrollment(
-        enrollment_id,
-        {
-            "student_id": student_id,
-            "course_id": course_id,
-            "enrollment_date": "2026-01-02",
-            "enrollment_fee": "100.00",
-            "monthly_fee": "80.00",
-        },
-    )
-    assert backend.saveEnrollment(
-        enrollment_id,
-        {
-            "student_id": student_id,
-            "course_id": course_id,
-            "enrollment_date": "2026-01-02",
-            "enrollment_fee": "100.00",
-            "monthly_fee": "80.00",
-            "active": False,
-        },
-    )
-
-    enrollment = backend.selectedEnrollment
-    assert enrollment["record_code"] == 42
-    assert enrollment["record_image_quality"] == 60
-    assert enrollment["promoter_ids"] == [promoter_id]
-    assert enrollment["active"] is False
-
-
-def test_save_enrollment_updates_sqlite_without_a_loaded_manifest(tmp_path):
-    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
-    backend.createWorkspace("Sede de prueba", "")
-    course_id = backend.createCourse(
-        "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
-    )
-    promoter_id = backend.createPromoter("Promotor local")
-    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
-    student_id = backend.selectedStudent["id"]
     store = backend.store
     assert store is not None
+
+    manifest = asyncio.run(store.load())
+    assert manifest is not None
+    attachment_hash = "a" * 64
+    attachment_path = f"attachments/{attachment_hash}.jpg"
+    manifest["promoters"] = [
+        {"id": 1, "server_id": None, "name": "PROMOTOR WEB", "active": True}
+    ]
+    enrollment = manifest["enrollments"][0]
+    enrollment.update(
+        record_code=42,
+        record_image=attachment_path,
+        record_image_hash=attachment_hash,
+        record_image_quality=60,
+        promoter_ids=[1],
+    )
+    manifest["_attachment_data"] = {attachment_path: "aW1wb3J0ZWQ="}
+    asyncio.run(store.save(manifest))
     backend.manifest = None
 
-    fields = {
-        "student_id": student_id,
-        "course_id": course_id,
-        "enrollment_date": "2026-01-02",
-        "enrollment_fee": "100.00",
-        "monthly_fee": "80.00",
-        "record_code": "42",
-        "record_image_quality": 60,
-        "promoter_ids": [promoter_id],
-    }
-    assert backend.saveEnrollment("", fields)
-    enrollment_id = backend._selected_enrollment_id
-    assert enrollment_id
-    assert backend.selectedEnrollment["id"] == enrollment_id
-    assert backend.selectedEnrollment["record_code"] == 42
-    assert backend.manifest is None
-    assert not backend.saveEnrollment("", fields)
-    assert "ya está matriculado" in backend.errorMessage
-    assert not backend.saveEnrollment(
+    assert backend.saveEnrollment(
         enrollment_id,
         {
             **fields,
-            "record_code": "43",
-            "enrollment_date": "fecha inválida",
-        },
-    )
-
-    assert backend.saveEnrollment(
-        enrollment_id,
-        {
-            "student_id": student_id,
-            "course_id": course_id,
-            "enrollment_date": "2026-01-02",
-            "enrollment_fee": "100.00",
-            "monthly_fee": "80.00",
+            "monthly_fee": "90.00",
             "active": False,
         },
     )
+    assert backend.manifest is None
     persisted = asyncio.run(store.load())
     assert persisted is not None
-    enrollment = next(
+    saved = next(
         item for item in persisted["enrollments"] if item["id"] == enrollment_id
     )
-    assert enrollment["record_code"] == 42
-    assert enrollment["record_image_quality"] == 60
-    assert enrollment["promoter_ids"] == [promoter_id]
-    assert enrollment["active"] is False
+    assert saved["monthly_fee"] == "90.00"
+    assert saved["active"] is False
+    assert saved["record_code"] == 42
+    assert saved["record_image"] == attachment_path
+    assert saved["record_image_hash"] == attachment_hash
+    assert saved["record_image_quality"] == 60
+    assert saved["promoter_ids"] == [1]
+    assert persisted["_attachment_data"] == {attachment_path: "aW1wb3J0ZWQ="}
 
-    backend.manifest = None
-    image_path = tmp_path / "record.png"
-    image = QImage(3, 3, QImage.Format.Format_RGB32)
-    image.fill(Qt.GlobalColor.blue)
-    assert image.save(str(image_path), "PNG")
-    backend.attachEnrollmentImage(str(image_path))
-    with_attachment = asyncio.run(store.load())
-    assert with_attachment is not None
-    attached_enrollment = next(
-        item
-        for item in with_attachment["enrollments"]
-        if item["id"] == enrollment_id
-    )
-    assert attached_enrollment["record_image"]
-    assert attached_enrollment["record_image"] in with_attachment["_attachment_data"]
-    assert (
-        backend.enrollmentImageName
-        == attached_enrollment["record_image"].rsplit("/", 1)[-1]
-    )
-    assert backend.manifest is None
-    attachment_path = attached_enrollment["record_image"]
-
-    second_course_id = backend.createCourse(
-        "Física", "Tarde", "2", "2026-01-01", "100.00", "80.00", "20"
-    )
-    backend.saveStudent("", "López", "Luis", "", "912345678")
-    second_student_id = backend._selected_student_id
-    assert backend.saveEnrollment(
-        "",
+    for managed_fields in (
+        {"promoter_ids": [1]},
+        {"record_code": "43"},
         {
-            "student_id": second_student_id,
-            "course_id": second_course_id,
-            "enrollment_date": "2026-01-03",
-            "enrollment_fee": "100.00",
-            "monthly_fee": "80.00",
-            "record_code": "43",
+            "record_image": f"attachments/{'b' * 64}.jpg",
+            "record_image_hash": "b" * 64,
         },
-    )
-    second_enrollment_id = backend._selected_enrollment_id
-    assert second_enrollment_id
-    backend.attachEnrollmentImage(str(image_path))
-    with_shared_attachment = asyncio.run(store.load())
-    assert with_shared_attachment is not None
-    second_enrollment = next(
-        item
-        for item in with_shared_attachment["enrollments"]
-        if item["id"] == second_enrollment_id
-    )
-    assert second_enrollment["record_image"] == attachment_path
+    ):
+        assert not backend.saveEnrollment(
+            enrollment_id,
+            {
+                **fields,
+                **managed_fields,
+            },
+        )
+        assert "EduTrack Web" in backend.errorMessage
 
-    backend.selectEnrollment(enrollment_id)
-
-    backend.clearEnrollmentImage()
-    cleared_attachment = asyncio.run(store.load())
-    assert cleared_attachment is not None
-    cleared_enrollment = next(
-        item
-        for item in cleared_attachment["enrollments"]
-        if item["id"] == enrollment_id
+    unchanged = asyncio.run(store.load())
+    assert unchanged is not None
+    saved = next(
+        item for item in unchanged["enrollments"] if item["id"] == enrollment_id
     )
-    assert cleared_enrollment["record_image"] is None
-    assert attachment_path in cleared_attachment["_attachment_data"]
-
-    backend.selectEnrollment(second_enrollment_id)
-    backend.clearEnrollmentImage()
-    cleared_attachment = asyncio.run(store.load())
-    assert cleared_attachment is not None
-    assert cleared_attachment["_attachment_data"] == {}
-
-    backend.selectEnrollment(enrollment_id)
-    backend.attachEnrollmentImage(str(image_path))
-    with_attachment = asyncio.run(store.load())
-    assert with_attachment is not None
-    assert with_attachment["_attachment_data"]
-
-    assert backend.saveEnrollment(
-        enrollment_id,
-        {
-            "student_id": student_id,
-            "course_id": course_id,
-            "enrollment_date": "2026-01-02",
-            "enrollment_fee": "100.00",
-            "monthly_fee": "80.00",
-            "record_code": "",
-        },
-    )
-    without_attachment = asyncio.run(store.load())
-    assert without_attachment is not None
-    enrollment = next(
-        item
-        for item in without_attachment["enrollments"]
-        if item["id"] == enrollment_id
-    )
-    assert enrollment["record_image"] is None
-    assert without_attachment["_attachment_data"] == {}
+    assert saved["record_code"] == 42
+    assert saved["record_image"] == attachment_path
+    assert saved["promoter_ids"] == [1]
+    assert unchanged["_attachment_data"] == {attachment_path: "aW1wb3J0ZWQ="}
 
 
 def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):

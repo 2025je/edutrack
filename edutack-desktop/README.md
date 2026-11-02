@@ -1,6 +1,6 @@
 # EduTrack Desktop
 
-Aplicación de escritorio offline hecha con Python, PySide6 y QML. `PySide6.QtAsyncio` integra los bucles de Qt y asyncio; SQLAlchemy 2.x usa `AsyncSession` y `aiosqlite` para la base SQLite local, con migraciones de esquema mediante Alembic. Estudiantes, matrículas, cursos y promotores se guardan en tablas separadas; no se necesita conexión durante el registro.
+Aplicación de escritorio offline hecha con Python, PySide6 y QML. `PySide6.QtAsyncio` integra los bucles de Qt y asyncio; SQLAlchemy 2.x usa `AsyncSession` y `aiosqlite` para la base SQLite local, con migraciones de esquema mediante Alembic. Estudiantes, matrículas y cursos se administran directamente en SQLite. Los datos de promotores y fichas que llegan desde la web se conservan para sincronización, pero Desktop no los crea ni los modifica.
 
 ## Varias sedes y bases de datos
 
@@ -29,14 +29,14 @@ Para recuperar datos, selecciona un respaldo válido de la misma sede y confirma
 5. Revisa la vista previa y confirma los cursos nuevos junto con estudiantes y matrículas. Para crear cursos, la persona que confirma necesita permiso para agregar cursos. Si un registro cambió en la web mientras trabajabas sin conexión, resuelve el conflicto eligiendo qué versión conservar.
 6. Después de sincronizar, importa el archivo canónico descargado desde la web y selecciona la misma base SQLite de esa sede. Desktop pide confirmación antes de reemplazar sus datos locales y verifica que el paquete corresponda a esa sede.
 
-La sincronización no elimina registros que no estén en el archivo. Las imágenes de fichas se incluyen y pueden adjuntarse o reemplazarse en Desktop; los pagos no se copian al equipo. Si se borra el código de ficha en Desktop, también se elimina esa ficha y su imagen en la web.
+La sincronización no elimina registros que no estén en el archivo. Los códigos, asignaciones e imágenes de fichas recibidos desde la web se conservan en SQLite y en los paquetes `.edutrack`, sin controles de edición en Desktop. La creación y asignación de promotores y la gestión de fichas corresponden a EduTrack Web. Los pagos y recibos no se copian ni se administran en Desktop.
 
-Los registros de Desktop siguen las validaciones de la web: estudiantes con nombres únicos por sede y uno o más celulares peruanos válidos sin repetir; cursos con identidad única, grupo entero positivo, fecha, capacidad e importes válidos; y matrículas sin duplicar la pareja estudiante-curso. Desktop no solicita ficha ni promotor al crear o editar matrículas; si esos datos ya existen en una matrícula importada, se conservan al editarla. El asistente permite registrar una matrícula pendiente sin curso (con costos en cero) o reservar un cupo sin estudiante.
+Los registros de Desktop siguen las validaciones de la web: estudiantes con nombres únicos por sede y uno o más celulares peruanos válidos sin repetir; cursos con identidad única, grupo entero positivo, fecha, capacidad e importes válidos; y matrículas sin duplicar la pareja estudiante-curso. Desktop no solicita ni acepta cambios de promotores o datos de ficha al crear o editar matrículas; si ya existen en una matrícula importada, los conserva al editarla. El asistente permite registrar una matrícula pendiente sin curso (con costos en cero) o una reserva administrativa sin estudiante. La capacidad del curso es informativa: no bloquea matrículas y las reservas sin estudiante no cuentan como alumnos en la ocupación.
 
 ### Cuando la sede todavía no existe en la web
 
 1. En Desktop, crea la sede con su nombre y, si hace falta, su dirección.
-2. Agrega los cursos y promotores con sus asistentes; después registra estudiantes y matrículas sin conexión. El asistente de matrícula permite buscar un estudiante existente o crearlo antes de completar la inscripción.
+2. Agrega los cursos con sus asistentes; después registra estudiantes y matrículas sin conexión. Los promotores y fichas se gestionan desde EduTrack Web. El asistente de matrícula permite buscar un estudiante existente o crearlo antes de completar la inscripción.
 3. Exporta el **paquete inicial de sede** y súbelo en Estudiantes → Importar desktop offline. Un usuario con permisos para crear sedes y registrar estudiantes y matrículas debe revisar y confirmar la importación.
 4. La web crea la sede, sus catálogos y los registros en una única operación. Al terminar, descarga el archivo canónico desde la web y ábrelo en Desktop para continuar con la sincronización normal.
 

@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import hashlib
 import re
 import sqlite3
@@ -922,11 +921,6 @@ class DesktopBackend(QObject):
         self._course_students_cache = students
         self.selectionChanged.emit()
 
-    @Property(str, notify=selectionChanged)
-    def enrollmentImageName(self):
-        image_path = self.selectedEnrollment.get("record_image")
-        return Path(image_path).name if image_path else "Sin imagen de ficha"
-
     @Property("QVariantMap", notify=selectionChanged)
     def selectedStudent(self):
         student = self._selected_student_record
@@ -1730,10 +1724,7 @@ class DesktopBackend(QObject):
             "students": [],
             "enrollments": [],
             "courses": [],
-            "promoters": [
-                {"id": 1, "server_id": None, "name": "PARTICULAR", "active": True},
-                {"id": 2, "server_id": None, "name": "NN", "active": True},
-            ],
+            "promoters": [],
         }
         target_store = (
             self.store
@@ -2741,46 +2732,6 @@ class DesktopBackend(QObject):
             succeeded and isinstance(course, dict) and course_id is not None
         )
 
-    @Slot(str, result=int)
-    def createPromoter(self, name):
-        if self.isBusy:
-            self._set_error("Ya hay un guardado en curso.")
-            return 0
-        store = self.store
-        if store is None:
-            self._set_error(
-                "Los promotores se crean desde Desktop al preparar una sede nueva."
-            )
-            return 0
-        try:
-            promoter_id = self._run_store_write(
-                store.create_promoter(name, self._record_service)
-            )
-        except ValueError as exc:
-            self._log_validation_failure("promoter.create", exc)
-            self._set_error(str(exc))
-            return 0
-        except (
-            OSError,
-            RuntimeError,
-            SQLAlchemyError,
-            sqlite3.Error,
-            TypeError,
-            KeyError,
-        ) as exc:
-            logger.error(
-                "workspace.promoter_create_failed",
-                error_type=exc.__class__.__name__,
-            )
-            self._set_error(f"No se pudo guardar el promotor localmente: {exc}")
-            return 0
-        if isinstance(promoter_id, bool) or not isinstance(promoter_id, int):
-            self._set_error("La creación del promotor devolvió datos no válidos.")
-            return 0
-        self.dataChanged.emit()
-        self._set_error("Promotor guardado localmente.")
-        return promoter_id
-
     @Slot(str)
     def selectStudent(self, source_id):
         if self._selected_student_id != source_id:
@@ -2813,110 +2764,6 @@ class DesktopBackend(QObject):
         self._selected_enrollment_id = ""
         self._selected_enrollment_record = None
         self.selectionChanged.emit()
-
-    def _save_enrollment_image(
-        self,
-        attachment_path: str | None,
-        image_hash: str | None,
-        encoded_content: str | None,
-        operation: str,
-        success_message: str,
-        missing_selection_message: str,
-    ) -> None:
-        if self.isBusy:
-            self._set_error("Ya hay un guardado en curso.")
-            return
-        store = self.store
-        if store is None:
-            self._set_error("Primero abre el archivo de una sede.")
-            return
-        enrollment_id = str(self._selected_enrollment_id or "")
-        if not enrollment_id:
-            self._set_error(missing_selection_message)
-            return
-        try:
-            result = self._run_store_write(
-                store.update_enrollment_image(
-                    enrollment_id,
-                    attachment_path,
-                    image_hash,
-                    encoded_content,
-                )
-            )
-        except ValueError as exc:
-            self._log_validation_failure(operation, exc)
-            self._set_error(str(exc) or "Revisa los datos de la imagen de ficha.")
-            return
-        except (
-            OSError,
-            RuntimeError,
-            SQLAlchemyError,
-            sqlite3.Error,
-            TypeError,
-            KeyError,
-        ) as exc:
-            logger.error(
-                "workspace.enrollment_image_update_failed",
-                operation=operation,
-                error_type=exc.__class__.__name__,
-            )
-            self._set_error(f"No se pudo actualizar la imagen de ficha: {exc}")
-            return
-
-        if (
-            not isinstance(result, dict)
-            or not isinstance(result.get("record"), dict)
-        ):
-            self._set_error(
-                "La actualización de la imagen de ficha devolvió datos no válidos."
-            )
-            return
-        self._finish_enrollment_write(result["record"])
-        self._set_error(success_message)
-
-    @Slot(str)
-    def attachEnrollmentImage(self, path):
-        if not self._selected_enrollment_id:
-            self._set_error("Guarda primero la matrícula para adjuntar una imagen.")
-            return
-        try:
-            image_path = Path(self._local_path(path))
-            if image_path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
-                raise ValueError("Selecciona una imagen JPG, PNG o WEBP.")
-            content = image_path.read_bytes()
-            if not content or len(content) > 10 * 1024 * 1024:
-                raise ValueError("La imagen está vacía o supera el máximo de 10 MB.")
-        except (OSError, ValueError) as exc:
-            if isinstance(exc, ValueError):
-                self._log_validation_failure("enrollment.image_attach", exc)
-            else:
-                logger.error(
-                    "enrollment.image_attach_failed",
-                    error_type=exc.__class__.__name__,
-                )
-                self._set_error(str(exc))
-                return
-        image_hash = hashlib.sha256(content).hexdigest()
-        package_path = f"attachments/{image_hash}.jpg"
-        self._save_enrollment_image(
-                package_path,
-                image_hash,
-                base64.b64encode(content).decode("ascii"),
-                "enrollment.image_attach",
-                "Imagen de ficha guardada localmente.",
-                "Guarda primero la matrícula para adjuntar una imagen.",
-        )
-
-    @Slot()
-    def clearEnrollmentImage(self):
-        self._save_enrollment_image(
-                None,
-                None,
-                None,
-                "enrollment.image_clear",
-                "Se quitará la imagen al sincronizar con la web.",
-                "La matrícula seleccionada no tiene imagen de ficha.",
-        )
 
     def _finish_student_write(
         self, student: dict[str, Any], *, select_student: bool = False

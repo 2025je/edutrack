@@ -19,9 +19,6 @@ def _enrollment_fields(**overrides):
         "enrollment_date": "2026-01-02",
         "enrollment_fee": "100.00",
         "monthly_fee": "80.00",
-        "record_code": "",
-        "record_image_quality": 80,
-        "promoter_ids": [1],
     }
     fields.update(overrides)
     return fields
@@ -32,7 +29,6 @@ def _enrollment_fields(**overrides):
     [
         ("student", "estudiante inactivo"),
         ("course", "curso inactivo"),
-        ("promoter", "promotores inactivos"),
     ],
 )
 def test_backend_create_enrollment_rejects_inactive_sqlite_references(
@@ -54,7 +50,6 @@ def test_backend_create_enrollment_rejects_inactive_sqlite_references(
     table, record_id = {
         "student": ("desktop_students", student_id),
         "course": ("desktop_courses", course_id),
-        "promoter": ("desktop_promoters", 1),
     }[inactive_record]
 
     with sqlite3.connect(backend.store.path) as connection:
@@ -155,9 +150,6 @@ def test_backend_create_enrollment_persists_atomically(tmp_path):
             "enrollment_date": "2026-01-02",
             "enrollment_fee": "100.00",
             "monthly_fee": "80.00",
-            "record_code": "55",
-            "record_image_quality": 80,
-            "promoter_ids": [1],
         },
     )
 
@@ -175,7 +167,8 @@ def test_backend_create_enrollment_persists_atomically(tmp_path):
     assert len(persisted["students"]) == 1
     assert len(persisted["enrollments"]) == 1
     assert persisted["students"][0]["id"] == result["student_id"]
-    assert persisted["enrollments"][0]["record_code"] == 55
+    assert persisted["enrollments"][0]["record_code"] is None
+    assert persisted["enrollments"][0]["promoter_ids"] == []
     assert persisted["enrollments"][0]["id"] == result["enrollment_id"]
 
 

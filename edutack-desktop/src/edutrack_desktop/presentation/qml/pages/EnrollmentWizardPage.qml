@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import "../components"
 
@@ -63,8 +62,7 @@ Rectangle {
 
     Shortcut {
         sequence: "Esc"
-        enabled: root.visible && !recordImageDialog.visible
-                 && !enrollmentDateField.popupOpen
+        enabled: root.visible && !enrollmentDateField.popupOpen
         onActivated: root.requestCancel()
     }
 
@@ -234,9 +232,7 @@ Rectangle {
             course_id: course.id,
             enrollment_date: enrollmentDateField.value,
             enrollment_fee: enrollmentFeeField.text.replace(",", "."),
-            monthly_fee: monthlyFeeField.text.replace(",", "."),
-            record_code: "",
-            promoter_ids: []
+            monthly_fee: monthlyFeeField.text.replace(",", ".")
         })
         if (!result.ok) {
             root.errorText = root.backendObject.errorMessage
@@ -247,8 +243,7 @@ Rectangle {
             courseName: course.name,
             schedule: course.schedule,
             group: course.group,
-            date: enrollmentDateField.value,
-            recordCode: ""
+            date: enrollmentDateField.value
         }
         root.currentStep = 4
     }
@@ -320,14 +315,6 @@ Rectangle {
             courseField.currentIndex = courses.length > 0 ? 0 : -1
             root.updateCourseFees()
         }
-    }
-
-    FileDialog {
-        id: recordImageDialog
-        title: "Selecciona la imagen de la ficha"
-        nameFilters: ["Imágenes (*.jpg *.jpeg *.png *.webp)"]
-        onAccepted: root.backendObject.attachEnrollmentImage(
-                        selectedFile.toString())
     }
 
     ColumnLayout {
@@ -1031,27 +1018,6 @@ Rectangle {
                             }
                         }
                     }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 12
-                visible: root.savedResult && root.savedResult.recordCode.length > 0
-
-                Button {
-                    objectName: "enrollmentAttachImageButton"
-                    text: "Adjuntar imagen de ficha"
-                    enabled: !root.backendObject.isBusy
-                    onClicked: recordImageDialog.open()
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.backendObject.enrollmentImageName
-                    color: root.theme.secondaryText
-                    font.family: "Roboto"
-                    elide: Text.ElideRight
                 }
             }
 
