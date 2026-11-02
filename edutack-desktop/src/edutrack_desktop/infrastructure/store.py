@@ -552,9 +552,11 @@ class LocalStore:
                 await session.scalar(
                     select(func.coalesce(func.max(CourseRecord.id), 0))
                 )
+                or 0
             ) + 1
             next_position = int(
                 await session.scalar(select(func.count(CourseRecord.id)))
+                or 0
             )
             mutation = record_service.create_course(
                 _course_context(matching_courses),

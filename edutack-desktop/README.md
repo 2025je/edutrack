@@ -58,7 +58,13 @@ El código de aplicación vive en `src/edutrack_desktop/`, organizado por capas:
 
 ## Pruebas y mediciones
 
-Desde `edutack-desktop`, ejecuta `uv run pytest tests -q` para la suite, incluidas las pruebas QML en modo offscreen del asistente, del atajo global Ctrl+M y de la edición de matrículas con búsqueda limitada de estudiantes. Los benchmarks pytest optativos de búsqueda/paginación SQLite, actualización de estudiantes en SQLite y paquetes `.edutrack` se ejecutan con `uv run pytest -m performance --benchmark-only -q`; prueban conjuntos de 1.000, 10.000 y 50.000 registros cuando corresponde y no se incluyen en la suite habitual. Las mediciones dependen del equipo y no establecen umbrales de aprobación. El benchmark reproducible de búsqueda, carga y transferencia sigue disponible con `uv run python tests/benchmark_desktop.py`; crea sus bases temporales y reporta las medianas de cinco operaciones.
+Desde `edutack-desktop`, usa Nox para ejecutar las comprobaciones:
+
+```powershell
+uv run nox
+```
+
+La ejecución predeterminada corre las pruebas con cobertura, Ruff y mypy. El informe de cobertura se muestra en la terminal y se guarda como `coverage.xml`; no se aplica un umbral mínimo. Las sesiones también pueden ejecutarse individualmente con `uv run nox -s tests`, `uv run nox -s coverage`, `uv run nox -s lint` o `uv run nox -s typecheck`. Los benchmarks optativos de búsqueda/paginación SQLite, actualización de estudiantes y paquetes `.edutrack` se ejecutan con `uv run nox -s performance`; prueban conjuntos de 1.000, 10.000 y 50.000 registros cuando corresponde. Las mediciones dependen del equipo y no establecen umbrales de aprobación. El benchmark reproducible de búsqueda, carga y transferencia sigue disponible con `uv run python tests/benchmark_desktop.py`.
 
 ## Crear el instalador de Windows
 
@@ -79,10 +85,3 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -SkipInstall
 Distribuye el instalador generado, no los archivos de `build\`. Se recomienda probarlo en una PC Windows limpia o una máquina virtual antes de entregarlo a usuarios.
 
 El workflow **EduTrack Desktop Windows Installer** compila el instalador en Windows al cambiar `edutack-desktop/` o al ejecutarlo manualmente. Instala el paquete en el runner, inicia el ejecutable en modo de prueba para comprobar que Qt, QML y sus DLL cargan, y publica el instalador como artefacto de la ejecución.
-
-## Ejecutar las pruebas
-
-```powershell
-uv run pytest
-uv run mypy
-```

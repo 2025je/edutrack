@@ -7,6 +7,7 @@ import colorama
 import structlog
 from rich.console import Console
 from rich.logging import RichHandler
+from structlog.typing import Processor
 
 
 def configure_logging(level: str, log_path: Path) -> None:
@@ -46,7 +47,7 @@ def configure_logging(level: str, log_path: Path) -> None:
         root_logger.addHandler(handler)
 
     if console_output:
-        processors = [
+        processors: list[Processor] = [
             structlog.contextvars.merge_contextvars,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,

@@ -59,7 +59,10 @@ def export_register(manifest: dict[str, Any], output_path: str | Path) -> Path:
 
     workbook = Workbook()
     workbook.properties.creator = "EduTrack"
-    course_sheet = workbook.active
+    active_sheet = workbook.active
+    if not isinstance(active_sheet, Worksheet):
+        raise RuntimeError("No se pudo crear la hoja inicial del registro.")
+    course_sheet = active_sheet
     course_sheet.title = "Cursos"
     course_headers = [
         "Tipo de curso",
@@ -130,6 +133,8 @@ def export_register(manifest: dict[str, Any], output_path: str | Path) -> Path:
         display_name = _text(course_group[0].get("name")).strip() or "Curso"
         title = _unique_sheet_title(display_name, used_titles)
         sheet = workbook.create_sheet(title)
+        if not isinstance(sheet, Worksheet):
+            raise RuntimeError(f"No se pudo crear la hoja {title}.")
         headers = [
             "Curso",
             "Horario",

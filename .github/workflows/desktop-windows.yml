@@ -44,8 +44,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --group dev
 
-      - name: Run desktop tests
-        run: uv run --locked pytest
+      - name: Run desktop quality checks
+        run: uv run --locked nox
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress

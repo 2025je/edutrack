@@ -1,4 +1,8 @@
 .pytest_cache/
 .ruff_cache/
+.nox/
+.coverage*
+coverage.xml
+htmlcov/
 build/
 dist/

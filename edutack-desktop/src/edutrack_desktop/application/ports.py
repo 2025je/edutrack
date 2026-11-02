@@ -17,7 +17,11 @@ class WorkspaceStore(Protocol):
     async def save(self, manifest: dict[str, Any]) -> None: ...
 
     async def save_with_sync_history(
-        self, manifest: dict[str, Any], history_event: dict[str, Any]
+        self,
+        manifest: dict[str, Any],
+        history_event: dict[str, Any],
+        *,
+        expected_snapshot: dict[str, Any] | None = None,
     ) -> None: ...
 
     async def create_enrollment(
@@ -147,6 +151,19 @@ class CampusCatalogPort(Protocol):
 
 
 class RecordServicePort(Protocol):
+    def normalize_course_fields(
+        self,
+        manifest: dict[str, Any],
+        course_id: int | None,
+        name: str,
+        schedule: str,
+        group_name: str,
+        start_date: str,
+        enrollment_fee: str,
+        monthly_fee: str,
+        capacity: str,
+    ) -> dict[str, Any]: ...
+
     def create_course(
         self,
         manifest: dict[str, Any],
