@@ -20,10 +20,6 @@ class WorkspaceStore(Protocol):
         self, manifest: dict[str, Any], history_event: dict[str, Any]
     ) -> None: ...
 
-    async def save_records(
-        self, manifest: dict[str, Any], changes: dict[str, list[RecordMutation]]
-    ) -> None: ...
-
     async def create_enrollment(
         self,
         student_fields: dict[str, Any],

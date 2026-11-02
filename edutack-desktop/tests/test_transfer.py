@@ -13,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, inspect, select
 
-from edutrack_desktop.domain.record_service import RecordMutation
+from edutrack_desktop.domain.record_service import RecordService
 from edutrack_desktop.application.presenters import dashboard_summary
 from edutrack_desktop.infrastructure.models import CourseRecord, StudentRecord
 from edutrack_desktop.infrastructure.search import normalize_search_text
@@ -269,14 +269,12 @@ def test_local_store_incremental_save_rolls_back_invalid_references(manifest, tm
     asyncio.run(verify_rollback())
 
 
-def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path):
+def test_local_store_student_crud_updates_only_student_row(manifest, tmp_path):
     store = LocalStore(tmp_path / "specific-save.sqlite3")
     student_id = manifest["students"][0]["id"]
 
     async def verify_specific_save():
         await store.save(manifest)
-        updated = deepcopy(manifest)
-        updated["students"][0]["first_name"] = "ANA ACTUALIZADA"
         statements = []
 
         def capture_sql(_connection, _cursor, statement, _parameters, *_):
@@ -284,13 +282,18 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
 
         event.listen(store.engine.sync_engine, "before_cursor_execute", capture_sql)
         try:
-            await store.save_records(
-                updated,
-                {"students": [RecordMutation(0, updated["students"][0])]},
+            updated = await store.save_student(
+                student_id,
+                manifest["students"][0]["last_name"],
+                "ANA ACTUALIZADA",
+                manifest["students"][0]["document_number"],
+                ", ".join(manifest["students"][0]["phone_numbers"]),
+                RecordService(),
             )
         finally:
             event.remove(store.engine.sync_engine, "before_cursor_execute", capture_sql)
 
+        assert updated["first_name"] == "ANA ACTUALIZADA"
         assert any(
             "select" in statement and "from desktop_students" in statement
             for statement in statements
@@ -308,49 +311,73 @@ def test_local_store_record_save_touches_only_requested_rows(manifest, tmp_path)
     asyncio.run(verify_specific_save())
 
 
-def test_incremental_enrollment_save_batches_records_and_reference_checks(
+def test_local_store_student_save_rejects_missing_edit_target(manifest, tmp_path):
+    store = LocalStore(tmp_path / "missing-student.sqlite3")
+    student = manifest["students"][0]
+    missing_id = str(uuid.uuid4())
+
+    async def verify_missing_target():
+        await store.save(manifest)
+        with pytest.raises(ValueError, match="seleccionado ya no existe"):
+            await store.save_student(
+                missing_id,
+                "APELLIDO",
+                "ESTUDIANTE",
+                student["document_number"],
+                ", ".join(student["phone_numbers"]),
+                RecordService(),
+            )
+        assert await store.load() == manifest
+
+    try:
+        asyncio.run(verify_missing_target())
+    finally:
+        asyncio.run(store.dispose())
+
+
+def test_local_store_enrollment_crud_updates_only_target_row(
     manifest, tmp_path
 ):
-    data = deepcopy(manifest)
-    for _ in range(4):
-        enrollment = deepcopy(data["enrollments"][0])
-        enrollment["id"] = str(uuid.uuid4())
-        enrollment["record_code"] = None
-        data["enrollments"].append(enrollment)
-
     store = LocalStore(tmp_path / "batched-save.sqlite3")
+    enrollment = manifest["enrollments"][0]
 
-    async def verify_batched_save():
-        await store.save(data)
-        updated = deepcopy(data)
-        changes = []
-        for position, enrollment in enumerate(updated["enrollments"]):
-            enrollment["monthly_fee"] = f"{81 + position}.00"
-            changes.append(RecordMutation(position, enrollment))
-
+    async def verify_targeted_save():
+        await store.save(manifest)
         statements = []
 
         def capture_sql(_connection, _cursor, statement, _parameters, *_):
-            if statement.lstrip().lower().startswith("select"):
+            if statement.lstrip().lower().startswith(
+                ("insert", "update", "delete")
+            ):
                 statements.append(statement.lower())
 
         event.listen(store.engine.sync_engine, "before_cursor_execute", capture_sql)
         try:
-            await store.save_records(updated, {"enrollments": changes})
+            saved = await store.save_enrollment(
+                enrollment["id"],
+                {
+                    "student_id": enrollment["student_id"],
+                    "course_id": enrollment["course_id"],
+                    "enrollment_date": enrollment["enrollment_date"],
+                    "promoter_ids": enrollment["promoter_ids"],
+                    "enrollment_fee": enrollment["enrollment_fee"],
+                    "monthly_fee": "90.00",
+                },
+                RecordService(),
+            )
         finally:
             event.remove(store.engine.sync_engine, "before_cursor_execute", capture_sql)
 
-        for table in (
-            "desktop_enrollments",
-            "desktop_students",
-            "desktop_courses",
-            "desktop_promoters",
-        ):
-            assert sum(f"from {table}" in statement for statement in statements) == 1
-        assert await store.load() == updated
+        assert saved["record"]["monthly_fee"] == "90.00"
+        assert len(statements) == 1
+        assert statements[0].startswith("update desktop_enrollments")
+        persisted = await store.load()
+        expected = deepcopy(manifest)
+        expected["enrollments"][0]["monthly_fee"] = "90.00"
+        assert persisted == expected
 
     try:
-        asyncio.run(verify_batched_save())
+        asyncio.run(verify_targeted_save())
     finally:
         asyncio.run(store.dispose())
 

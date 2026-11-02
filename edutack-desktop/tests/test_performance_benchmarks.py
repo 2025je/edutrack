@@ -7,7 +7,7 @@ from benchmark_data import (
     build_enrollment_search_manifest,
     build_manifest,
 )
-from edutrack_desktop.domain.record_service import RecordMutation
+from edutrack_desktop.domain.record_service import RecordService
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.transfer import read_package, write_package
 
@@ -119,17 +119,28 @@ def test_benchmark_student_page_search(benchmark, benchmark_loop, student_store)
 
 
 @pytest.mark.performance
-@pytest.mark.benchmark(group="incremental-save")
-def test_benchmark_incremental_student_save(benchmark, benchmark_loop, student_store):
-    size, manifest, store = student_store
+@pytest.mark.benchmark(group="student-update")
+def test_benchmark_student_update(benchmark, benchmark_loop, student_store):
+    _, manifest, store = student_store
     student = manifest["students"][-1]
-    student["first_name"] = "ACTUALIZADO"
-    mutations = {"students": [RecordMutation(size - 1, student)]}
+    record_service = RecordService()
+    iteration = 0
 
     def save_record():
-        benchmark_loop.run_until_complete(store.save_records(manifest, mutations))
+        nonlocal iteration
+        iteration += 1
+        return benchmark_loop.run_until_complete(
+            store.save_student(
+                student["id"],
+                student["last_name"],
+                f"ACTUALIZADO{iteration}",
+                student["document_number"],
+                ", ".join(student["phone_numbers"]),
+                record_service,
+            )
+        )
 
-    save_record()
+    assert save_record()["first_name"] == "ACTUALIZADO1"
     benchmark.pedantic(
         save_record,
         rounds=BENCHMARK_ROUNDS,

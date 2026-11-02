@@ -25,7 +25,6 @@ from sqlalchemy.sql.elements import ColumnElement
 import structlog
 
 from ..application.ports import RecordServicePort
-from ..domain.record_service import RecordMutation
 from .models import (
     CourseRecord,
     EnrollmentRecord,
@@ -610,6 +609,8 @@ class LocalStore:
             target = (
                 await session.get(StudentRecord, source_id) if source_id else None
             )
+            if source_id and target is None:
+                raise ValueError("El estudiante seleccionado ya no existe.")
             normalized_last_name = normalize_search_text(last_name.strip().upper())
             normalized_first_name = normalize_search_text(first_name.strip().upper())
             candidates_statement = select(StudentRecord).where(
@@ -1863,161 +1864,6 @@ class LocalStore:
 
     def create_backup(self, destination):
         return create_sqlite_backup(self.path, Path(destination))
-
-    async def save_records(
-        self, manifest: dict[str, Any], changes: dict[str, list[RecordMutation]]
-    ) -> None:
-        """Persist changed records and workspace metadata in one transaction."""
-        await self.initialize()
-
-        def requested_changes(collection_name: str) -> list[RecordMutation]:
-            mutations = changes.get(collection_name, [])
-            seen_ids = set()
-            for mutation in mutations:
-                if (
-                    not isinstance(mutation, RecordMutation)
-                    or isinstance(mutation.position, bool)
-                    or mutation.position < 0
-                    or not isinstance(mutation.record, dict)
-                    or "id" not in mutation.record
-                ):
-                    raise ValueError(
-                        f"Los cambios de {collection_name} no son válidos."
-                    )
-                record_id = mutation.record["id"]
-                if record_id in seen_ids:
-                    raise ValueError(
-                        f"Hay IDs duplicados en los cambios de {collection_name}."
-                    )
-                seen_ids.add(record_id)
-            return mutations
-
-        async def existing_ids(model, record_ids: set[Any]) -> set[Any]:
-            if not record_ids:
-                return set()
-            result: Any = await session.scalars(
-                select(model.id).where(model.id.in_(record_ids))
-            )
-            return set(result.all())
-
-        async def upsert_many(model, mutations, values_for):
-            if not mutations:
-                return
-            mutation_ids = {mutation.record["id"] for mutation in mutations}
-            result: Any = await session.scalars(
-                select(model).where(model.id.in_(mutation_ids))
-            )
-            existing_records: list[Any] = list(result.all())
-            records_by_id = {record.id: record for record in existing_records}
-            for mutation in mutations:
-                item = mutation.record
-                values = values_for(item, mutation.position)
-                record = records_by_id.get(item["id"])
-                if record is None:
-                    session.add(model(**values))
-                    continue
-                for key, value in values.items():
-                    if getattr(record, key) != value:
-                        setattr(record, key, value)
-
-        students = requested_changes("students")
-        courses = requested_changes("courses")
-        promoters = requested_changes("promoters")
-        enrollments = requested_changes("enrollments")
-
-        async with self.session_factory.begin() as session:
-            workspace = await session.get(Workspace, 1)
-            if workspace is None:
-                raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            for key, value in _workspace_values(manifest).items():
-                if getattr(workspace, key) != value:
-                    setattr(workspace, key, value)
-
-            await upsert_many(
-                StudentRecord,
-                students,
-                lambda item, position: _student_values(item, workspace.id, position),
-            )
-            await upsert_many(
-                CourseRecord,
-                courses,
-                lambda item, position: _course_values(item, workspace.id, position),
-            )
-            await upsert_many(
-                PromoterRecord,
-                promoters,
-                lambda item, position: _promoter_values(
-                    item, workspace.id, position, manifest["version"]
-                ),
-            )
-            await session.flush()
-
-            student_ids = {mutation.record["id"] for mutation in students}
-            required_student_ids = {
-                mutation.record["student_id"]
-                for mutation in enrollments
-                if mutation.record.get("student_id") is not None
-            }
-            missing_student_ids = required_student_ids - student_ids
-            available_student_ids = student_ids | await existing_ids(
-                StudentRecord, missing_student_ids
-            )
-
-            course_ids = {int(mutation.record["id"]) for mutation in courses}
-            required_course_ids = {
-                int(mutation.record["course_id"])
-                for mutation in enrollments
-                if mutation.record.get("course_id") is not None
-            }
-            missing_course_ids = required_course_ids - course_ids
-            available_course_ids = course_ids | await existing_ids(
-                CourseRecord, missing_course_ids
-            )
-
-            promoter_ids = {int(mutation.record["id"]) for mutation in promoters}
-            required_promoter_ids = {
-                int(promoter_id)
-                for mutation in enrollments
-                for promoter_id in mutation.record["promoter_ids"]
-            }
-            missing_promoter_ids = required_promoter_ids - promoter_ids
-            available_promoter_ids = promoter_ids | await existing_ids(
-                PromoterRecord, missing_promoter_ids
-            )
-
-            for mutation in enrollments:
-                item = mutation.record
-                student_id = item.get("student_id")
-                if student_id is not None and student_id not in available_student_ids:
-                    raise ValueError(
-                        "Una matrícula hace referencia a un estudiante inexistente."
-                    )
-                course_id = item.get("course_id")
-                if course_id is not None and int(course_id) not in available_course_ids:
-                    raise ValueError(
-                        "Una matrícula hace referencia a un curso inexistente."
-                    )
-                if any(
-                    int(promoter_id) not in available_promoter_ids
-                    for promoter_id in item["promoter_ids"]
-                ):
-                    raise ValueError(
-                        "Una matrícula hace referencia a un promotor inexistente."
-                    )
-
-            await upsert_many(
-                EnrollmentRecord,
-                enrollments,
-                lambda item, position: _enrollment_values(item, workspace.id, position),
-            )
-
-        audit_logger.info(
-            "database.records_saved",
-            student_count=len(students),
-            enrollment_count=len(enrollments),
-            course_count=len(courses),
-            promoter_count=len(promoters),
-        )
 
     async def create_enrollment(
         self,

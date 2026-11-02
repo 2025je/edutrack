@@ -9,7 +9,7 @@ from typing import Any
 
 from benchmark_data import build_course_search_manifest, build_manifest
 from edutrack_desktop.application.presenters import dashboard_summary
-from edutrack_desktop.domain.record_service import RecordMutation
+from edutrack_desktop.domain.record_service import RecordService
 from edutrack_desktop.infrastructure.store import LocalStore
 from edutrack_desktop.infrastructure.logging_config import configure_logging
 from edutrack_desktop.infrastructure.transfer import read_package, write_package
@@ -78,19 +78,19 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
                 )
 
         student = manifest["students"][-1]
-        incremental_save_samples = []
+        student_update_samples = []
+        record_service = RecordService()
         for iteration in range(ITERATIONS):
-            student["first_name"] = f"ACTUALIZADO{iteration}"
             started = time.perf_counter()
-            await store.save_records(
-                manifest,
-                {
-                    "students": [
-                        RecordMutation(size - 1, student)
-                    ]
-                },
+            await store.save_student(
+                student["id"],
+                student["last_name"],
+                f"ACTUALIZADO{iteration}",
+                student["document_number"],
+                ", ".join(student["phone_numbers"]),
+                record_service,
             )
-            incremental_save_samples.append(time.perf_counter() - started)
+            student_update_samples.append(time.perf_counter() - started)
 
         await store.dashboard_summary()
         sql_dashboard_samples = []
@@ -117,8 +117,8 @@ async def benchmark_dataset(size: int, root: Path) -> dict[str, Any]:
             "student_page_search_median_ms": median_milliseconds(
                 student_page_samples
             ),
-            "one_record_incremental_save_median_ms": median_milliseconds(
-                incremental_save_samples
+            "student_update_median_ms": median_milliseconds(
+                student_update_samples
             ),
             "sql_dashboard_summary_median_ms": median_milliseconds(
                 sql_dashboard_samples
