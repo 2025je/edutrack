@@ -89,7 +89,6 @@ def _course_values(
     item: dict[str, Any], workspace_id: int, position: int
 ) -> dict[str, Any]:
     course_id = int(item["id"])
-    search_text = f"{item['name']} · {item['schedule']} · Grupo {item['group']}"
     return {
         "id": course_id,
         "workspace_id": workspace_id,
@@ -98,13 +97,18 @@ def _course_values(
         "name": item["name"],
         "schedule": item["schedule"],
         "group_name": item["group"],
-        "search_text": normalize_search_text(search_text),
+        "search_text": _course_search_text(item),
         "start_date": item["start_date"],
         "enrollment_fee": item["enrollment_fee"],
         "monthly_fee": item["monthly_fee"],
         "capacity": item["capacity"],
         "active": item["active"],
     }
+
+
+def _course_search_text(item: dict[str, Any]) -> str:
+    value = f"{item['name']} · {item['schedule']} · Grupo {item['group']}"
+    return normalize_search_text(value)
 
 
 def _course_context(records: Sequence[CourseRecord]) -> dict[str, Any]:
@@ -438,13 +442,31 @@ class LocalStore:
             if workspace is None:
                 raise RuntimeError("No hay un espacio de trabajo inicializado.")
 
-            course_records = (
+            target = await session.get(CourseRecord, course_id)
+            if target is None:
+                raise ValueError("Selecciona un curso válido para editar.")
+            fields = record_service.normalize_course_fields(
+                {"courses": []},
+                course_id,
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+            )
+            matching_courses = (
                 await session.scalars(
-                    select(CourseRecord).order_by(CourseRecord.position)
+                    select(CourseRecord).where(
+                        CourseRecord.id != course_id,
+                        CourseRecord.search_text == _course_search_text(fields),
+                    )
                 )
             ).all()
+            course_context = _course_context([target, *matching_courses])
             mutation = record_service.update_course(
-                _course_context(course_records),
+                course_context,
                 course_id,
                 name,
                 schedule,
@@ -455,20 +477,10 @@ class LocalStore:
                 capacity,
                 active,
             )
-            course = next(
-                (
-                    item
-                    for item in course_records
-                    if item.id == course_id
-                ),
-                None,
-            )
-            if course is None:
-                raise RuntimeError("El curso seleccionado ya no está disponible.")
             for key, value in _course_values(
-                mutation.record, workspace.id, course.position
+                mutation.record, workspace.id, target.position
             ).items():
-                setattr(course, key, value)
+                setattr(target, key, value)
             return dict(mutation.record)
 
     async def create_course(
@@ -487,13 +499,9 @@ class LocalStore:
             workspace = await session.get(Workspace, 1)
             if workspace is None:
                 raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            course_records = (
-                await session.scalars(
-                    select(CourseRecord).order_by(CourseRecord.position)
-                )
-            ).all()
-            mutation = record_service.create_course(
-                _course_context(course_records),
+            fields = record_service.normalize_course_fields(
+                {"courses": []},
+                None,
                 name,
                 schedule,
                 group_name,
@@ -501,6 +509,33 @@ class LocalStore:
                 enrollment_fee,
                 monthly_fee,
                 capacity,
+            )
+            matching_courses = (
+                await session.scalars(
+                    select(CourseRecord).where(
+                        CourseRecord.search_text == _course_search_text(fields)
+                    )
+                )
+            ).all()
+            next_course_id = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(CourseRecord.id), 0))
+                )
+            ) + 1
+            next_position = int(
+                await session.scalar(select(func.count(CourseRecord.id)))
+            )
+            mutation = record_service.create_course(
+                _course_context(matching_courses),
+                name,
+                schedule,
+                group_name,
+                start_date,
+                enrollment_fee,
+                monthly_fee,
+                capacity,
+                course_id=next_course_id,
+                position=next_position,
             )
             session.add(
                 CourseRecord(
@@ -521,19 +556,29 @@ class LocalStore:
             workspace = await session.get(Workspace, 1)
             if workspace is None:
                 raise RuntimeError("No hay un espacio de trabajo inicializado.")
-            promoter_records = (
-                await session.scalars(
-                    select(PromoterRecord).order_by(PromoterRecord.position)
-                )
+            promoter_names = (
+                await session.scalars(select(PromoterRecord.name))
             ).all()
+            next_promoter_id = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(PromoterRecord.id), 0))
+                )
+            ) + 1
+            next_position = int(
+                await session.scalar(select(func.count(PromoterRecord.id)))
+            )
             context = {
                 "campus_mode": "new" if workspace.version == 3 else "existing",
                 "promoters": [
-                    {"id": promoter.id, "name": promoter.name, "active": promoter.active}
-                    for promoter in promoter_records
+                    {"name": promoter_name} for promoter_name in promoter_names
                 ],
             }
-            mutation = record_service.create_promoter(context, name)
+            mutation = record_service.create_promoter(
+                context,
+                name,
+                promoter_id=next_promoter_id,
+                position=next_position,
+            )
             session.add(
                 PromoterRecord(
                     **_promoter_values(
@@ -805,22 +850,12 @@ class LocalStore:
                 for key, value in values.items():
                     setattr(target, key, value)
 
-            attachments_changed = False
             if attachments_to_clean:
                 attachment_data = manifest_context["_attachment_data"]
                 if attachment_data != workspace.attachment_data:
                     workspace.attachment_data = attachment_data
-                    attachments_changed = True
 
-            return {
-                "record": dict(mutation.record),
-                "attachments_changed": attachments_changed,
-                "attachment_data": (
-                    manifest_context["_attachment_data"]
-                    if attachments_changed
-                    else None
-                ),
-            }
+            return {"record": dict(mutation.record)}
 
     async def update_enrollment_image(
         self,
@@ -857,7 +892,6 @@ class LocalStore:
                 raise RuntimeError("Los adjuntos guardados no tienen un formato válido.")
 
             attachment_data = dict(workspace.attachment_data or {})
-            attachments_changed = False
             if attachment_path is None:
                 if not enrollment.record_image:
                     raise ValueError(
@@ -882,8 +916,6 @@ class LocalStore:
                 }
                 if updated_attachment_data != workspace.attachment_data:
                     workspace.attachment_data = updated_attachment_data
-                    attachment_data = updated_attachment_data
-                    attachments_changed = True
             else:
                 if not enrollment.record_code:
                     raise ValueError(
@@ -894,17 +926,10 @@ class LocalStore:
                 attachment_data[attachment_path] = encoded_content
                 if attachment_data != workspace.attachment_data:
                     workspace.attachment_data = attachment_data
-                    attachments_changed = True
                 enrollment.record_image = attachment_path
                 enrollment.record_image_hash = image_hash
 
-            return {
-                "record": _enrollment_context_item(enrollment),
-                "attachments_changed": attachments_changed,
-                "attachment_data": (
-                    attachment_data if attachments_changed else None
-                ),
-            }
+            return {"record": _enrollment_context_item(enrollment)}
 
     async def search_students(self, query: str, limit: int = 20):
         await self.initialize()
@@ -1676,112 +1701,121 @@ class LocalStore:
 
     async def _load(self):
         async with self.session_factory() as session:
-            workspace = await session.get(Workspace, 1)
-            if workspace is None:
-                return None
+            return await self._load_from_session(session)
 
-            students = (
-                await session.scalars(
-                    select(StudentRecord).order_by(StudentRecord.position)
-                )
-            ).all()
-            enrollments = (
-                await session.scalars(
-                    select(EnrollmentRecord).order_by(EnrollmentRecord.position)
-                )
-            ).all()
-            courses = (
-                await session.scalars(
-                    select(CourseRecord).order_by(CourseRecord.position)
-                )
-            ).all()
-            promoters = (
-                await session.scalars(
-                    select(PromoterRecord).order_by(PromoterRecord.position)
-                )
-            ).all()
-            manifest = {
-                "format": workspace.format,
-                "version": workspace.version,
-                "bundle_id": workspace.bundle_id,
-                "campus_id": workspace.campus_id,
-                "campus_name": workspace.campus_name,
-                "campus_address": workspace.campus_address,
-                "students": [
-                    {
-                        "id": item.id,
-                        "server_id": item.server_id,
-                        "base_hash": item.base_hash,
-                        "last_name": item.last_name,
-                        "first_name": item.first_name,
-                        "document_number": item.document_number,
-                        "phone_numbers": item.phone_numbers,
-                        "active": item.active,
-                    }
-                    for item in students
-                ],
-                "enrollments": [
-                    {
-                        "id": item.id,
-                        "server_id": item.server_id,
-                        "base_hash": item.base_hash,
-                        "student_id": item.student_id,
-                        "student_server_id": item.student_server_id,
-                        "course_id": item.course_id,
-                        "enrollment_date": item.enrollment_date,
-                        "promoter_ids": item.promoter_ids,
-                        "enrollment_fee": item.enrollment_fee,
-                        "monthly_fee": item.monthly_fee,
-                        "record_code": item.record_code,
-                        "active": item.active,
-                        "record_image": item.record_image,
-                        "record_image_hash": item.record_image_hash,
-                        "record_image_quality": item.record_image_quality,
-                    }
-                    for item in enrollments
-                ],
-                "courses": [
-                    {
-                        "id": item.id,
-                        "server_id": item.server_id,
-                        "name": item.name,
-                        "schedule": item.schedule,
-                        "group": item.group_name,
-                        "start_date": item.start_date,
-                        "enrollment_fee": item.enrollment_fee,
-                        "monthly_fee": item.monthly_fee,
-                        "capacity": item.capacity,
-                        "active": item.active,
-                    }
-                    for item in courses
-                ],
-                "promoters": [
-                    {
-                        "id": item.id,
-                        "server_id": (
-                            item.server_id
-                            if item.server_id is not None or workspace.version == 3
-                            else item.id
-                        ),
-                        "name": item.name,
-                        "active": item.active,
-                    }
-                    for item in promoters
-                ],
-            }
-            if workspace.attachment_data is not None:
-                manifest["_attachment_data"] = workspace.attachment_data
-            if workspace.version == 3:
-                manifest["campus_mode"] = "new"
-            return manifest
+    async def _load_from_session(self, session: AsyncSession):
+        workspace = await session.get(Workspace, 1)
+        if workspace is None:
+            return None
+
+        students = (
+            await session.scalars(
+                select(StudentRecord).order_by(StudentRecord.position)
+            )
+        ).all()
+        enrollments = (
+            await session.scalars(
+                select(EnrollmentRecord).order_by(EnrollmentRecord.position)
+            )
+        ).all()
+        courses = (
+            await session.scalars(
+                select(CourseRecord).order_by(CourseRecord.position)
+            )
+        ).all()
+        promoters = (
+            await session.scalars(
+                select(PromoterRecord).order_by(PromoterRecord.position)
+            )
+        ).all()
+        manifest = {
+            "format": workspace.format,
+            "version": workspace.version,
+            "bundle_id": workspace.bundle_id,
+            "campus_id": workspace.campus_id,
+            "campus_name": workspace.campus_name,
+            "campus_address": workspace.campus_address,
+            "students": [
+                {
+                    "id": item.id,
+                    "server_id": item.server_id,
+                    "base_hash": item.base_hash,
+                    "last_name": item.last_name,
+                    "first_name": item.first_name,
+                    "document_number": item.document_number,
+                    "phone_numbers": item.phone_numbers,
+                    "active": item.active,
+                }
+                for item in students
+            ],
+            "enrollments": [
+                {
+                    "id": item.id,
+                    "server_id": item.server_id,
+                    "base_hash": item.base_hash,
+                    "student_id": item.student_id,
+                    "student_server_id": item.student_server_id,
+                    "course_id": item.course_id,
+                    "enrollment_date": item.enrollment_date,
+                    "promoter_ids": item.promoter_ids,
+                    "enrollment_fee": item.enrollment_fee,
+                    "monthly_fee": item.monthly_fee,
+                    "record_code": item.record_code,
+                    "active": item.active,
+                    "record_image": item.record_image,
+                    "record_image_hash": item.record_image_hash,
+                    "record_image_quality": item.record_image_quality,
+                }
+                for item in enrollments
+            ],
+            "courses": [
+                {
+                    "id": item.id,
+                    "server_id": item.server_id,
+                    "name": item.name,
+                    "schedule": item.schedule,
+                    "group": item.group_name,
+                    "start_date": item.start_date,
+                    "enrollment_fee": item.enrollment_fee,
+                    "monthly_fee": item.monthly_fee,
+                    "capacity": item.capacity,
+                    "active": item.active,
+                }
+                for item in courses
+            ],
+            "promoters": [
+                {
+                    "id": item.id,
+                    "server_id": (
+                        item.server_id
+                        if item.server_id is not None or workspace.version == 3
+                        else item.id
+                    ),
+                    "name": item.name,
+                    "active": item.active,
+                }
+                for item in promoters
+            ],
+        }
+        if workspace.attachment_data is not None:
+            manifest["_attachment_data"] = workspace.attachment_data
+        if workspace.version == 3:
+            manifest["campus_mode"] = "new"
+        return manifest
 
     async def save(self, manifest):
         await self.initialize()
         await self._save(manifest)
 
-    async def save_with_sync_history(self, manifest, history_event):
+    async def save_with_sync_history(
+        self, manifest, history_event, *, expected_snapshot=None
+    ):
         await self.initialize()
-        await self._save(manifest, sync_history_event=history_event)
+        await self._save(
+            manifest,
+            sync_history_event=history_event,
+            expected_snapshot=expected_snapshot,
+        )
 
     async def record_sync_history(self, history_event):
         await self.initialize()
@@ -2230,8 +2264,18 @@ class LocalStore:
             "student_created": student_created,
         }
 
-    async def _save(self, manifest, sync_history_event=None):
+    async def _save(
+        self, manifest, sync_history_event=None, expected_snapshot=None
+    ):
         async with self.session_factory.begin() as session:
+            if expected_snapshot is not None:
+                current = await self._load_from_session(session)
+                if current != expected_snapshot:
+                    raise ValueError(
+                        "La sede cambió después de la vista previa. "
+                        "Valida el paquete otra vez."
+                    )
+
             workspace = await session.get(Workspace, 1)
             workspace_values = _workspace_values(manifest)
             if workspace is None:

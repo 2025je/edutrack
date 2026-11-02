@@ -89,6 +89,9 @@ class RecordService:
         enrollment_fee: str,
         monthly_fee: str,
         capacity: str,
+        *,
+        course_id: int | None = None,
+        position: int | None = None,
     ) -> RecordMutation:
         fields = self.normalize_course_fields(
             manifest,
@@ -101,11 +104,14 @@ class RecordService:
             monthly_fee,
             capacity,
         )
-        course_id = (
-            max((int(item["id"]) for item in manifest["courses"]), default=0) + 1
-        )
+        if course_id is None:
+            course_id = (
+                max((int(item["id"]) for item in manifest["courses"]), default=0)
+                + 1
+            )
         record = {"id": course_id, "server_id": None, **fields, "active": True}
-        position = len(manifest["courses"])
+        if position is None:
+            position = len(manifest["courses"])
         manifest["courses"].append(record)
         return RecordMutation(position, record)
 
@@ -149,7 +155,12 @@ class RecordService:
         return RecordMutation(position, course)
 
     def create_promoter(
-        self, manifest: dict[str, Any], name: str
+        self,
+        manifest: dict[str, Any],
+        name: str,
+        *,
+        promoter_id: int | None = None,
+        position: int | None = None,
     ) -> RecordMutation:
         if manifest.get("campus_mode") != "new":
             raise ValueError(
@@ -163,16 +174,19 @@ class RecordService:
             for item in manifest["promoters"]
         ):
             raise ValueError("Ya existe un promotor con ese nombre.")
-        promoter_id = (
-            max((int(item["id"]) for item in manifest["promoters"]), default=0) + 1
-        )
+        if promoter_id is None:
+            promoter_id = (
+                max((int(item["id"]) for item in manifest["promoters"]), default=0)
+                + 1
+            )
         record = {
             "id": promoter_id,
             "server_id": None,
             "name": name,
             "active": True,
         }
-        position = len(manifest["promoters"])
+        if position is None:
+            position = len(manifest["promoters"])
         manifest["promoters"].append(record)
         return RecordMutation(position, record)
 

@@ -51,6 +51,11 @@ def _wait_for_course_students(backend, expected_count):
     assert len(backend.courseStudents) == expected_count
 
 
+def _course_by_id(backend, course_id):
+    rows, _, _ = asyncio.run(backend.store.course_page("", 0, 100))
+    return next(row for row in rows if row["id"] == course_id)
+
+
 def _wait_for_dashboard_summary(backend, expected_student_count):
     deadline = time.monotonic() + 5
     while (
@@ -181,12 +186,15 @@ def test_new_campus_workspace_exports_catalog_and_records(tmp_path):
     )
     backend.selectCourse(course_id)
     _wait_for_course_students(backend, 1)
-    assert backend.selectedCourse["id"] == course_id
-    assert backend.courses[0]["student_count"] == 1
+    assert _course_by_id(backend, course_id)["id"] == course_id
+    course_model = backend.courseListModel
+    course_model.activate()
+    _wait_for_model(course_model)
+    assert course_model.rowAt(0)["courses"][0]["student_count"] == 1
     assert [student["label"] for student in backend.courseStudents] == ["PÉREZ ANA"]
 
     output = tmp_path / "sede-inicial.edutrack"
-    initial_bundle_id = backend.manifest["bundle_id"]
+    initial_bundle_id = asyncio.run(backend.store.workspace_info())["bundle_id"]
     backend.exportPackage(str(output))
     package = read_package(output)
 
@@ -208,8 +216,8 @@ def test_backend_exports_package_from_sql_when_manifest_is_not_loaded(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede inicial", "Av. Principal 123")
     backend.saveStudent("", "Pérez", "Ana", "12345678", "987654321")
-    expected_bundle_id = backend.manifest["bundle_id"]
-    backend.manifest = None
+    assert backend.manifest is None
+    expected_bundle_id = asyncio.run(backend.store.workspace_info())["bundle_id"]
 
     output = tmp_path / "sede.edutrack"
     backend.exportPackage(str(output))
@@ -251,20 +259,63 @@ def test_create_promoter_persists_to_sqlite_without_manifest(tmp_path):
     assert len(persisted["promoters"]) == promoter_count
 
 
-def test_create_promoter_does_not_update_loaded_manifest(tmp_path):
+def test_create_promoter_keeps_manifest_unloaded(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede inicial", "Av. Principal 123")
     store = backend.store
     assert store is not None
-    manifest_before = deepcopy(backend.manifest)
+    assert backend.manifest is None
 
     promoter_id = backend.createPromoter("Promotor local")
 
     assert promoter_id > 0
-    assert backend.manifest == manifest_before
+    assert backend.manifest is None
     persisted = asyncio.run(store.load())
     assert persisted is not None
     assert any(item["id"] == promoter_id for item in persisted["promoters"])
+
+
+def test_create_promoter_passes_name_only_context_to_domain(tmp_path, monkeypatch):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "Av. Principal 123")
+    store = backend.store
+    assert store is not None
+    manifest = asyncio.run(store.load())
+    assert manifest is not None
+    manifest["promoters"][0]["name"] = "Promotor objetivo"
+    asyncio.run(store.save(manifest))
+    record_service = backend._record_service
+    original_create_promoter = record_service.create_promoter
+    promoter_contexts = []
+
+    def capture_candidates(
+        manifest,
+        name,
+        *,
+        promoter_id=None,
+        position=None,
+    ):
+        promoter_contexts.append(manifest["promoters"])
+        return original_create_promoter(
+            manifest,
+            name,
+            promoter_id=promoter_id,
+            position=position,
+        )
+
+    monkeypatch.setattr(record_service, "create_promoter", capture_candidates)
+
+    assert backend.createPromoter(" promotor objetivo ") == 0
+
+    assert len(promoter_contexts) == 1
+    assert all(
+        set(promoter) == {"name"} for promoter in promoter_contexts[0]
+    )
+    assert any(
+        promoter["name"].casefold() == "promotor objetivo"
+        for promoter in promoter_contexts[0]
+    )
+    assert "Ya existe un promotor con ese nombre." in backend.errorMessage
 
 
 def test_create_promoter_keeps_existing_campus_restriction_without_manifest(
@@ -436,7 +487,10 @@ def test_student_validation_matches_web_name_and_phone_rules(tmp_path):
     student = backend.selectedStudent
     assert len(student["phone_numbers"]) == 21
     backend.saveStudent("", "PÉREZ", "ANA", "", ", ".join(phones))
-    assert len(backend.students) == 1
+    rows, total_count, _ = asyncio.run(
+        backend.store.student_page("", 0, 0, 0, 10)
+    )
+    assert total_count == len(rows) == 1
     assert "Ya existe un estudiante" in backend.errorMessage
 
     backend.saveStudent(student["id"], "Pérez", "Ana", "", "987654321, 987654321")
@@ -451,11 +505,11 @@ def test_student_can_be_deactivated_and_activated(tmp_path):
     student_id = backend.selectedStudent["id"]
 
     assert backend.setStudentActive(student_id, False)
-    assert backend.students[0]["active"] is False
+    assert backend.selectedStudent["active"] is False
     assert "desactivado correctamente" in backend.errorMessage
 
     assert backend.setStudentActive(student_id, True)
-    assert backend.students[0]["active"] is True
+    assert backend.selectedStudent["active"] is True
     assert "activado correctamente" in backend.errorMessage
 
     assert not backend.setStudentActive("missing-student", True)
@@ -507,22 +561,33 @@ def test_student_save_and_activation_use_sqlite_without_a_manifest(
 def test_student_pages_filter_and_refresh_after_saving(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
+    store = backend.store
+    assert store is not None
     backend.saveStudent("", "ROJAS", "LUIS", "11111111", "987654321")
     backend.saveStudent("", "PEREZ", "ANA", "22222222", "912345678")
     backend.saveStudent("", "GOMEZ", "MARIO", "33333333", "923456789")
 
-    assert backend.matchingStudentCount("") == 3
-    assert [row["label"] for row in backend.studentPage("", 0, 2)] == [
+    rows, total_count, matching_count = asyncio.run(
+        store.student_page("", 0, 0, 0, 2)
+    )
+    assert total_count == matching_count == 3
+    assert [row["label"] for row in rows] == [
         "GOMEZ MARIO",
         "PEREZ ANA",
     ]
-    assert [row["label"] for row in backend.studentPage("", 1, 2)] == ["ROJAS LUIS"]
-    assert backend.matchingStudentCount("2222") == 1
-    assert backend.studentPage("2222", 0, 50)[0]["label"] == "PEREZ ANA"
+    rows, _, _ = asyncio.run(store.student_page("", 0, 0, 1, 2))
+    assert [row["label"] for row in rows] == ["ROJAS LUIS"]
+    rows, _, matching_count = asyncio.run(store.student_page("2222", 0, 0, 0, 50))
+    assert matching_count == 1
+    assert rows[0]["label"] == "PEREZ ANA"
 
     backend.saveStudent("", "ALVA", "SOFIA", "44444444", "934567890")
-    assert backend.matchingStudentCount("") == 4
-    assert not backend.studentPage("", 0, 101)
+    _, total_count, matching_count = asyncio.run(
+        store.student_page("", 0, 0, 0, 10)
+    )
+    assert total_count == matching_count == 4
+    with pytest.raises(ValueError, match="página de estudiantes"):
+        asyncio.run(store.student_page("", 0, 0, 0, 101))
 
 
 def test_student_list_model_filters_and_refreshes_after_saving(tmp_path):
@@ -762,7 +827,7 @@ def test_enrollment_page_exposes_course_active_state(tmp_path):
         "Inglés", "Mañana", "1", "2026-01-01", "100.00", "80.00", "30"
     )
     backend.saveStudent("", "PEREZ", "ANA", "12345678", "912345678")
-    student_id = backend.manifest["students"][-1]["id"]
+    student_id = backend.selectedStudent["id"]
     assert backend.saveEnrollment(
         "",
         {
@@ -889,13 +954,13 @@ def test_dashboard_summary_cache_updates_and_workspace_refresh_reloads_metadata(
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
     _wait_for_dashboard_summary(backend, 1)
 
-    external_manifest = deepcopy(backend.manifest)
+    external_manifest = asyncio.run(backend.store.load())
+    assert external_manifest is not None
     external_manifest["campus_address"] = "Dirección actualizada"
     asyncio.run(backend.store.save(external_manifest))
 
-    original_manifest_address = backend.manifest["campus_address"]
     assert backend.refreshWorkspace()
-    assert backend.manifest["campus_address"] == original_manifest_address
+    assert backend.manifest is None
     _wait_for_workspace_info(backend, "campus_address", "Dirección actualizada")
     _wait_for_dashboard_summary_idle(backend)
 
@@ -978,7 +1043,8 @@ def test_course_validation_normalizes_identity_and_enforces_web_amount_limit(tmp
         "20",
     )
 
-    course = next(item for item in backend.courses if item["id"] == course_id)
+    course_rows, _, _ = asyncio.run(backend.store.course_page("", 0, 50))
+    course = next(item for item in course_rows if item["id"] == course_id)
     assert (course["name"], course["schedule"], course["group"]) == (
         "INGLÉS BÁSICO",
         "LUNES 8:00",
@@ -1021,11 +1087,13 @@ def test_save_course_updates_validates_and_persists(tmp_path):
     existing_course_id = backend.createCourse(
         "Pastelería", "Tarde", "2", "2026-01-02", "40.00", "60.00", "15"
     )
-    course = next(
-        item for item in backend.manifest["courses"] if item["id"] == course_id
-    )
+    manifest = asyncio.run(backend.store.load())
+    assert manifest is not None
+    course = next(item for item in manifest["courses"] if item["id"] == course_id)
     course["server_id"] = 25
-    asyncio.run(backend.store.save(backend.manifest))
+    asyncio.run(backend.store.save(manifest))
+    backend.manifest = manifest
+    manifest_before_save = deepcopy(backend.manifest)
     backend.selectCourse(course_id)
 
     assert backend.saveCourse(
@@ -1039,7 +1107,9 @@ def test_save_course_updates_validates_and_persists(tmp_path):
         "12",
         False,
     )
-    assert backend.selectedCourse == {
+    assert backend.manifest == manifest_before_save
+    course = _course_by_id(backend, course_id)
+    assert {key: course[key] for key in course if key != "label"} == {
         "id": course_id,
         "server_id": 25,
         "name": "COCINA AVANZADA",
@@ -1050,6 +1120,7 @@ def test_save_course_updates_validates_and_persists(tmp_path):
         "monthly_fee": "55.50",
         "capacity": 12,
         "active": False,
+        "student_count": 0,
     }
 
     assert not backend.saveCourse(
@@ -1064,7 +1135,7 @@ def test_save_course_updates_validates_and_persists(tmp_path):
         True,
     )
     assert "Ya existe un curso" in backend.errorMessage
-    assert backend.selectedCourse["name"] == "COCINA AVANZADA"
+    assert _course_by_id(backend, course_id)["name"] == "COCINA AVANZADA"
     assert existing_course_id != course_id
 
     reloaded_backend = DesktopBackend(path)
@@ -1148,7 +1219,7 @@ def test_save_course_async_persists_and_signals_completion(tmp_path):
 
     assert completed == [True]
     assert not backend.courseSaveInProgress
-    assert backend.selectedCourse["name"] == "COCINA AVANZADA"
+    assert _course_by_id(backend, course_id)["name"] == "COCINA AVANZADA"
     reloaded_backend = DesktopBackend(path)
     persisted_course = next(
         item
@@ -1158,6 +1229,80 @@ def test_save_course_async_persists_and_signals_completion(tmp_path):
         if item["id"] == course_id
     )
     assert persisted_course["name"] == "COCINA AVANZADA"
+
+
+def test_course_writes_pass_only_matching_rows_to_domain(tmp_path, monkeypatch):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    first_course_id = backend.createCourse(
+        "Cocina", "Sábado", "1", "2026-01-01", "30.00", "50.00", "20"
+    )
+    backend.createCourse(
+        "Pastelería", "Tarde", "2", "2026-01-02", "40.00", "60.00", "15"
+    )
+    record_service = backend._record_service
+    original_create_course = record_service.create_course
+    create_contexts = []
+
+    def capture_create_course(
+        manifest,
+        name,
+        schedule,
+        group_name,
+        start_date,
+        enrollment_fee,
+        monthly_fee,
+        capacity,
+        *,
+        course_id=None,
+        position=None,
+    ):
+        create_contexts.append(
+            (list(manifest["courses"]), course_id, position)
+        )
+        return original_create_course(
+            manifest,
+            name,
+            schedule,
+            group_name,
+            start_date,
+            enrollment_fee,
+            monthly_fee,
+            capacity,
+            course_id=course_id,
+            position=position,
+        )
+
+    monkeypatch.setattr(record_service, "create_course", capture_create_course)
+
+    created_course_id = backend.createCourse(
+        "Inglés", "Mañana", "3", "2026-01-03", "50.00", "70.00", "10"
+    )
+
+    assert create_contexts == [([], 3, 2)]
+    assert created_course_id == 3
+
+    original_update_course = record_service.update_course
+    update_contexts = []
+
+    def capture_update_course(manifest, course_id, *args):
+        update_contexts.append([course["id"] for course in manifest["courses"]])
+        return original_update_course(manifest, course_id, *args)
+
+    monkeypatch.setattr(record_service, "update_course", capture_update_course)
+
+    assert backend.saveCourse(
+        first_course_id,
+        "Cocina avanzada",
+        "Lunes",
+        "1",
+        "2026-02-01",
+        "30.00",
+        "50.00",
+        "20",
+        True,
+    )
+    assert update_contexts == [[first_course_id]]
 
 
 def test_save_course_async_persists_without_a_loaded_manifest(tmp_path, monkeypatch):
@@ -1302,7 +1447,7 @@ def test_save_course_async_reports_persistence_errors(tmp_path, monkeypatch):
     assert completed == [False]
     assert not backend.courseSaveInProgress
     assert "disco lleno" in backend.errorMessage
-    assert backend.selectedCourse["name"] == "COCINA"
+    assert _course_by_id(backend, course_id)["name"] == "COCINA"
 
 
 def test_enrollment_validation_supports_pending_and_reserved_records(tmp_path):
@@ -1502,6 +1647,9 @@ def test_save_enrollment_updates_sqlite_without_a_loaded_manifest(tmp_path):
     assert backend.saveEnrollment("", fields)
     enrollment_id = backend._selected_enrollment_id
     assert enrollment_id
+    assert backend.selectedEnrollment["id"] == enrollment_id
+    assert backend.selectedEnrollment["record_code"] == 42
+    assert backend.manifest is None
     assert not backend.saveEnrollment("", fields)
     assert "ya está matriculado" in backend.errorMessage
     assert not backend.saveEnrollment(
@@ -1549,6 +1697,11 @@ def test_save_enrollment_updates_sqlite_without_a_loaded_manifest(tmp_path):
     )
     assert attached_enrollment["record_image"]
     assert attached_enrollment["record_image"] in with_attachment["_attachment_data"]
+    assert (
+        backend.enrollmentImageName
+        == attached_enrollment["record_image"].rsplit("/", 1)[-1]
+    )
+    assert backend.manifest is None
     attachment_path = attached_enrollment["record_image"]
 
     second_course_id = backend.createCourse(
@@ -1648,20 +1801,25 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
         "Sede Norte",
         "Sede Sur",
     ]
-    assert backend.courses == []
+    courses, _, _ = asyncio.run(backend.store.course_page("", 0, 50))
+    assert courses == []
     assert backend.activeCampusIndex == 1
 
     original_store_factory = backend._store_factory
 
     def slow_store_factory(path):
         store = original_store_factory(path)
-        store_load = store.load
+        get_workspace_info = store.workspace_info
 
-        async def slow_load():
+        async def fail_if_manifest_loaded():
+            raise AssertionError("Local database opening must not load the manifest.")
+
+        async def slow_workspace_info():
             time.sleep(0.1)
-            return await store_load()
+            return await get_workspace_info()
 
-        store.load = slow_load
+        store.load = fail_if_manifest_loaded
+        store.workspace_info = slow_workspace_info
         return store
 
     backend._store_factory = slow_store_factory
@@ -1675,11 +1833,14 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
         (False, ""),
     ]
     assert backend.campusName == "Sede Norte"
-    assert len(backend.courses) == 1
+    assert backend.manifest is None
+    courses, _, _ = asyncio.run(backend.store.course_page("", 0, 50))
+    assert len(courses) == 1
     assert backend.activeCampusIndex == 0
 
     reopened_backend = DesktopBackend(default_path, catalog_path)
     assert reopened_backend.campusName == "Sede Norte"
+    reopened_backend._store_factory = slow_store_factory
     reopened_courses, _, _ = asyncio.run(
         reopened_backend.store.course_page("", 0, 20)
     )
@@ -1692,6 +1853,7 @@ def test_campus_catalog_keeps_separate_database_for_each_site(tmp_path):
         QUrl.fromLocalFile(str(external_path)).toString()
     )
     assert reopened_backend.campusName == "Sede Externa"
+    assert reopened_backend.manifest is None
     assert reopened_backend.campuses[-1]["campus_name"] == "Sede Externa"
 
 
@@ -1774,13 +1936,13 @@ def test_importing_updated_package_replaces_only_the_confirmed_matching_site(tmp
     assert backend.createWorkspace("Sede Norte", "", str(database_path))
     backend.exportPackage(str(package_path))
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
-    assert len(backend.students) == 1
+    assert asyncio.run(backend.store.workspace_info())["students"] == 1
 
     assert not backend.openPackage(str(package_path), str(database_path))
-    assert len(backend.students) == 1
+    assert asyncio.run(backend.store.workspace_info())["students"] == 1
     assert backend.openPackage(str(package_path), str(database_path), True)
     assert backend.campusName == "Sede Norte"
-    assert backend.students == []
+    assert asyncio.run(backend.store.workspace_info())["students"] == 0
     backups = list((tmp_path / "backups").glob("sede-*.sqlite3"))
     assert len(backups) == 1
     history = asyncio.run(backend.store.list_sync_history())
@@ -1809,4 +1971,6 @@ def test_closing_campus_keeps_database_registered_and_reopenable(tmp_path):
     assert not reopened_backend.hasWorkspace
     assert reopened_backend.switchCampus(str(database_path))
     assert reopened_backend.campusName == "Sede Guardada"
-    assert len(reopened_backend.students) == 1
+    assert (
+        asyncio.run(reopened_backend.store.workspace_info())["students"] == 1
+    )

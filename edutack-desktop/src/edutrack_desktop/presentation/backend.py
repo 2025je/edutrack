@@ -31,13 +31,7 @@ from ..application.ports import (
     StoreFactory,
     WorkspaceStore,
 )
-from ..application.presenters import (
-    course_rows,
-    dashboard_summary,
-    enrollment_rows,
-    filter_student_rows,
-    student_rows,
-)
+from ..application.presenters import dashboard_summary
 from ..application.sync import build_import_preview
 from ..domain.record_service import RecordMutation, RecordService
 from ..infrastructure.app_settings import DesktopSettings
@@ -304,11 +298,6 @@ class DesktopBackend(QObject):
         self.store: WorkspaceStore | None = None
         self.manifest: dict[str, Any] | None = None
         self._workspace_info: dict[str, Any] | None = None
-        self._student_rows_cache: list[dict[str, Any]] | None = None
-        self._student_filter_cache_query: str | None = None
-        self._student_filter_cache_rows: list[dict[str, Any]] = []
-        self._enrollment_rows_cache: list[dict[str, Any]] | None = None
-        self._course_rows_cache: list[dict[str, Any]] | None = None
         self._course_students_cache: list[dict[str, Any]] = []
         self._course_students_request_id = 0
         self._course_students_workers: dict[int, AsyncQueryWorker] = {}
@@ -347,7 +336,9 @@ class DesktopBackend(QObject):
         self._initialized = False
         self._error_message = startup_error
         self._selected_student_id = ""
+        self._selected_student_record: dict[str, Any] | None = None
         self._selected_enrollment_id = ""
+        self._selected_enrollment_record: dict[str, Any] | None = None
         self._selected_course_id: int | None = None
         self._student_list_model = StudentListModel(
             self._student_page_rows,
@@ -472,10 +463,6 @@ class DesktopBackend(QObject):
             -1,
         )
 
-    @Property("QVariantList", notify=dataChanged)
-    def students(self):
-        return self._all_student_rows()
-
     @Property(QObject, constant=True)
     def studentListModel(self):
         return self._student_list_model
@@ -585,11 +572,6 @@ class DesktopBackend(QObject):
         self._workspace_info = info
         self.workspaceInfoChanged.emit()
 
-    def _all_student_rows(self) -> list[dict[str, Any]]:
-        if self._student_rows_cache is None:
-            self._student_rows_cache = student_rows(self.manifest)
-        return self._student_rows_cache
-
     def _student_page_rows(
         self,
         query: str,
@@ -670,36 +652,6 @@ class DesktopBackend(QObject):
             error=message,
         )
         self._set_error("No se pudo cargar la lista de matrículas desde la base local.")
-
-    def _matching_student_rows(self, query: str) -> list[dict[str, Any]]:
-        normalized_query = query.strip().casefold()
-        if normalized_query != self._student_filter_cache_query:
-            self._student_filter_cache_query = normalized_query
-            self._student_filter_cache_rows = filter_student_rows(
-                self._all_student_rows(),
-                normalized_query,
-            )
-        return self._student_filter_cache_rows
-
-    def _invalidate_student_rows(self) -> None:
-        self._student_rows_cache = None
-        self._student_filter_cache_query = None
-        self._student_filter_cache_rows = []
-        self._enrollment_rows_cache = None
-        self._course_rows_cache = None
-
-    @Slot(str, result=int)
-    def matchingStudentCount(self, query):
-        return len(self._matching_student_rows(query))
-
-    @Slot(str, int, int, result="QVariantList")
-    def studentPage(self, query, page, page_size):
-        if page < 0 or page_size < 1 or page_size > 100:
-            self._set_error("La página de estudiantes solicitada no es válida.")
-            return []
-        rows = self._matching_student_rows(query)
-        start = page * page_size
-        return rows[start : start + page_size]
 
     @Slot(str, result="QVariantList")
     @Slot(str, int, result="QVariantList")
@@ -871,21 +823,6 @@ class DesktopBackend(QObject):
             return
         self.courseSearchFinished.emit(request_id, courses, "")
 
-    @Property("QVariantList", notify=dataChanged)
-    def enrollments(self):
-        return self._all_enrollment_rows()
-
-    def _all_enrollment_rows(self) -> list[dict[str, Any]]:
-        if self._enrollment_rows_cache is None:
-            self._enrollment_rows_cache = enrollment_rows(self.manifest)
-        return self._enrollment_rows_cache
-
-    @Property("QVariantList", notify=dataChanged)
-    def courses(self):
-        if self._course_rows_cache is None:
-            self._course_rows_cache = course_rows(self.manifest)
-        return self._course_rows_cache
-
     @Property("QVariantMap", notify=dashboardSummaryChanged)
     def dashboardSummary(self):
         if self.store is not None and not self._dashboard_summary_requested:
@@ -1032,10 +969,6 @@ class DesktopBackend(QObject):
         self._course_students_cache = students
         self.selectionChanged.emit()
 
-    @Property("QVariantList", notify=dataChanged)
-    def studentOptions(self):
-        return [{"id": "", "label": "Sin estudiante"}] + self.students
-
     @Property(str, notify=selectionChanged)
     def enrollmentImageName(self):
         image_path = self.selectedEnrollment.get("record_image")
@@ -1043,42 +976,17 @@ class DesktopBackend(QObject):
 
     @Property("QVariantMap", notify=selectionChanged)
     def selectedStudent(self):
-        if not self.manifest:
+        student = self._selected_student_record
+        if student is None or student.get("id") != self._selected_student_id:
             return {}
-        return next(
-            (
-                item
-                for item in self.manifest["students"]
-                if item["id"] == self._selected_student_id
-            ),
-            {},
-        )
+        return student
 
     @Property("QVariantMap", notify=selectionChanged)
     def selectedEnrollment(self):
-        if not self.manifest:
+        enrollment = self._selected_enrollment_record
+        if enrollment is None or enrollment.get("id") != self._selected_enrollment_id:
             return {}
-        return next(
-            (
-                item
-                for item in self.manifest["enrollments"]
-                if item["id"] == self._selected_enrollment_id
-            ),
-            {},
-        )
-
-    @Property("QVariantMap", notify=selectionChanged)
-    def selectedCourse(self):
-        if not self.manifest:
-            return {}
-        return next(
-            (
-                item
-                for item in self.manifest["courses"]
-                if item["id"] == self._selected_course_id
-            ),
-            {},
-        )
+        return enrollment
 
     @Property(str, notify=errorChanged)
     def errorMessage(self):
@@ -1717,36 +1625,6 @@ class DesktopBackend(QObject):
             return False
         return row is not None
 
-    def _save(self, record_changes=None):
-        if self.store is None or self.manifest is None:
-            self._set_error("No hay una sede abierta para guardar los cambios.")
-            return False
-        succeeded, error = self._persist_manifest(
-            self.store, self.manifest, record_changes
-        )
-        if not succeeded:
-            self._set_error(f"No se pudieron guardar los cambios localmente: {error}")
-            return False
-        self._invalidate_student_rows()
-        self.dataChanged.emit()
-        return True
-
-    @staticmethod
-    def _mutation_for_record(
-        manifest: dict[str, Any], collection: str, record: dict[str, Any]
-    ) -> RecordMutation:
-        position = next(
-            (
-                index
-                for index, item in enumerate(manifest[collection])
-                if item is record
-            ),
-            None,
-        )
-        if position is None:
-            raise RuntimeError(f"El registro modificado ya no existe en {collection}.")
-        return RecordMutation(position, record)
-
     def _persist_manifest(
         self, store, manifest, record_changes=None, history_event=None
     ):
@@ -1819,6 +1697,33 @@ class DesktopBackend(QObject):
         ) as exc:
             logger.error(
                 "workspace.load_failed",
+                error_type=exc.__class__.__name__,
+            )
+            return False, None, str(exc) or exc.__class__.__name__
+        finally:
+            self._load_in_progress = False
+            self._activity_message = ""
+            self.activityStateChanged.emit()
+
+    def _load_workspace_info(self, store):
+        if self.isBusy:
+            return False, None, "Ya hay otra operación en curso."
+
+        self._load_in_progress = True
+        self._activity_message = "Cargando los datos de la sede..."
+        self.activityStateChanged.emit()
+        try:
+            return True, self._run_async(store.workspace_info()), ""
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            logger.error(
+                "workspace.metadata_load_failed",
                 error_type=exc.__class__.__name__,
             )
             return False, None, str(exc) or exc.__class__.__name__
@@ -2216,7 +2121,13 @@ class DesktopBackend(QObject):
                 / f"{store.path.stem}-{timestamp}-{backup_token}.sqlite3"
             )
             store.create_backup(backup_path)
-            run_async_operation(store.save_with_sync_history(incoming, event))
+            run_async_operation(
+                store.save_with_sync_history(
+                    incoming,
+                    event,
+                    expected_snapshot=snapshot,
+                )
+            )
             return {
                 "manifest": incoming,
                 "backup_path": str(backup_path),
@@ -2315,7 +2226,7 @@ class DesktopBackend(QObject):
             target_path = Path(self._local_path(path)).expanduser().resolve()
             if (
                 self.store is not None
-                and self.manifest is not None
+                and self._workspace_info is not None
                 and target_path == self.store.path
             ):
                 self._set_error("Cierra la sede activa antes de quitarla de la lista.")
@@ -2366,12 +2277,12 @@ class DesktopBackend(QObject):
         except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
             self._set_error(f"No se pudo abrir la sede seleccionada: {exc}")
             return False
-        loaded, manifest, error = self._load_manifest(target_store)
+        loaded, workspace_info, error = self._load_workspace_info(target_store)
         if not loaded:
             self._dispose_store(target_store)
             self._set_error(f"No se pudo abrir la sede seleccionada: {error}")
             return False
-        if manifest is None:
+        if workspace_info is None:
             self._dispose_store(target_store)
             self._set_error("La base seleccionada no contiene una sede de EduTrack.")
             return False
@@ -2389,9 +2300,10 @@ class DesktopBackend(QObject):
             return False
         return self._finish_database_change(
             target_store,
-            manifest,
-            f"Sede {manifest['campus_name']} abierta.",
+            None,
+            f"Sede {workspace_info['campus_name']} abierta.",
             register=False,
+            workspace_info=workspace_info,
         )
 
     @Slot(str, result=bool)
@@ -2420,12 +2332,12 @@ class DesktopBackend(QObject):
         ) as exc:
             self._set_error(f"No se pudo abrir la base seleccionada: {exc}")
             return False
-        loaded, manifest, error = self._load_manifest(target_store)
+        loaded, workspace_info, error = self._load_workspace_info(target_store)
         if not loaded:
             self._dispose_store(target_store)
             self._set_error(f"No se pudo abrir la base seleccionada: {error}")
             return False
-        if manifest is None:
+        if workspace_info is None:
             self._dispose_store(target_store)
             self._set_error("La base seleccionada no contiene una sede de EduTrack.")
             return False
@@ -2433,7 +2345,7 @@ class DesktopBackend(QObject):
             if self.catalog:
                 self.catalog.register(
                     target_path,
-                    manifest["campus_name"],
+                    workspace_info["campus_name"],
                     activate=True,
                 )
         except (
@@ -2448,9 +2360,10 @@ class DesktopBackend(QObject):
             return False
         return self._finish_database_change(
             target_store,
-            manifest,
-            f"Sede {manifest['campus_name']} abierta.",
+            None,
+            f"Sede {workspace_info['campus_name']} abierta.",
             register=False,
+            workspace_info=workspace_info,
         )
 
     @Slot(result=bool)
@@ -2460,7 +2373,6 @@ class DesktopBackend(QObject):
             return False
         self._request_workspace_info()
         self._request_dashboard_summary()
-        self._invalidate_student_rows()
         self._refresh_list_models()
         self.workspaceInfoChanged.emit()
         self.selectionChanged.emit()
@@ -2483,9 +2395,10 @@ class DesktopBackend(QObject):
         self.manifest = None
         self._workspace_info = None
         self._workspace_info_request_id += 1
-        self._invalidate_student_rows()
         self._selected_student_id = ""
+        self._selected_student_record = None
         self._selected_enrollment_id = ""
+        self._selected_enrollment_record = None
         self._selected_course_id = None
         self._dispose_store(previous_store)
         self.dataChanged.emit()
@@ -2498,26 +2411,37 @@ class DesktopBackend(QObject):
         )
         return True
 
-    def _finish_database_change(self, store, manifest, message, register=True):
+    def _finish_database_change(
+        self,
+        store,
+        manifest,
+        message,
+        register=True,
+        workspace_info=None,
+    ):
+        if workspace_info is None:
+            if manifest is None:
+                raise ValueError("Se requiere información de la sede.")
+            workspace_info = self._workspace_info_from_manifest(manifest)
         catalog_error = ""
         if self.catalog and register:
             try:
                 self.catalog.register(
                     store.path,
-                    manifest["campus_name"],
+                    workspace_info["campus_name"],
                     activate=True,
                 )
             except CampusCatalogError as exc:
                 catalog_error = str(exc)
         previous_store = self.store
         self.store = store
-        self.manifest = manifest
-        self._workspace_info = self._workspace_info_from_manifest(manifest)
-        self._invalidate_student_rows()
+        self.manifest = None
+        self._workspace_info = workspace_info
         self._selected_student_id = ""
+        self._selected_student_record = None
         self._selected_enrollment_id = ""
-        courses = manifest.get("courses", [])
-        self._selected_course_id = courses[0]["id"] if courses else None
+        self._selected_enrollment_record = None
+        self._selected_course_id = workspace_info.get("first_course_id")
         if previous_store is not None and previous_store is not store:
             self._dispose_store(previous_store)
         self.dataChanged.emit()
@@ -2539,9 +2463,10 @@ class DesktopBackend(QObject):
         self.store = store
         self.manifest = None
         self._workspace_info = workspace_info
-        self._invalidate_student_rows()
         self._selected_student_id = ""
+        self._selected_student_record = None
         self._selected_enrollment_id = ""
+        self._selected_enrollment_record = None
         self._selected_course_id = workspace_info.get("first_course_id")
         if previous_store is not None and previous_store is not store:
             self._dispose_store(previous_store)
@@ -2654,23 +2579,9 @@ class DesktopBackend(QObject):
             "Exportando registro de cursos...",
         )
 
-    def _sync_course_projection(self, course: dict[str, Any]) -> None:
+    def _finish_course_write(self, course: dict[str, Any]) -> None:
         course_id = int(course["id"])
-        if self.manifest is not None:
-            existing_course = next(
-                (
-                    item
-                    for item in self.manifest["courses"]
-                    if item["id"] == course_id
-                ),
-                None,
-            )
-            if existing_course is None:
-                self.manifest["courses"].append(course)
-            else:
-                existing_course.update(course)
         self._selected_course_id = course_id
-        self._invalidate_student_rows()
         self.dataChanged.emit()
         self.selectionChanged.emit()
 
@@ -2725,7 +2636,7 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudo guardar el curso localmente: {exc}")
             return 0
-        self._sync_course_projection(course)
+        self._finish_course_write(course)
         self._set_error("Curso guardado localmente.")
         return int(course["id"])
 
@@ -2784,7 +2695,7 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudieron guardar los cambios localmente: {exc}")
             return False
-        self._sync_course_projection(course)
+        self._finish_course_write(course)
         self._set_error("Curso actualizado correctamente en este dispositivo.")
         return True
 
@@ -2871,7 +2782,7 @@ class DesktopBackend(QObject):
         course_id = self._pending_course_save_id
         self._pending_course_save_id = None
         if succeeded and isinstance(course, dict) and course_id is not None:
-            self._sync_course_projection(course)
+            self._finish_course_write(course)
             self._backup_items = []
             self.backupDirectoryChanged.emit()
             self.backupStateChanged.emit()
@@ -2924,16 +2835,21 @@ class DesktopBackend(QObject):
 
     @Slot(str)
     def selectStudent(self, source_id):
+        if self._selected_student_id != source_id:
+            self._selected_student_record = None
         self._selected_student_id = source_id
         self.selectionChanged.emit()
 
     @Slot()
     def newStudent(self):
         self._selected_student_id = ""
+        self._selected_student_record = None
         self.selectionChanged.emit()
 
     @Slot(str)
     def selectEnrollment(self, source_id):
+        if self._selected_enrollment_id != source_id:
+            self._selected_enrollment_record = None
         self._selected_enrollment_id = source_id
         self.selectionChanged.emit()
 
@@ -2947,6 +2863,7 @@ class DesktopBackend(QObject):
     @Slot()
     def newEnrollment(self):
         self._selected_enrollment_id = ""
+        self._selected_enrollment_record = None
         self.selectionChanged.emit()
 
     def _save_enrollment_image(
@@ -3001,17 +2918,12 @@ class DesktopBackend(QObject):
         if (
             not isinstance(result, dict)
             or not isinstance(result.get("record"), dict)
-            or not isinstance(result.get("attachments_changed"), bool)
-            or (
-                result["attachments_changed"]
-                and not isinstance(result.get("attachment_data"), dict)
-            )
         ):
             self._set_error(
                 "La actualización de la imagen de ficha devolvió datos no válidos."
             )
             return
-        self._sync_enrollment_projection(result)
+        self._finish_enrollment_write(result["record"])
         self._set_error(success_message)
 
     @Slot(str)
@@ -3058,49 +2970,21 @@ class DesktopBackend(QObject):
                 "La matrícula seleccionada no tiene imagen de ficha.",
         )
 
-    def _sync_student_projection(
+    def _finish_student_write(
         self, student: dict[str, Any], *, select_student: bool = False
     ) -> None:
         student_id = str(student["id"])
-        if self.manifest is not None:
-            existing_student = next(
-                (
-                    item
-                    for item in self.manifest["students"]
-                    if item["id"] == student_id
-                ),
-                None,
-            )
-            if existing_student is None:
-                self.manifest["students"].append(student)
-            else:
-                existing_student.update(student)
         if select_student:
             self._selected_student_id = student_id
-        self._invalidate_student_rows()
+        if self._selected_student_id == student_id:
+            self._selected_student_record = student
         self.dataChanged.emit()
         self.selectionChanged.emit()
 
-    def _sync_enrollment_projection(self, result: dict[str, Any]) -> None:
-        enrollment = result["record"]
+    def _finish_enrollment_write(self, enrollment: dict[str, Any]) -> None:
         enrollment_id = str(enrollment["id"])
-        if self.manifest is not None:
-            existing_enrollment = next(
-                (
-                    item
-                    for item in self.manifest["enrollments"]
-                    if item["id"] == enrollment["id"]
-                ),
-                None,
-            )
-            if existing_enrollment is None:
-                self.manifest["enrollments"].append(enrollment)
-            else:
-                existing_enrollment.update(enrollment)
-            if result["attachments_changed"]:
-                self.manifest["_attachment_data"] = result["attachment_data"]
         self._selected_enrollment_id = enrollment_id
-        self._invalidate_student_rows()
+        self._selected_enrollment_record = enrollment
         self.dataChanged.emit()
         self.selectionChanged.emit()
 
@@ -3144,7 +3028,7 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudo guardar el estudiante localmente: {exc}")
             return False
-        self._sync_student_projection(student, select_student=True)
+        self._finish_student_write(student, select_student=True)
         self._set_error("Estudiante guardado en este dispositivo.")
         return True
 
@@ -3183,7 +3067,7 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudo actualizar el estado del estudiante: {exc}")
             return False
-        self._sync_student_projection(student)
+        self._finish_student_write(student)
         state = "activado" if active else "desactivado"
         self._set_error(f"Estudiante {state} correctamente en este dispositivo.")
         return True
@@ -3223,9 +3107,11 @@ class DesktopBackend(QObject):
             )
             return failure
 
+        if self._selected_student_id != result.student_id:
+            self._selected_student_record = None
         self._selected_student_id = result.student_id
         self._selected_enrollment_id = result.enrollment_id
-        self._invalidate_student_rows()
+        self._selected_enrollment_record = None
         self.dataChanged.emit()
         self.selectionChanged.emit()
         self._set_error("Matrícula guardada en este dispositivo.")
@@ -3278,17 +3164,12 @@ class DesktopBackend(QObject):
         if (
             not isinstance(result, dict)
             or not isinstance(result.get("record"), dict)
-            or not isinstance(result.get("attachments_changed"), bool)
-            or (
-                result["attachments_changed"]
-                and not isinstance(result.get("attachment_data"), dict)
-            )
         ):
             self._set_error(
                 "La actualización de la matrícula devolvió datos no válidos."
             )
             return False
-        self._sync_enrollment_projection(result)
+        self._finish_enrollment_write(result["record"])
         self._set_error("Matrícula guardada en este dispositivo.")
         return True
 

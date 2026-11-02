@@ -175,6 +175,9 @@ class RecordServicePort(Protocol):
         enrollment_fee: str,
         monthly_fee: str,
         capacity: str,
+        *,
+        course_id: int | None = None,
+        position: int | None = None,
     ) -> RecordMutation: ...
 
     def update_course(
@@ -192,7 +195,12 @@ class RecordServicePort(Protocol):
     ) -> RecordMutation: ...
 
     def create_promoter(
-        self, manifest: dict[str, Any], name: str
+        self,
+        manifest: dict[str, Any],
+        name: str,
+        *,
+        promoter_id: int | None = None,
+        position: int | None = None,
     ) -> RecordMutation: ...
 
     def save_student(

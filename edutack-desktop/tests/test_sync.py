@@ -359,10 +359,9 @@ def test_backend_async_package_export_reads_sql_without_a_manifest(tmp_path):
     )
     backend.createWorkspace("Sede inicial", "")
     backend.saveStudent("", "Pérez", "Ana", "", "987654321")
-    assert backend.manifest is not None
-    expected_bundle_id = backend.manifest["bundle_id"]
     assert backend.store is not None
-    backend.manifest = None
+    assert backend.manifest is None
+    expected_bundle_id = asyncio.run(backend.store.workspace_info())["bundle_id"]
     package_path = tmp_path / "exported.edutrack"
 
     succeeded, message = _await_signal(
@@ -444,6 +443,43 @@ def test_backend_previews_then_atomically_imports_with_backup_and_history(
     assert history[0]["bundle_id"] == incoming["bundle_id"]
 
 
+def test_backend_blocks_import_confirmation_when_preview_has_conflicts(
+    manifest, tmp_path
+):
+    local = deepcopy(manifest)
+    _set_base_hashes(local)
+    local["students"][0]["first_name"] = "ANA LOCAL"
+    database_path = tmp_path / "workspace.sqlite3"
+    store = LocalStore(database_path)
+    asyncio.run(store.save(local))
+
+    incoming = deepcopy(manifest)
+    incoming["bundle_id"] = str(uuid.uuid4())
+    incoming["students"][0]["first_name"] = "ANA WEB"
+    package_path = tmp_path / "conflicting.edutrack"
+    write_package(package_path, incoming)
+    backend = DesktopBackend(
+        database_path,
+        catalog_path=tmp_path / "campuses.json",
+    )
+
+    succeeded, preview, error = _await_signal(
+        backend.syncPreviewFinished,
+        lambda: backend.preparePackageImport(str(package_path)),
+    )
+    assert succeeded is True
+    assert error == ""
+    assert preview is not None
+    assert preview["conflicts"] == 1
+    assert preview["can_import"] is False
+
+    assert backend.confirmPackageImport() is False
+    assert "Resuelve los conflictos" in backend.errorMessage
+    assert asyncio.run(store.load()) == local
+    assert asyncio.run(store.list_sync_history()) == []
+    assert not (database_path.parent / "backups").exists()
+
+
 def test_import_confirmation_rejects_sqlite_changes_after_preview(
     manifest, tmp_path
 ):
@@ -481,6 +517,60 @@ def test_import_confirmation_rejects_sqlite_changes_after_preview(
     assert succeeded is False
     assert "La sede cambió después de la vista previa" in error
     assert asyncio.run(store.load()) == changed
+
+
+def test_import_confirmation_detects_write_between_precheck_and_save(
+    manifest, tmp_path, monkeypatch
+):
+    database_path = tmp_path / "workspace.sqlite3"
+    asyncio.run(LocalStore(database_path).save(manifest))
+    backend = DesktopBackend(
+        database_path,
+        catalog_path=tmp_path / "campuses.json",
+    )
+    incoming = deepcopy(manifest)
+    incoming["bundle_id"] = str(uuid.uuid4())
+    package_path = tmp_path / "updated.edutrack"
+    write_package(package_path, incoming)
+
+    succeeded, preview, error = _await_signal(
+        backend.syncPreviewFinished,
+        lambda: backend.preparePackageImport(str(package_path)),
+    )
+    assert succeeded is True
+    assert preview is not None
+    assert preview["can_import"] is True
+    assert error == ""
+    assert backend.store is not None
+
+    store = backend.store
+    save_with_sync_history = store.save_with_sync_history
+    changed = deepcopy(manifest)
+    changed["campus_address"] = "Cambio concurrente"
+
+    async def write_before_atomic_save(
+        import_manifest, history_event, *, expected_snapshot
+    ):
+        await store.save(changed)
+        await save_with_sync_history(
+            import_manifest,
+            history_event,
+            expected_snapshot=expected_snapshot,
+        )
+
+    monkeypatch.setattr(store, "save_with_sync_history", write_before_atomic_save)
+    succeeded, _result, error = _await_signal(
+        backend.syncImportFinished,
+        backend.confirmPackageImport,
+    )
+
+    assert succeeded is False
+    assert "La sede cambió después de la vista previa" in error
+    assert asyncio.run(store.load()) == changed
+    history = asyncio.run(store.list_sync_history())
+    assert len(history) == 1
+    assert history[0]["status"] == "failed"
+    assert history[0]["bundle_id"] == incoming["bundle_id"]
 
 
 def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path):

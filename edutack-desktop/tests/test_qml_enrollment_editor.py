@@ -115,6 +115,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
         "25",
         False,
     )
+    backend.manifest = None
     selected_student_id = ""
     for index in range(21):
         backend.saveStudent(
@@ -125,7 +126,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
             f"{912345600 + index}",
         )
         if index == 0:
-            selected_student_id = backend.manifest["students"][-1]["id"]
+            selected_student_id = backend.selectedStudent["id"]
 
     backend.saveEnrollment(
         "",
@@ -169,7 +170,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
     gui_application.processEvents()
 
     try:
-        assert backend._student_rows_cache is None
+        assert backend.manifest is None
         _wait_for_enrollment_list(backend, gui_application)
 
         try:
@@ -196,7 +197,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
         editor = _wait_for_item(root, "enrollmentEditorPage", gui_application)
         assert root.property("currentView") == "editor"
         assert editor is not None
-        assert backend._student_rows_cache is None
+        assert backend.manifest is None
         enrollment_fee = _item(editor, "editEnrollmentFee")
         monthly_fee = _item(editor, "editEnrollmentMonthlyFee")
         assert enrollment_fee.property("text") == "100.00"
@@ -247,7 +248,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
         assert any(
             str(option["id"]) == str(selected_student_id) for option in student_options
         )
-        assert backend._student_rows_cache is None
+        assert backend.manifest is None
 
         search = _item(editor, "editEnrollmentStudentSearch")
         search.setProperty("text", "NOMBRE20")
@@ -258,7 +259,7 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
             student["label"]
             for student in _variant(editor.property("studentSearchResults"))
         ] == ["PEREZ NOMBRE20"]
-        assert backend._student_rows_cache is None
+        assert backend.manifest is None
 
         enrollment_fee.setProperty("text", "123.00")
         assert editor.property("hasUnsavedChanges") is True

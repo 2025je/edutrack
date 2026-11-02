@@ -1,7 +1,6 @@
 import asyncio
 import sqlite3
 import uuid
-from copy import deepcopy
 
 import pytest
 from PySide6.QtCore import QCoreApplication
@@ -214,7 +213,7 @@ def test_backend_create_enrollment_persists_atomically(tmp_path):
         "80.00",
         "20",
     )
-    manifest_before_save = deepcopy(backend.manifest)
+    assert backend.manifest is None
 
     result = backend.createEnrollment(
         {
@@ -236,7 +235,7 @@ def test_backend_create_enrollment_persists_atomically(tmp_path):
 
     assert result["ok"] is True
     assert result["student_created"] is True
-    assert backend.manifest == manifest_before_save
+    assert backend.manifest is None
     assert backend.errorMessage == "Matrícula guardada en este dispositivo."
 
     # Los datos operativos se recuperan desde SQLite.
@@ -281,8 +280,9 @@ def test_backend_create_enrollment_failure_leaves_no_partial_student(tmp_path):
     )
 
     assert result["ok"] is False
-    assert backend.manifest["students"] == []
-    assert backend.manifest["enrollments"] == []
+    workspace_info = asyncio.run(backend.store.workspace_info())
+    assert workspace_info["students"] == 0
+    assert workspace_info["enrollments"] == 0
     assert backend.errorMessage
 
 

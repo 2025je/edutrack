@@ -1,6 +1,5 @@
 import asyncio
 import json
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -172,7 +171,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     _click(view, option)
     selected_student = root.property("selectedStudent")
     assert selected_student is not None, option_state
-    assert selected_student["id"] == backend.students[0]["id"]
+    assert selected_student["id"] == results[0]["id"]
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
     assert root.property("currentStep") == 2
@@ -233,7 +232,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
         "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
 
-    manifest_before_save = deepcopy(backend.manifest)
+    assert backend.manifest is None
     QTest.keyClick(
         view,
         Qt.Key.Key_S,
@@ -243,7 +242,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     gui_application.processEvents()
 
     assert root.property("currentStep") == 4
-    assert backend.manifest == manifest_before_save
+    assert backend.manifest is None
     assert root.property("savedResult").toVariant()["student"] == "PEREZ ANA"
     persisted = asyncio.run(backend.store.load())
     assert len(persisted["enrollments"]) == 1
@@ -539,7 +538,10 @@ def test_main_restores_and_persists_selected_workspace_section(
             "page_width": courses_page.width(),
         }
         loaded_manifest = backend.manifest
-        courses_page.setProperty("selectedCourse", backend.courses[0])
+        courses_page.setProperty(
+            "selectedCourse",
+            backend.courseListModel.rowAt(0)["courses"][0],
+        )
         backend.manifest = None
         backend.selectCourse(course_id)
         courses_page.setProperty("currentView", "details")

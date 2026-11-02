@@ -33,7 +33,7 @@ def _click(view, item):
 def test_course_fees_use_two_decimal_spinboxes(tmp_path, gui_application):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede de prueba", "")
-    backend.createCourse(
+    course_id = backend.createCourse(
         "English",
         "Morning",
         "1",
@@ -42,6 +42,8 @@ def test_course_fees_use_two_decimal_spinboxes(tmp_path, gui_application):
         "80.00",
         "20",
     )
+    courses, _, _ = asyncio.run(backend.store.course_page("", 0, 50))
+    course = next(course for course in courses if course["id"] == course_id)
 
     qml_directory = (
         Path(__file__).parents[1]
@@ -67,7 +69,7 @@ def test_course_fees_use_two_decimal_spinboxes(tmp_path, gui_application):
     root = page_component.createWithInitialProperties(
         {
             "backendObject": backend,
-            "course": backend.courses[0],
+            "course": course,
             "theme": theme,
         }
     )
