@@ -270,8 +270,16 @@ def test_qml_wizard_searches_sqlite_without_a_loaded_manifest(
     results = _variant(root.property("searchResults"))
     assert len(results) == 1
     assert results[0]["label"] == "PEREZ ANA"
-    _click(_view, _find_visual_item(_view, "enrollmentStudentOption"))
+    student_option = _wait_for_visual_item(
+        _view,
+        "enrollmentStudentOption",
+        gui_application,
+    )
+    _click(_view, student_option)
+    selected_student = _variant(root.property("selectedStudent"))
+    assert selected_student["id"] == results[0]["id"]
     _click(_view, _item(root, "enrollmentContinueToCourseButton"))
+    assert root.property("currentStep") == 2
     _wait_for_search(root, "activeCourseSearchPending", gui_application)
     course_search = _item(root, "newEnrollmentCourseSearch")
     course_search.setProperty("text", "english")

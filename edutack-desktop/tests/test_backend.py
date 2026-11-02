@@ -8,6 +8,7 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QCoreApplication,
     QEventLoop,
+    QThreadPool,
     QTimer,
     QUrl,
 )
@@ -25,6 +26,18 @@ from edutrack_desktop.presentation.list_models import (
 @pytest.fixture(scope="module", autouse=True)
 def qcore_application():
     return QCoreApplication.instance() or QCoreApplication([])
+
+
+@pytest.fixture(autouse=True)
+def drain_backend_workers(qcore_application):
+    yield
+    pool = QThreadPool.globalInstance()
+    for _ in range(3):
+        assert pool.waitForDone(5_000), "Qt database workers did not finish."
+        qcore_application.processEvents()
+        if pool.activeThreadCount() == 0:
+            return
+    raise AssertionError("Qt database workers kept starting after test completion.")
 
 
 def _wait_for_model(model):
