@@ -24,6 +24,9 @@ Rectangle {
     property var duplicateCandidates: []
     property int duplicateSearchRequestId: 0
     property bool duplicateSearchPending: false
+    property var activeCourseSearchResults: []
+    property int activeCourseSearchRequestId: 0
+    property bool activeCourseSearchPending: false
     property var savedResult: null
     readonly property bool hasUnsavedChanges: {
         return root.currentStep === 2 || root.currentStep === 3
@@ -35,12 +38,7 @@ Rectangle {
                         || phonesField.text.trim().length > 0))
     }
 
-    readonly property var activeCourses: {
-        var courses = root.backendObject ? root.backendObject.courses : []
-        return courses.filter(function(course) {
-            return course.active
-        })
-    }
+    readonly property var activeCourses: root.activeCourseSearchResults
     readonly property string stepTitle: {
         if (root.currentStep === 1)
             return "Paso 1 de 2 · Estudiante"
@@ -84,8 +82,12 @@ Rectangle {
         root.duplicateSearchRequestId = 0
         root.duplicateSearchPending = false
         root.duplicateCandidates = []
+        root.activeCourseSearchResults = []
+        root.activeCourseSearchRequestId = 0
+        root.activeCourseSearchPending = false
         root.savedResult = null
         studentSearchField.clear()
+        courseSearchField.clear()
         lastNameField.clear()
         firstNameField.clear()
         documentField.clear()
@@ -127,6 +129,15 @@ Rectangle {
             query, 5)
     }
 
+    function refreshActiveCourseSearch() {
+        if (!root.backendObject)
+            return
+        root.activeCourseSearchPending = true
+        root.activeCourseSearchRequestId =
+                root.backendObject.searchCourseOptionsAsync(
+                    courseSearchField.text.trim(), false, 50)
+    }
+
     function studentLabel(student) {
         return [student.last_name, student.first_name].filter(function(part) {
             return part
@@ -166,9 +177,11 @@ Rectangle {
         }
         if (!root.stepTwoInitialized) {
             enrollmentDateField.value = root.todayDate()
-            courseField.currentIndex = root.activeCourses.length > 0 ? 0 : -1
+            root.activeCourseSearchResults = []
+            courseField.currentIndex = -1
             root.updateCourseFees()
             root.stepTwoInitialized = true
+            root.refreshActiveCourseSearch()
         }
         root.currentStep = 2
     }
@@ -260,6 +273,13 @@ Rectangle {
         onTriggered: root.refreshDuplicates()
     }
 
+    Timer {
+        id: activeCourseSearchDebounce
+        interval: 250
+        repeat: false
+        onTriggered: root.refreshActiveCourseSearch()
+    }
+
     Connections {
         target: root.backendObject
         function onDataChanged() {
@@ -286,6 +306,19 @@ Rectangle {
                     root.duplicateCandidates = rows
                 }
             }
+        }
+        function onCourseSearchFinished(requestId, courses, error) {
+            if (requestId !== root.activeCourseSearchRequestId)
+                return
+            root.activeCourseSearchPending = false
+            if (error.length > 0) {
+                root.activeCourseSearchResults = []
+                root.errorText = error
+                return
+            }
+            root.activeCourseSearchResults = courses
+            courseField.currentIndex = courses.length > 0 ? 0 : -1
+            root.updateCourseFees()
         }
     }
 
@@ -682,6 +715,22 @@ Rectangle {
                         color: root.theme.secondaryText
                         font.family: "Roboto"
                     }
+                    TextField {
+                        id: courseSearchField
+                        objectName: "newEnrollmentCourseSearch"
+                        Layout.fillWidth: true
+                        placeholderText: "Buscar por nombre, horario, grupo o fecha..."
+                        onTextChanged: {
+                            root.errorText = ""
+                            root.activeCourseSearchResults = []
+                            courseField.currentIndex = -1
+                            root.updateCourseFees()
+                            if (root.currentStep === 2) {
+                                root.activeCourseSearchPending = true
+                                activeCourseSearchDebounce.restart()
+                            }
+                        }
+                    }
                     ComboBox {
                         id: courseField
                         objectName: "newEnrollmentCourse"
@@ -745,8 +794,19 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                visible: root.activeCourses.length === 0
-                text: "No hay cursos activos disponibles para matricular."
+                visible: root.activeCourseSearchPending
+                text: "Cargando cursos activos..."
+                color: root.theme.secondaryText
+                font.family: "Roboto"
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: !root.activeCourseSearchPending
+                         && root.activeCourses.length === 0
+                text: courseSearchField.text.trim().length > 0
+                      ? "No se encontraron cursos activos."
+                      : "No hay cursos activos disponibles para matricular."
                 color: root.theme.error
                 font.family: "Roboto"
                 wrapMode: Text.Wrap
@@ -787,6 +847,7 @@ Rectangle {
                     text: "Revisar y confirmar"
                     highlighted: true
                     enabled: root.activeCourses.length > 0
+                             && !root.activeCourseSearchPending
                              && !root.backendObject.isBusy
                     onClicked: root.continueToSummary()
                 }

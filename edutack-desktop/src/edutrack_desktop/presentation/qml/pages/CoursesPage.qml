@@ -479,6 +479,14 @@ Rectangle {
         }
     }
 
+    Connections {
+        target: root.backendObject
+        function onSelectionChanged() {
+            if (root.currentView === "details" && root.courseDetailsItem)
+                root.courseDetailsItem.students = root.backendObject.courseStudents
+        }
+    }
+
     Loader {
         id: courseEditorLoader
         objectName: "courseEditorLoader"

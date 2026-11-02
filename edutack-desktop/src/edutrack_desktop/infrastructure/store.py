@@ -284,6 +284,55 @@ class LocalStore:
         await self.initialize()
         return await self._load()
 
+    async def workspace_info(self) -> dict[str, Any] | None:
+        await self.initialize()
+        statement = select(
+            Workspace.format.label("format"),
+            Workspace.version.label("version"),
+            Workspace.bundle_id.label("bundle_id"),
+            Workspace.campus_id.label("campus_id"),
+            Workspace.campus_name.label("campus_name"),
+            Workspace.campus_address.label("campus_address"),
+            (
+                select(func.count())
+                .select_from(StudentRecord)
+                .scalar_subquery()
+                .label("students")
+            ),
+            (
+                select(func.count())
+                .select_from(EnrollmentRecord)
+                .scalar_subquery()
+                .label("enrollments")
+            ),
+            (
+                select(func.count())
+                .select_from(CourseRecord)
+                .scalar_subquery()
+                .label("courses")
+            ),
+            (
+                select(func.count())
+                .select_from(PromoterRecord)
+                .scalar_subquery()
+                .label("promoters")
+            ),
+            (
+                select(CourseRecord.id)
+                .order_by(CourseRecord.position)
+                .limit(1)
+                .scalar_subquery()
+                .label("first_course_id")
+            ),
+        ).where(Workspace.id == 1)
+        async with self.session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+            if row is None:
+                return None
+            info = dict(row)
+            info["campus_mode"] = "new" if info["version"] == 3 else "existing"
+            return info
+
     async def register_export_data(self) -> dict[str, Any] | None:
         await self.initialize()
         async with self.session_factory() as session:
@@ -457,6 +506,41 @@ class LocalStore:
                 CourseRecord(
                     **_course_values(
                         mutation.record, workspace.id, mutation.position
+                    )
+                )
+            )
+            return dict(mutation.record)
+
+    async def create_promoter(
+        self,
+        name: str,
+        record_service: RecordServicePort,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+            promoter_records = (
+                await session.scalars(
+                    select(PromoterRecord).order_by(PromoterRecord.position)
+                )
+            ).all()
+            context = {
+                "campus_mode": "new" if workspace.version == 3 else "existing",
+                "promoters": [
+                    {"id": promoter.id, "name": promoter.name, "active": promoter.active}
+                    for promoter in promoter_records
+                ],
+            }
+            mutation = record_service.create_promoter(context, name)
+            session.add(
+                PromoterRecord(
+                    **_promoter_values(
+                        mutation.record,
+                        workspace.id,
+                        mutation.position,
+                        workspace.version,
                     )
                 )
             )
@@ -738,6 +822,90 @@ class LocalStore:
                 ),
             }
 
+    async def update_enrollment_image(
+        self,
+        enrollment_id: str,
+        attachment_path: str | None,
+        image_hash: str | None,
+        encoded_content: str | None,
+    ) -> dict[str, Any]:
+        await self.initialize()
+        if not enrollment_id:
+            raise ValueError("Selecciona una matrícula válida.")
+        if attachment_path is None:
+            if image_hash is not None or encoded_content is not None:
+                raise ValueError("Los datos de la imagen de ficha no son válidos.")
+        elif (
+            image_hash is None
+            or len(image_hash) != 64
+            or any(character not in "0123456789abcdef" for character in image_hash)
+            or attachment_path != f"attachments/{image_hash}.jpg"
+            or not encoded_content
+        ):
+            raise ValueError("Los datos de la imagen de ficha no son válidos.")
+
+        async with self.session_factory.begin() as session:
+            workspace = await session.get(Workspace, 1)
+            enrollment = await session.get(EnrollmentRecord, enrollment_id)
+            if workspace is None:
+                raise RuntimeError("No hay un espacio de trabajo inicializado.")
+            if enrollment is None:
+                raise ValueError("La matrícula seleccionada ya no existe.")
+            if workspace.attachment_data is not None and not isinstance(
+                workspace.attachment_data, dict
+            ):
+                raise RuntimeError("Los adjuntos guardados no tienen un formato válido.")
+
+            attachment_data = dict(workspace.attachment_data or {})
+            attachments_changed = False
+            if attachment_path is None:
+                if not enrollment.record_image:
+                    raise ValueError(
+                        "La matrícula seleccionada no tiene imagen de ficha."
+                    )
+                enrollment.record_image = None
+                enrollment.record_image_hash = ""
+                referenced_paths = set(
+                    (
+                        await session.scalars(
+                            select(EnrollmentRecord.record_image).where(
+                                EnrollmentRecord.id != enrollment_id,
+                                EnrollmentRecord.record_image.is_not(None),
+                            )
+                        )
+                    ).all()
+                )
+                updated_attachment_data = {
+                    path: content
+                    for path, content in attachment_data.items()
+                    if path in referenced_paths
+                }
+                if updated_attachment_data != workspace.attachment_data:
+                    workspace.attachment_data = updated_attachment_data
+                    attachment_data = updated_attachment_data
+                    attachments_changed = True
+            else:
+                if not enrollment.record_code:
+                    raise ValueError(
+                        "Ingresa y guarda el código de ficha antes de adjuntar una imagen."
+                    )
+                if image_hash is None or not encoded_content:
+                    raise ValueError("Los datos de la imagen de ficha no son válidos.")
+                attachment_data[attachment_path] = encoded_content
+                if attachment_data != workspace.attachment_data:
+                    workspace.attachment_data = attachment_data
+                    attachments_changed = True
+                enrollment.record_image = attachment_path
+                enrollment.record_image_hash = image_hash
+
+            return {
+                "record": _enrollment_context_item(enrollment),
+                "attachments_changed": attachments_changed,
+                "attachment_data": (
+                    attachment_data if attachments_changed else None
+                ),
+            }
+
     async def search_students(self, query: str, limit: int = 20):
         await self.initialize()
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
@@ -779,6 +947,58 @@ class LocalStore:
                 session, [student.id for student in students]
             )
             return [self._student_row(student, active_courses) for student in students]
+
+    async def search_course_options(
+        self,
+        query: str,
+        include_inactive: bool = False,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        await self.initialize()
+        if not isinstance(include_inactive, bool):
+            raise ValueError("El filtro de cursos inactivos no es válido.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            limit = 50
+        limit = min(limit, 100)
+        conditions: list[ColumnElement[bool]] = []
+        if not include_inactive:
+            conditions.append(CourseRecord.active.is_(True))
+        for token in normalize_search_text(query).split():
+            escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            conditions.append(
+                or_(
+                    CourseRecord.search_text.like(pattern, escape="\\"),
+                    CourseRecord.start_date.like(pattern, escape="\\"),
+                )
+            )
+        statement = (
+            select(
+                CourseRecord.id.label("id"),
+                CourseRecord.name.label("name"),
+                CourseRecord.schedule.label("schedule"),
+                CourseRecord.group_name.label("group"),
+                CourseRecord.start_date.label("start_date"),
+                CourseRecord.enrollment_fee.label("enrollment_fee"),
+                CourseRecord.monthly_fee.label("monthly_fee"),
+                CourseRecord.capacity.label("capacity"),
+                CourseRecord.active.label("active"),
+            )
+            .where(*conditions)
+            .order_by(CourseRecord.start_date.desc(), CourseRecord.position.desc())
+            .limit(limit)
+        )
+        async with self.session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+            return [
+                {
+                    **dict(row),
+                    "label": (
+                        f"{row['name']} · {row['schedule']} · Grupo {row['group']}"
+                    ),
+                }
+                for row in rows
+            ]
 
     async def dashboard_summary(
         self, today: str | None = None
@@ -1235,6 +1455,45 @@ class LocalStore:
                 int(matching_count or 0),
             )
 
+    async def course_students(self, course_id: int) -> list[dict[str, Any]]:
+        await self.initialize()
+        if isinstance(course_id, bool) or not isinstance(course_id, int) or course_id < 1:
+            raise ValueError("Selecciona un curso válido.")
+        statement = (
+            select(StudentRecord)
+            .join(
+                EnrollmentRecord,
+                EnrollmentRecord.student_id == StudentRecord.id,
+            )
+            .where(
+                EnrollmentRecord.course_id == course_id,
+                EnrollmentRecord.active.is_(True),
+                StudentRecord.active.is_(True),
+            )
+            .distinct()
+            .order_by(StudentRecord.position.desc())
+        )
+        async with self.session_factory() as session:
+            students = (await session.scalars(statement)).all()
+            return [
+                {
+                    "id": student.id,
+                    "server_id": student.server_id,
+                    "base_hash": student.base_hash,
+                    "last_name": student.last_name,
+                    "first_name": student.first_name,
+                    "document_number": student.document_number,
+                    "phone_numbers": student.phone_numbers,
+                    "active": student.active,
+                    "label": " ".join(
+                        part
+                        for part in (student.last_name, student.first_name)
+                        if part
+                    ),
+                }
+                for student in students
+            ]
+
     async def enrollment_page(
         self,
         query: str,
@@ -1309,6 +1568,7 @@ class LocalStore:
                 CourseRecord.name.label("course_name"),
                 CourseRecord.schedule.label("course_schedule"),
                 CourseRecord.group_name.label("course_group"),
+                CourseRecord.active.label("course_active"),
             )
             .select_from(EnrollmentRecord)
             .outerjoin(
@@ -1355,6 +1615,7 @@ class LocalStore:
                 course_name,
                 course_schedule,
                 course_group,
+                course_active,
             ) in result:
                 student_label = (
                     " ".join(part for part in (last_name, first_name) if part)
@@ -1389,6 +1650,7 @@ class LocalStore:
                         "pending_student": last_name is None,
                         "pending_course": pending_course,
                         "student_active": bool(student_active),
+                        "course_active": bool(course_active),
                         "label": f"{student_label} — {course_label}",
                     }
                 )

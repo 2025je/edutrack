@@ -134,6 +134,35 @@ def test_local_store_persists_workspace(manifest, tmp_path):
     asyncio.run(verify_store())
 
 
+def test_local_store_workspace_info_does_not_load_manifest(
+    manifest, tmp_path, monkeypatch
+):
+    store = LocalStore(tmp_path / "workspace-info.sqlite3")
+
+    async def verify_info():
+        assert await store.workspace_info() is None
+        await store.save(manifest)
+
+        async def fail_if_loaded():
+            raise AssertionError("Workspace metadata must not load record tables.")
+
+        monkeypatch.setattr(store, "_load", fail_if_loaded)
+        info = await store.workspace_info()
+
+        assert info is not None
+        assert info["campus_name"] == manifest["campus_name"]
+        assert info["campus_id"] == manifest["campus_id"]
+        assert info["bundle_id"] == manifest["bundle_id"]
+        assert info["campus_mode"] == "existing"
+        assert info["students"] == len(manifest["students"])
+        assert info["enrollments"] == len(manifest["enrollments"])
+        assert info["courses"] == len(manifest["courses"])
+        assert info["promoters"] == len(manifest["promoters"])
+        assert info["first_course_id"] == manifest["courses"][0]["id"]
+
+    asyncio.run(verify_info())
+
+
 def test_local_store_dashboard_summary_matches_manifest_projection(manifest, tmp_path):
     store = LocalStore(tmp_path / "dashboard.sqlite3")
     data = deepcopy(manifest)

@@ -39,7 +39,7 @@ Rectangle {
         backendObject.studentListModel.setFilters(
             studentSearch.text,
             studentStatusFilter.currentIndex,
-            Number(studentCourseFilter.currentValue) || 0
+            studentCourseFilter.selectedCourseId
         )
     }
 
@@ -135,26 +135,15 @@ Rectangle {
                 onActivated: studentsPage.applyStudentFilters()
             }
 
-            ComboBox {
+            CourseFilterPicker {
                 id: studentCourseFilter
                 objectName: "studentCourseFilter"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 160
                 Layout.preferredWidth: 240
-                textRole: "label"
-                valueRole: "id"
-                model: {
-                    var options = [{"id": 0, "label": "Todos los cursos"}]
-                    var availableCourses = studentsPage.backendObject.courses
-                    for (var index = 0; index < availableCourses.length; index++)
-                        options.push({
-                            "id": Number(availableCourses[index].id),
-                            "label": availableCourses[index].label
-                        })
-                    return options
-                }
-                font.family: "Roboto"
-                onActivated: studentsPage.applyStudentFilters()
+                backendObject: studentsPage.backendObject
+                theme: studentsPage.theme
+                onCourseSelected: studentsPage.applyStudentFilters()
             }
         }
 

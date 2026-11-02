@@ -62,6 +62,15 @@ def _wait_for_search(editor, gui_application):
     raise AssertionError("Timed out waiting for the student search.")
 
 
+def _wait_for_course_search(editor, gui_application):
+    for _ in range(100):
+        gui_application.processEvents()
+        if not editor.property("courseSearchPending"):
+            return
+        QTest.qWait(10)
+    raise AssertionError("Timed out waiting for the course search.")
+
+
 def _wait_for_enrollment_list(backend, gui_application):
     model = backend.enrollmentListModel
     for _ in range(200):
@@ -85,6 +94,26 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
         "100.00",
         "80.00",
         "30",
+    )
+    inactive_course_id = backend.createCourse(
+        "Historia",
+        "Noche",
+        "2",
+        "2026-01-03",
+        "90.00",
+        "70.00",
+        "25",
+    )
+    assert backend.saveCourse(
+        inactive_course_id,
+        "Historia",
+        "Noche",
+        "2",
+        "2026-01-03",
+        "90.00",
+        "70.00",
+        "25",
+        False,
     )
     selected_student_id = ""
     for index in range(21):
@@ -172,6 +201,24 @@ def test_enrollment_editor_defers_and_limits_student_data(tmp_path, gui_applicat
         monthly_fee = _item(editor, "editEnrollmentMonthlyFee")
         assert enrollment_fee.property("text") == "100.00"
         assert monthly_fee.property("text") == "80.00"
+
+        _click(view, _item(editor, "editEnrollmentCourse"))
+        course_search = _item(editor, "editEnrollmentCourseSearch")
+        course_search.setProperty("text", "Historia")
+        QTest.qWait(250)
+        _wait_for_course_search(editor, gui_application)
+        course_results = _variant(editor.property("courseSearchResults"))
+        assert len(course_results) == 1
+        assert course_results[0]["id"] == inactive_course_id
+        assert course_results[0]["active"] is False
+        course_options = _variant(editor.property("courseOptions"))
+        assert any(
+            str(option["id"]) == str(course_id) for option in course_options
+        )
+        assert QMetaObject.invokeMethod(
+            _item(editor, "enrollmentCoursePicker"),
+            "close",
+        )
 
         search_responses = []
         backend.studentSearchFinished.connect(

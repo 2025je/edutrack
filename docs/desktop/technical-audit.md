@@ -892,3 +892,167 @@ esos archivos informa 15 hallazgos de estilo/modernización fuera de esta ruta.
 El chequeo mypy completo sigue informando siete errores en `excel_export.py` y
 `logging_config.py` (stubs externos y tipado del procesador); no se modificaron
 en esta etapa. No se midió rendimiento.
+
+## 28. Fase 2 incremental — adjuntos SQL de matrículas
+
+`attachEnrollmentImage` y `clearEnrollmentImage` ya operan mediante
+`WorkspaceStore.update_enrollment_image`, sin exigir un manifiesto cargado. La
+imagen validada se codifica temporalmente para persistir su contenido en
+`Workspace.attachment_data` y la referencia/hash en `EnrollmentRecord`, dentro
+de una única transacción. Al quitar una imagen, se consultan en SQL las demás
+referencias antes de eliminar el contenido compartido, conservando adjuntos
+referenciados por otras matrículas. Si el manifiesto está cargado, su proyección
+se actualiza únicamente después del commit. El formato `.edutrack` no cambia.
+
+Las pruebas cubren adjuntar y quitar imágenes con `manifest=None`, limpieza al
+quitar el código de ficha y conservación del contenido mientras otra matrícula
+comparte la misma imagen.
+
+Validación: suite Desktop **134 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los módulos fuente afectados y Ruff pasa para E4/E7/E9/F.
+No se midió rendimiento. La carga inicial del manifiesto y otras operaciones
+operativas siguen pendientes de migración.
+
+## 29. Fase 2 incremental — creación SQL de promotores
+
+`createPromoter` ya valida y persiste el nuevo promotor mediante
+`WorkspaceStore.create_promoter` en una transacción SQLite, aun con
+`backend.manifest=None`. `RecordService` conserva la normalización, detección de
+duplicados y asignación del identificador. El store deriva `campus_mode` de la
+versión persistida: se conserva la restricción que permite crear promotores
+solo en sedes nuevas. Si el manifiesto está cargado, se actualiza su proyección
+después del commit.
+
+Las pruebas cubren creación sin manifiesto, duplicados, persistencia, la
+restricción de sedes existentes y compatibilidad de exportación. La propiedad
+`promoterOptions` y la carga inicial todavía dependen del manifiesto; esta etapa
+no completa la migración de las lecturas operativas.
+
+Validación: suite Desktop **136 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los módulos fuente afectados y Ruff pasa para E4/E7/E9/F.
+No se midió rendimiento ni se modificó el formato `.edutrack`.
+
+## 30. Fase 2 incremental — nómina de curso desde SQLite
+
+La propiedad `courseStudents` ya no filtra la copia completa del manifiesto.
+`LocalStore.course_students` consulta en SQL las matrículas activas del curso,
+une únicamente a los estudiantes activos, elimina duplicados y conserva el
+orden previo de la nómina. El backend ejecuta la consulta con `AsyncQueryWorker`,
+descarta resultados obsoletos cuando cambia el curso y notifica a la vista de
+detalle al recibir el resultado; así evita bloquear el hilo de Qt.
+
+Las pruebas cubren la nómina con `manifest=None` y la actualización de la vista
+de detalle. La carga inicial y otras propiedades operativas todavía dependen
+del manifiesto; no se afirma que SQLite sea aún la única fuente en toda la app.
+
+Validación: suite Desktop **137 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los módulos fuente afectados y Ruff pasa para E4/E7/E9/F.
+No se midió rendimiento.
+
+## 31. Fase 2 incremental — opciones y filtros de cursos desde SQLite
+
+`WorkspaceStore.course_options()` consulta en SQLite únicamente los campos
+necesarios para seleccionar y filtrar cursos. El backend carga esa proyección
+con `AsyncQueryWorker` y expone `courseOptions`,
+`courseFilterOptions` y `activeEnrollmentCourses` desde el mismo resultado.
+El editor de matrícula, el asistente y los filtros de estudiantes y matrículas
+ya no leen `backend.courses` ni requieren `backend.manifest` para sus opciones.
+La interfaz distingue el estado de carga del estado vacío, y las opciones en
+caché se invalidan cuando cambian los datos.
+
+Las pruebas cubren cursos activos e inactivos, el orden, la consulta con
+`manifest=None` y la integración QML. La proyección sigue materializando todas
+las opciones de curso en memoria; para volúmenes grandes, debe evolucionar a
+búsqueda/paginación SQL. La propiedad general `courses` y el inicio todavía
+cargan el manifiesto.
+
+Validación: suite Desktop **138 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los tres módulos fuente afectados y Ruff pasa para
+E4/E7/E9/F en los archivos Python revisados. No se midió rendimiento.
+
+## 32. Fase 2 incremental — búsqueda SQL de cursos en matrícula
+
+El selector del asistente de matrícula ya no recibe la lista completa de cursos.
+`WorkspaceStore.search_course_options()` filtra cursos activos directamente en
+SQLite por nombre, horario, grupo o fecha y limita cada resultado; el backend lo
+ejecuta fuera del hilo Qt. QML aplica debounce, descarta respuestas obsoletas y
+copia al formulario los costos del curso seleccionado. La prueba QML verifica
+la búsqueda con `backend.manifest=None`; otra prueba comprueba el filtro de
+activos y el límite de resultados.
+
+Los filtros generales de estudiantes/matrículas todavía usan la proyección
+completa `course_options()`, y el inicio continúa cargando el manifiesto. No se
+modificó el esquema ni el formato `.edutrack`, y no se midió rendimiento.
+
+Validación: suite Desktop **139 pruebas pasadas, 20 benchmarks optativos
+excluidos**; mypy pasa en los tres módulos fuente afectados, Ruff pasa para
+E4/E7/E9/F y Pylance confirmó la compatibilidad de los cuatro sitios de
+llamada con la API original de búsqueda SQL de cursos, generalizada en la
+sección 33.
+
+## 33. Fase 2 incremental — selector SQL del editor de matrículas
+
+El editor ya no filtra la proyección completa `backend.courseOptions`: al abrir
+el selector o escribir una búsqueda, consulta SQLite con un límite de 50
+opciones y debounce, y descarta respuestas de solicitudes anteriores. Esta
+consulta incluye cursos inactivos para que el editor pueda mostrarlos sin
+permitir seleccionar uno inactivo distinto del curso que ya tiene la matrícula.
+La fila SQL de matrícula ahora incluye el estado `course_active`, de modo que el
+curso actual conserva su etiqueta y condición aunque no aparezca en la búsqueda
+actual o esté inactivo/no disponible.
+
+La búsqueda genérica también es usada por el asistente de matrícula con filtro
+de activos. No se modifica el esquema ni el formato `.edutrack`. Los filtros
+generales de estudiantes y matrículas todavía materializan opciones completas
+de curso, y el inicio aún carga el manifiesto.
+
+Validación: `tests/test_backend.py` **41 pruebas pasadas** y Ruff pasa para los
+archivos Python afectados. Las pruebas QML focalizadas no pudieron validar la
+interfaz en esta máquina: Qt no cargó
+`qtquickcontrols2materialstyleplugin.dll` ("No se puede encontrar el módulo
+especificado"). Mypy reportó errores en ubicaciones preexistentes fuera de los
+métodos modificados después de instalar SQLAlchemy 2.1.6; por ello ese chequeo
+no se considera aprobado en este entorno.
+
+## 34. Fase 2 incremental — filtros de curso con búsqueda SQL
+
+Los filtros de estudiantes y matrículas usan ahora el componente reutilizable
+`CourseFilterPicker`: la lista solo se consulta cuando se abre el selector o se
+escribe una búsqueda, con debounce, descarte de respuestas obsoletas y un
+límite de 50 resultados. La consulta incluye cursos activos e inactivos para
+conservar la posibilidad de filtrar matrículas históricas. El identificador
+seleccionado se conserva al cambiar las opciones visibles.
+
+Se eliminaron `LocalStore.course_options()`, su contrato en `WorkspaceStore` y
+la caché/proyección completa de cursos del backend. Por tanto, los filtros ya no
+materializan el catálogo completo. El inicio sigue cargando el manifiesto y
+otras operaciones todavía dependen de él; no se modificó el esquema ni el
+formato `.edutrack`.
+
+Validación: `tests/test_backend.py` **40 pruebas pasadas**; Ruff y
+`git diff --check` pasan. Las pruebas y compilación QML continúan bloqueadas por
+fallos al cargar los plugins Qt Quick Controls de esta instalación; no se
+consideran validadas visualmente.
+
+## 35. Fase 2 incremental — inicio y respaldo con metadatos SQL
+
+La inicialización ya no llama a `LocalStore.load()`. `LocalStore.workspace_info()`
+obtiene desde SQLite los metadatos de sede, conteos SQL y el primer ID de curso;
+el backend usa ese resultado para nombre/estado de sede, catálogo, selección
+inicial y resumen de sincronización, manteniendo `manifest=None` en el arranque.
+`refreshWorkspace()` vuelve a consultar metadatos y modelos SQL sin reconstruir
+las colecciones. Los cambios de datos actualizan estos metadatos mediante un
+worker y las respuestas antiguas se descartan por ID.
+
+También se retiró la dependencia del manifiesto de las comprobaciones y la
+restauración de backups: se valida la sede candidata/restaurada con metadatos
+SQL y la base restaurada queda activa sin cargar todas sus filas a memoria.
+Una prueba de backend prohíbe `load()` durante el arranque y verifica metadatos
+y búsqueda con SQLite; `test_transfer.py` comprueba que `workspace_info()` no
+usa `_load()`.
+
+Validación: `tests/test_backend.py tests/test_sync.py` **56 pasaron**;
+`tests/test_transfer.py` **17 pasaron**; `compileall` pasó. Ruff y
+`git diff --check` pasaron para los archivos Python modificados. Las operaciones
+de importación/exportación y varios flujos heredados todavía crean o consultan
+manifiestos temporales; no se cambió el esquema ni el formato `.edutrack`.

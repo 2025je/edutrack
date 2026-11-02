@@ -526,7 +526,8 @@ def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path
     )
     assert succeeded is False
     assert "otra sede" in error
-    assert len(backend.students) == 2
+    assert backend._workspace_info["students"] == 2
+    assert backend.manifest is None
 
     _, succeeded, restored, error = _await_signal(
         backend.backupOperationFinished,
@@ -537,4 +538,5 @@ def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path
     assert Path(restored["recovery_backup"]).is_file()
     assert backend.store is not None
     assert asyncio.run(backend.store.load()) == manifest
-    assert len(backend.students) == 1
+    assert backend._workspace_info["students"] == 1
+    assert backend.manifest is None

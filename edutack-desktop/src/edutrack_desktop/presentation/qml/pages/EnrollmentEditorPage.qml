@@ -16,9 +16,13 @@ Rectangle {
     property string courseSearchQuery: ""
     property int studentSearchLimit: 20
     property var studentSearchResults: []
+    property var courseSearchResults: []
     property int studentSearchResultVersion: 0
     property int studentSearchRequestId: 0
+    property int courseSearchRequestId: 0
     property bool studentSearchPending: false
+    property bool courseSearchPending: false
+    property var selectedCourseOption: null
     property var initialEnrollmentValues: null
     readonly property bool hasUnsavedChanges: {
         if (!root.initialEnrollmentValues)
@@ -69,24 +73,23 @@ Rectangle {
     readonly property var filteredCourseOptions: {
         var query = root.courseSearchQuery.trim().toLowerCase()
         return root.courseOptions.filter(function(option) {
-            return String(option.label).toLowerCase().indexOf(query) >= 0
+            return String(option.label || "").toLowerCase().indexOf(query) >= 0
         })
     }
     readonly property var courseOptions: {
-        var options = root.backendObject
-                      ? root.backendObject.courseOptions.slice()
-                      : []
-        var courseId = root.enrollment ? root.enrollment.course_id : ""
-        if (courseId
+        var options = [{
+            id: "",
+            label: "Pendiente de curso",
+            active: true
+        }]
+        for (var index = 0; index < root.courseSearchResults.length; index++)
+            options.push(root.courseSearchResults[index])
+        var selectedOption = root.selectedCourseOption
+        if (selectedOption
                 && !options.some(function(option) {
-                    return String(option.id) === String(courseId)
+                    return String(option.id) === String(selectedOption.id)
                 })) {
-                options.push({
-                    id: courseId,
-                    label: "Curso no disponible",
-                    active: false,
-                    missing: true
-                })
+            options.push(selectedOption)
         }
         return options
     }
@@ -108,6 +111,13 @@ Rectangle {
         interval: 180
         repeat: false
         onTriggered: root.refreshStudentSearch()
+    }
+
+    Timer {
+        id: courseSearchTimer
+        interval: 180
+        repeat: false
+        onTriggered: root.refreshCourseSearch()
     }
 
     function optionForId(options, id) {
@@ -134,12 +144,36 @@ Rectangle {
         )
     }
 
+    function refreshCourseSearch() {
+        if (!root.backendObject)
+            return
+        root.courseSearchPending = true
+        root.courseSearchRequestId = root.backendObject.searchCourseOptionsAsync(
+            root.courseSearchQuery,
+            true,
+            50
+        )
+    }
+
     function loadEnrollment() {
         if (!root.enrollment)
             return
         root.errorText = ""
         root.selectedStudentId = root.enrollment.student_id || ""
         root.selectedCourseId = root.enrollment.course_id || ""
+        root.selectedCourseOption = root.selectedCourseId
+                ? {
+                    id: root.selectedCourseId,
+                    label: root.enrollment.course_label
+                           || "Curso no disponible",
+                    active: root.enrollment.course_active === true,
+                    missing: root.enrollment.pending_course === true
+                }
+                : {
+                    id: "",
+                    label: "Pendiente de curso",
+                    active: true
+                }
         enrollmentDateField.value = root.enrollment.enrollment_date || ""
         enrollmentFeeField.text = String(root.enrollment.enrollment_fee || "0.00")
         monthlyFeeField.text = String(root.enrollment.monthly_fee || "0.00")
@@ -163,6 +197,7 @@ Rectangle {
 
     function chooseCourse(option) {
         root.selectedCourseId = option.id
+        root.selectedCourseOption = option
         root.courseSearchQuery = ""
         root.errorText = ""
         coursePicker.close()
@@ -252,6 +287,17 @@ Rectangle {
             } else {
                 root.studentSearchResults = rows
                 root.studentSearchResultVersion += 1
+            }
+        }
+        function onCourseSearchFinished(requestId, rows, error) {
+            if (requestId !== root.courseSearchRequestId)
+                return
+            root.courseSearchPending = false
+            if (error.length > 0) {
+                root.courseSearchResults = []
+                root.errorText = error
+            } else {
+                root.courseSearchResults = rows
             }
         }
     }
@@ -584,6 +630,10 @@ Rectangle {
 
                             onOpened: {
                                 root.courseSearchQuery = ""
+                                courseSearchField.text = ""
+                                courseSearchTimer.stop()
+                                root.courseSearchResults = []
+                                root.refreshCourseSearch()
                                 courseSearchField.forceActiveFocus()
                             }
 
@@ -603,7 +653,13 @@ Rectangle {
                                     objectName: "editEnrollmentCourseSearch"
                                     Layout.fillWidth: true
                                     placeholderText: "Buscar por nombre, horario o grupo..."
-                                    onTextChanged: root.courseSearchQuery = text
+                                    onTextChanged: {
+                                        root.courseSearchQuery = text
+                                        root.courseSearchRequestId = 0
+                                        root.courseSearchResults = []
+                                        root.courseSearchPending = true
+                                        courseSearchTimer.restart()
+                                    }
                                 }
 
                                 ListView {
@@ -668,8 +724,18 @@ Rectangle {
 
                                 Label {
                                     Layout.fillWidth: true
-                                    visible: root.filteredCourseOptions.length === 0
+                                    visible: !root.courseSearchPending
+                                             && root.filteredCourseOptions.length === 0
                                     text: "No se encontraron cursos."
+                                    color: root.theme.secondaryText
+                                    font.family: "Roboto"
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: root.courseSearchPending
+                                    text: "Buscando cursos..."
                                     color: root.theme.secondaryText
                                     font.family: "Roboto"
                                     horizontalAlignment: Text.AlignHCenter

@@ -10,6 +10,8 @@ class WorkspaceStore(Protocol):
 
     async def load(self) -> dict[str, Any] | None: ...
 
+    async def workspace_info(self) -> dict[str, Any] | None: ...
+
     async def register_export_data(self) -> dict[str, Any] | None: ...
 
     async def save(self, manifest: dict[str, Any]) -> None: ...
@@ -55,6 +57,12 @@ class WorkspaceStore(Protocol):
         record_service: "RecordServicePort",
     ) -> dict[str, Any]: ...
 
+    async def create_promoter(
+        self,
+        name: str,
+        record_service: "RecordServicePort",
+    ) -> dict[str, Any]: ...
+
     async def save_student(
         self,
         source_id: str,
@@ -79,8 +87,23 @@ class WorkspaceStore(Protocol):
         record_service: "RecordServicePort",
     ) -> dict[str, Any]: ...
 
+    async def update_enrollment_image(
+        self,
+        enrollment_id: str,
+        attachment_path: str | None,
+        image_hash: str | None,
+        encoded_content: str | None,
+    ) -> dict[str, Any]: ...
+
     async def search_students(
         self, query: str, limit: int = 20
+    ) -> list[dict[str, Any]]: ...
+
+    async def search_course_options(
+        self,
+        query: str,
+        include_inactive: bool = False,
+        limit: int = 50,
     ) -> list[dict[str, Any]]: ...
 
     async def dashboard_summary(self, today: str | None = None) -> dict[str, Any]: ...
@@ -100,6 +123,8 @@ class WorkspaceStore(Protocol):
         page_index: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int, int]: ...
+
+    async def course_students(self, course_id: int) -> list[dict[str, Any]]: ...
 
     async def enrollment_page(
         self,

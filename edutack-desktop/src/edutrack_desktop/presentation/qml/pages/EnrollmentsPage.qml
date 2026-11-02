@@ -30,16 +30,6 @@ Rectangle {
     readonly property int filteredEnrollmentCount: enrollmentModel.matchingCount
     readonly property int pageIndex: enrollmentModel.pageIndex
     readonly property int pageCount: enrollmentModel.pageCount
-    readonly property var courseFilterOptions: [{
-        id: 0,
-        label: "Todos los cursos"
-    }].concat(backendObject.courses.map(function(course) {
-        return {
-            id: course.id,
-            label: course.label
-        }
-    }))
-
     radius: 0
     color: theme.surface
     border.color: theme.outline
@@ -100,7 +90,7 @@ Rectangle {
             root.enrollmentModel.setFilters(
                 enrollmentSearch.text,
                 statusFilter.currentIndex,
-                root.courseFilterOptions[courseFilter.currentIndex].id
+                courseFilter.selectedCourseId
             )
             filterUpdateFinishTimer.start()
         }
@@ -185,12 +175,13 @@ Rectangle {
                 }
             }
 
-            ComboBox {
+            CourseFilterPicker {
                 id: courseFilter
+                objectName: "courseFilter"
                 Layout.preferredWidth: 270
-                model: root.courseFilterOptions
-                textRole: "label"
-                onActivated: function(index) {
+                backendObject: root.backendObject
+                theme: root.theme
+                onCourseSelected: function(courseId) {
                     root.scheduleFilterUpdate()
                 }
             }
@@ -202,13 +193,13 @@ Rectangle {
                 enabled: !root.filtersUpdating
                          && (enrollmentSearch.text.length > 0
                              || statusFilter.currentIndex !== 0
-                             || courseFilter.currentIndex !== 0)
+                             || courseFilter.selectedCourseId !== 0)
                 font.family: "Roboto"
                 onClicked: {
                     root.resettingFilters = true
                     enrollmentSearch.clear()
                     statusFilter.currentIndex = 0
-                    courseFilter.currentIndex = 0
+                    courseFilter.resetSelection()
                     root.resettingFilters = false
                     root.scheduleFilterUpdate()
                 }

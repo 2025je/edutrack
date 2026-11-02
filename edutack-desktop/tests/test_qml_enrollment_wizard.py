@@ -175,6 +175,8 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
     assert root.property("currentStep") == 2
+    assert root.property("activeCourseSearchRequestId") > 0
+    _wait_for_search(root, "activeCourseSearchPending", gui_application)
     enrollment_fee = _item(root, "newEnrollmentFee")
     monthly_fee = _item(root, "newEnrollmentMonthlyFee")
     assert enrollment_fee.property("text") == "100.00"
@@ -264,6 +266,17 @@ def test_qml_wizard_searches_sqlite_without_a_loaded_manifest(
     results = _variant(root.property("searchResults"))
     assert len(results) == 1
     assert results[0]["label"] == "PEREZ ANA"
+    _click(_view, _find_visual_item(_view, "enrollmentStudentOption"))
+    _click(_view, _item(root, "enrollmentContinueToCourseButton"))
+    _wait_for_search(root, "activeCourseSearchPending", gui_application)
+    course_search = _item(root, "newEnrollmentCourseSearch")
+    course_search.setProperty("text", "english")
+    QTest.qWait(300)
+    _wait_for_search(root, "activeCourseSearchPending", gui_application)
+    assert [
+        course["label"] for course in _variant(root.property("activeCourses"))
+    ] == ["ENGLISH · MORNING · Grupo 1"]
+    assert _item(root, "newEnrollmentFee").property("text") == "100.00"
 
 
 def test_qml_wizard_validates_new_student_and_cancels_with_escape(
@@ -332,6 +345,7 @@ def test_qml_wizard_creates_student_without_leaving_enrollment(
 
     _click(view, _item(root, "enrollmentContinueToCourseButton"))
     assert root.property("currentStep") == 2
+    _wait_for_search(root, "activeCourseSearchPending", gui_application)
     _click(view, _item(root, "enrollmentContinueToSummaryButton"))
     assert root.property("currentStep") == 3
     _click(view, _item(root, "enrollmentSaveButton"))
@@ -518,11 +532,22 @@ def test_main_restores_and_persists_selected_workspace_section(
             "button_width": edit_button.width(),
             "page_width": courses_page.width(),
         }
+        loaded_manifest = backend.manifest
         courses_page.setProperty("selectedCourse", backend.courses[0])
+        backend.manifest = None
         backend.selectCourse(course_id)
         courses_page.setProperty("currentView", "details")
         QTest.qWait(250)
         assert course_details_loader.property("item") is not None
+        course_details_item = course_details_loader.property("item")
+        for _ in range(100):
+            gui_application.processEvents()
+            course_students = course_details_item.property("students")
+            if len(course_students) == 1:
+                break
+            QTest.qWait(10)
+        assert [student["label"] for student in course_students] == ["PEREZ ANA"]
+        backend.manifest = loaded_manifest
         courses_page.setProperty("currentView", "list")
         QTest.qWait(50)
         assert course_details_loader.property("item") is None
@@ -571,13 +596,33 @@ def test_main_restores_and_persists_selected_workspace_section(
         assert backend.studentListModel.matchingCount == 0
 
         status_filter.setProperty("currentIndex", 1)
-        course_filter.setProperty("currentIndex", 1)
-        assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
+        _click(
+            second_root,
+            _find_visual_item(second_root, "studentCourseFilterButton"),
+        )
+        course_search = _find_visual_item(
+            second_root,
+            "studentCourseFilterSearch",
+        )
+        course_search.setProperty("text", "English")
+        QTest.qWait(250)
+        _wait_for_search(course_filter, "searchPending", gui_application)
+        assert [
+            course["id"]
+            for course in _variant(course_filter.property("searchResults"))
+        ] == [course_id]
+        _click(
+            second_root,
+            _find_visual_item(
+                second_root,
+                "studentCourseFilterOption_" + str(course_id),
+            ),
+        )
         _wait_for_model(backend.studentListModel, gui_application, 1)
         assert backend.studentListModel.matchingCount == 1
 
         status_filter.setProperty("currentIndex", 0)
-        course_filter.setProperty("currentIndex", 0)
+        assert QMetaObject.invokeMethod(course_filter, "resetSelection")
         assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")
         _wait_for_model(backend.studentListModel, gui_application)
 

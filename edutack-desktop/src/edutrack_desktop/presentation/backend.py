@@ -33,7 +33,6 @@ from ..application.ports import (
 )
 from ..application.presenters import (
     course_rows,
-    course_students,
     dashboard_summary,
     enrollment_rows,
     filter_student_rows,
@@ -211,6 +210,7 @@ else:
 
 class DesktopBackend(QObject):
     dataChanged = Signal()
+    workspaceInfoChanged = Signal()
     dashboardSummaryChanged = Signal()
     selectionChanged = Signal()
     errorChanged = Signal()
@@ -220,6 +220,7 @@ class DesktopBackend(QObject):
     syncExportFinished = Signal(bool, str)
     registerExportFinished = Signal(bool, str)
     studentSearchFinished = Signal(int, list, str)
+    courseSearchFinished = Signal(int, list, str)
     backupStateChanged = Signal()
     backupDirectoryChanged = Signal()
     backupOperationFinished = Signal(str, bool, object, str)
@@ -245,6 +246,8 @@ class DesktopBackend(QObject):
         self._query_pool.setMaxThreadCount(3)
         self._student_search_request_id = 0
         self._student_search_workers: dict[int, AsyncQueryWorker] = {}
+        self._course_search_request_id = 0
+        self._course_search_workers: dict[int, AsyncQueryWorker] = {}
         self._save_in_progress = False
         self._course_save_worker: AsyncQueryWorker | None = None
         self._course_save_in_progress = False
@@ -300,11 +303,15 @@ class DesktopBackend(QObject):
         )
         self.store: WorkspaceStore | None = None
         self.manifest: dict[str, Any] | None = None
+        self._workspace_info: dict[str, Any] | None = None
         self._student_rows_cache: list[dict[str, Any]] | None = None
         self._student_filter_cache_query: str | None = None
         self._student_filter_cache_rows: list[dict[str, Any]] = []
         self._enrollment_rows_cache: list[dict[str, Any]] | None = None
         self._course_rows_cache: list[dict[str, Any]] | None = None
+        self._course_students_cache: list[dict[str, Any]] = []
+        self._course_students_request_id = 0
+        self._course_students_workers: dict[int, AsyncQueryWorker] = {}
         self._dashboard_summary_cache = dashboard_summary(None)
         self._dashboard_summary_requested = False
         self._dashboard_summary_dirty = False
@@ -360,6 +367,8 @@ class DesktopBackend(QObject):
         self._student_list_model.queryFailed.connect(self._on_student_page_failed)
         self._course_list_model.queryFailed.connect(self._on_course_page_failed)
         self._enrollment_list_model.queryFailed.connect(self._on_enrollment_page_failed)
+        self._workspace_info_request_id = 0
+        self._workspace_info_workers: dict[int, AsyncQueryWorker] = {}
         self.dataChanged.connect(self._on_data_changed)
         if not defer_initialize:
             try:
@@ -383,53 +392,52 @@ class DesktopBackend(QObject):
             self._startup_error = f"No se pudo abrir la sede registrada: {exc}"
             self.store = self._store_factory(self._default_store_path)
 
-        self.manifest = await self.store.load()
+        self._workspace_info = await self.store.workspace_info()
         logger.info(
             "database.opened",
-            workspace_loaded=self.manifest is not None,
-            student_count=(
-                len(self.manifest.get("students", [])) if self.manifest else 0
-            ),
-            enrollment_count=(
-                len(self.manifest.get("enrollments", [])) if self.manifest else 0
-            ),
-            course_count=(
-                len(self.manifest.get("courses", [])) if self.manifest else 0
-            ),
-            promoter_count=(
-                len(self.manifest.get("promoters", [])) if self.manifest else 0
-            ),
+            workspace_loaded=self._workspace_info is not None,
+            student_count=(self._workspace_info or {}).get("students", 0),
+            enrollment_count=(self._workspace_info or {}).get("enrollments", 0),
+            course_count=(self._workspace_info or {}).get("courses", 0),
+            promoter_count=(self._workspace_info or {}).get("promoters", 0),
         )
         self._error_message = self._startup_error
-        if self.catalog and self.manifest and self.store:
+        if self.catalog and self._workspace_info and self.store:
             try:
                 self.catalog.register(
                     self.store.path,
-                    self.manifest["campus_name"],
+                    self._workspace_info["campus_name"],
                     activate=True,
                 )
             except CampusCatalogError as exc:
                 self._error_message = str(exc)
-        courses = self.manifest.get("courses", []) if self.manifest else []
-        self._selected_course_id = courses[0]["id"] if courses else None
+        self._selected_course_id = (
+            self._workspace_info["first_course_id"]
+            if self._workspace_info
+            else None
+        )
         self._initialized = True
         self._refresh_list_models()
+        self.workspaceInfoChanged.emit()
 
-    @Property(str, notify=dataChanged)
+    @Property(str, notify=workspaceInfoChanged)
     def campusName(self):
         return (
-            self.manifest.get("campus_name", "Sin archivo de sede")
-            if self.manifest
+            self._workspace_info.get("campus_name", "Sin archivo de sede")
+            if self._workspace_info
             else "Sin archivo de sede"
         )
 
-    @Property(bool, notify=dataChanged)
+    @Property(bool, notify=workspaceInfoChanged)
     def hasWorkspace(self):
-        return self.manifest is not None
+        return self._workspace_info is not None
 
-    @Property(bool, notify=dataChanged)
+    @Property(bool, notify=workspaceInfoChanged)
     def isNewCampus(self):
-        return bool(self.manifest and self.manifest.get("campus_mode") == "new")
+        return bool(
+            self._workspace_info
+            and self._workspace_info.get("campus_mode") == "new"
+        )
 
     @Property("QVariantList", notify=dataChanged)
     def campuses(self):
@@ -446,13 +454,13 @@ class DesktopBackend(QObject):
         ).strip(" .-_")
         return f"edutrack-{safe_name or 'sede'}.sqlite3"
 
-    @Property(str, notify=dataChanged)
+    @Property(str, notify=workspaceInfoChanged)
     def activeDatabasePath(self):
-        return str(self.store.path) if self.store and self.manifest else ""
+        return str(self.store.path) if self.store and self._workspace_info else ""
 
-    @Property(int, notify=dataChanged)
+    @Property(int, notify=workspaceInfoChanged)
     def activeCampusIndex(self):
-        if not self.catalog or not self.store or not self.manifest:
+        if not self.catalog or not self.store or not self._workspace_info:
             return -1
         active_path = str(self.store.path)
         return next(
@@ -487,6 +495,14 @@ class DesktopBackend(QObject):
 
     def _on_data_changed(self) -> None:
         self._refresh_list_models()
+        if self.store is not None:
+            self._request_workspace_info()
+        else:
+            self._workspace_info_request_id += 1
+            self._workspace_info = None
+            self.workspaceInfoChanged.emit()
+        if self._selected_course_id is not None:
+            self._request_course_students()
         if self.store is None:
             self._dashboard_summary_request_id += 1
             self._dashboard_summary_requested = False
@@ -497,6 +513,77 @@ class DesktopBackend(QObject):
         if self._dashboard_summary_requested:
             self._dashboard_summary_dirty = True
             self._request_dashboard_summary()
+
+    def _request_workspace_info(self) -> bool:
+        store = self.store
+        if store is None:
+            return False
+        self._workspace_info_request_id += 1
+        request_id = self._workspace_info_request_id
+        try:
+            operation = store.workspace_info()
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            TypeError,
+            KeyError,
+        ) as exc:
+            self._finish_workspace_info(
+                request_id,
+                None,
+                type(exc).__name__,
+                str(exc),
+            )
+            return False
+        worker = AsyncQueryWorker(request_id, operation)
+        worker.signals.finished.connect(self._finish_workspace_info)
+        self._workspace_info_workers[request_id] = worker
+        self._query_pool.start(worker)
+        return True
+
+    @Slot(int, object, str, str)
+    def _finish_workspace_info(
+        self,
+        request_id: int,
+        info: object,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self._workspace_info_workers.pop(request_id, None)
+        if request_id != self._workspace_info_request_id:
+            return
+        if error_type:
+            logger.error(
+                "workspace.metadata_load_failed",
+                error_type=error_type,
+                error=error_message,
+            )
+            self._set_error("No se pudieron actualizar los datos de la sede.")
+            return
+        if info is not None and (
+            not isinstance(info, dict)
+            or not isinstance(info.get("campus_name"), str)
+            or not isinstance(info.get("bundle_id"), str)
+            or not isinstance(info.get("campus_mode"), str)
+            or not all(
+                isinstance(info.get(key), int)
+                and not isinstance(info.get(key), bool)
+                for key in ("students", "enrollments", "courses", "promoters")
+            )
+            or (
+                info.get("first_course_id") is not None
+                and (
+                    not isinstance(info.get("first_course_id"), int)
+                    or isinstance(info.get("first_course_id"), bool)
+                )
+            )
+        ):
+            self._set_error("La consulta de datos de sede devolvió datos no válidos.")
+            return
+        self._workspace_info = info
+        self.workspaceInfoChanged.emit()
 
     def _all_student_rows(self) -> list[dict[str, Any]]:
         if self._student_rows_cache is None:
@@ -619,7 +706,12 @@ class DesktopBackend(QObject):
     def searchStudents(self, query, limit=20):
         if self.store is None:
             return []
-        if isinstance(limit, bool) or limit < 1 or limit > 100:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or limit < 1
+            or limit > 100
+        ):
             limit = 20
         try:
             return self._run_async(self.store.search_students(query, limit))
@@ -692,6 +784,92 @@ class DesktopBackend(QObject):
             self.studentSearchFinished.emit(request_id, [], message)
             return
         self.studentSearchFinished.emit(request_id, rows, "")
+
+    @Slot(str, bool, result=int)
+    @Slot(str, bool, int, result=int)
+    def searchCourseOptionsAsync(
+        self,
+        query: str,
+        include_inactive: bool = False,
+        limit: int = 50,
+    ) -> int:
+        self._course_search_request_id += 1
+        request_id = self._course_search_request_id
+        if self.store is None:
+            message = (
+                "No se pudieron buscar cursos porque no hay una base local disponible."
+            )
+            self._set_error(message)
+            QTimer.singleShot(
+                0,
+                lambda: self.courseSearchFinished.emit(request_id, [], message),
+            )
+            return request_id
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or limit < 1
+            or limit > 100
+        ):
+            limit = 50
+        try:
+            operation = self.store.search_course_options(
+                query,
+                include_inactive,
+                limit,
+            )
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            TypeError,
+            KeyError,
+        ) as exc:
+            self._finish_course_search(
+                request_id,
+                None,
+                type(exc).__name__,
+                str(exc),
+            )
+            return request_id
+        worker = AsyncQueryWorker(request_id, operation)
+        worker.signals.finished.connect(self._finish_course_search)
+        self._course_search_workers[request_id] = worker
+        self._query_pool.start(worker)
+        return request_id
+
+    @Slot(int, object, str, str)
+    def _finish_course_search(
+        self,
+        request_id: int,
+        courses: object,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self._course_search_workers.pop(request_id, None)
+        if error_type:
+            logger.error(
+                "workspace.course_search_failed",
+                error_type=error_type,
+                error=error_message,
+            )
+            message = "No se pudieron buscar cursos en la base local."
+            self._set_error(message)
+            self.courseSearchFinished.emit(request_id, [], message)
+            return
+        if not isinstance(courses, list) or not all(
+            isinstance(course, dict)
+            and isinstance(course.get("id"), int)
+            and isinstance(course.get("label"), str)
+            and isinstance(course.get("active"), bool)
+            for course in courses
+        ):
+            message = "La búsqueda de cursos devolvió datos no válidos."
+            self._set_error(message)
+            self.courseSearchFinished.emit(request_id, [], message)
+            return
+        self.courseSearchFinished.emit(request_id, courses, "")
 
     @Property("QVariantList", notify=dataChanged)
     def enrollments(self):
@@ -787,28 +965,76 @@ class DesktopBackend(QObject):
 
     @Property("QVariantList", notify=selectionChanged)
     def courseStudents(self):
-        if not self.manifest or self._selected_course_id is None:
-            return []
-        return course_students(self.manifest, self._selected_course_id)
+        return self._course_students_cache
+
+    def _request_course_students(self) -> bool:
+        store = self.store
+        course_id = self._selected_course_id
+        self._course_students_request_id += 1
+        request_id = self._course_students_request_id
+        if store is None or course_id is None:
+            self._course_students_cache = []
+            self.selectionChanged.emit()
+            return False
+        try:
+            operation = store.course_students(course_id)
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            ValueError,
+            TypeError,
+            KeyError,
+        ) as exc:
+            self._finish_course_students(
+                request_id,
+                None,
+                type(exc).__name__,
+                str(exc),
+            )
+            return False
+        worker = AsyncQueryWorker(request_id, operation)
+        worker.signals.finished.connect(self._finish_course_students)
+        self._course_students_workers[request_id] = worker
+        self._query_pool.start(worker)
+        return True
+
+    @Slot(int, object, str, str)
+    def _finish_course_students(
+        self,
+        request_id: int,
+        students: object,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self._course_students_workers.pop(request_id, None)
+        if request_id != self._course_students_request_id:
+            return
+        if error_type:
+            logger.error(
+                "workspace.course_students_failed",
+                error_type=error_type,
+                error=error_message,
+            )
+            self._course_students_cache = []
+            self.selectionChanged.emit()
+            self._set_error("No se pudo cargar la lista de alumnos del curso.")
+            return
+        if not isinstance(students, list) or not all(
+            isinstance(student, dict) for student in students
+        ):
+            self._course_students_cache = []
+            self.selectionChanged.emit()
+            self._set_error(
+                "La consulta de alumnos del curso devolvió datos no válidos."
+            )
+            return
+        self._course_students_cache = students
+        self.selectionChanged.emit()
 
     @Property("QVariantList", notify=dataChanged)
     def studentOptions(self):
         return [{"id": "", "label": "Sin estudiante"}] + self.students
-
-    @Property("QVariantList", notify=dataChanged)
-    def courseOptions(self):
-        if not self.manifest:
-            return []
-        return [{"id": "", "label": "Pendiente de curso"}] + [
-            {
-                "id": course["id"],
-                "label": (
-                    f"{course['name']} · {course['schedule']} · Grupo {course['group']}"
-                    + ("" if course["active"] else " (inactivo)")
-                ),
-            }
-            for course in self.courses
-        ]
 
     @Property("QVariantList", notify=dataChanged)
     def promoterOptions(self):
@@ -902,20 +1128,20 @@ class DesktopBackend(QObject):
             return ""
         return str(self.store.path.parent / "backups")
 
-    @Property("QVariantMap", notify=dataChanged)
+    @Property("QVariantMap", notify=workspaceInfoChanged)
     def syncWorkspaceInfo(self):
-        manifest = self.manifest
+        info = self._workspace_info
         return {
-            "campus_name": manifest.get("campus_name", "") if manifest else "",
+            "campus_name": info.get("campus_name", "") if info else "",
             "workspace_id": (
-                str(manifest.get("campus_id") or manifest.get("bundle_id", ""))
-                if manifest
+                str(info.get("campus_id") or info.get("bundle_id", ""))
+                if info
                 else ""
             ),
-            "students": len(manifest.get("students", [])) if manifest else 0,
-            "enrollments": len(manifest.get("enrollments", [])) if manifest else 0,
-            "courses": len(manifest.get("courses", [])) if manifest else 0,
-            "promoters": len(manifest.get("promoters", [])) if manifest else 0,
+            "students": info.get("students", 0) if info else 0,
+            "enrollments": info.get("enrollments", 0) if info else 0,
+            "courses": info.get("courses", 0) if info else 0,
+            "promoters": info.get("promoters", 0) if info else 0,
         }
 
     @Property(str, notify=syncStateChanged)
@@ -973,7 +1199,7 @@ class DesktopBackend(QObject):
 
     @Slot(result=bool)
     def refreshBackups(self):
-        if self.store is None or self.manifest is None:
+        if self.store is None or self._workspace_info is None:
             self._set_error("Primero abre una sede local.")
             return False
         if self.isBusy:
@@ -981,7 +1207,7 @@ class DesktopBackend(QObject):
             return False
 
         store = self.store
-        manifest = deepcopy(self.manifest)
+        workspace_info = deepcopy(self._workspace_info)
         backup_directory = store.path.parent / "backups"
 
         def list_backups():
@@ -1000,7 +1226,7 @@ class DesktopBackend(QObject):
                 try:
                     file_stat = path.stat()
                     backup_info = verify_sqlite_backup(path)
-                    compatible = self._same_campus(manifest, backup_info)
+                    compatible = self._same_campus(workspace_info, backup_info)
                     message = "" if compatible else "El respaldo pertenece a otra sede."
                     valid = True
                 except (OSError, sqlite3.Error, ValueError) as exc:
@@ -1036,7 +1262,7 @@ class DesktopBackend(QObject):
 
     @Slot(result=bool)
     def createBackup(self):
-        if self.store is None or self.manifest is None:
+        if self.store is None or self._workspace_info is None:
             self._set_error("Primero abre una sede local.")
             return False
         if self.isBusy:
@@ -1067,7 +1293,7 @@ class DesktopBackend(QObject):
 
     @Slot(str, result=bool)
     def restoreBackup(self, backup_path):
-        if self.store is None or self.manifest is None:
+        if self.store is None or self._workspace_info is None:
             self._set_error("Primero abre una sede local.")
             return False
         if self.isBusy:
@@ -1076,7 +1302,7 @@ class DesktopBackend(QObject):
 
         store = self.store
         local_path = store.path
-        local_manifest = deepcopy(self.manifest)
+        local_info = deepcopy(self._workspace_info)
         backup_directory = (local_path.parent / "backups").resolve()
         selected_path = Path(self._local_path(backup_path)).expanduser()
         if selected_path.is_symlink():
@@ -1089,7 +1315,7 @@ class DesktopBackend(QObject):
 
         def restore_backup():
             backup_info = verify_sqlite_backup(selected_path)
-            if not self._same_campus(local_manifest, backup_info):
+            if not self._same_campus(local_info, backup_info):
                 raise ValueError("El respaldo pertenece a otra sede.")
 
             staging_path = local_path.with_name(
@@ -1102,10 +1328,10 @@ class DesktopBackend(QObject):
             try:
                 create_sqlite_backup(selected_path, staging_path)
                 candidate_store = self._store_factory(staging_path)
-                candidate_manifest = run_async_operation(candidate_store.load())
-                if candidate_manifest is None:
+                candidate_info = run_async_operation(candidate_store.workspace_info())
+                if candidate_info is None:
                     raise ValueError("El respaldo no contiene una sede recuperable.")
-                if not self._same_campus(local_manifest, candidate_manifest):
+                if not self._same_campus(local_info, candidate_info):
                     raise ValueError("El respaldo pertenece a otra sede.")
                 run_async_operation(candidate_store.dispose())
                 candidate_store = None
@@ -1117,16 +1343,16 @@ class DesktopBackend(QObject):
                 destination_replaced = True
 
                 restored_store = self._store_factory(local_path)
-                restored_manifest = run_async_operation(restored_store.load())
-                if restored_manifest is None or not self._same_campus(
-                    local_manifest, restored_manifest
+                restored_info = run_async_operation(restored_store.workspace_info())
+                if restored_info is None or not self._same_campus(
+                    local_info, restored_info
                 ):
                     raise RuntimeError(
                         "La base restaurada no corresponde a la sede activa."
                     )
                 return {
                     "store": restored_store,
-                    "manifest": restored_manifest,
+                    "workspace_info": restored_info,
                     "recovery_backup": str(recovery_path),
                 }
             except (
@@ -1300,7 +1526,7 @@ class DesktopBackend(QObject):
 
             if (
                 not isinstance(result, dict)
-                or not isinstance(result.get("manifest"), dict)
+                or not isinstance(result.get("workspace_info"), dict)
                 or result.get("store") is None
             ):
                 message = "El resultado de restauración no es válido."
@@ -1308,9 +1534,9 @@ class DesktopBackend(QObject):
                 self.backupOperationFinished.emit(operation_name, False, {}, message)
                 return
             recovery_backup = result["recovery_backup"]
-            self._finish_database_change(
+            self._finish_database_restore(
                 result["store"],
-                result["manifest"],
+                result["workspace_info"],
                 (
                     "Respaldo restaurado correctamente. "
                     f"Punto de recuperación: {recovery_backup}"
@@ -1622,7 +1848,7 @@ class DesktopBackend(QObject):
         else:
             self._set_error("Elige dónde guardar la base de datos de la nueva sede.")
             return False
-        if self.store and target_path == self.store.path and self.manifest:
+        if self.store and target_path == self.store.path and self._workspace_info:
             self._set_error(
                 "Elige una ubicación nueva para la base de datos de esta sede."
             )
@@ -1708,7 +1934,9 @@ class DesktopBackend(QObject):
             )
             return False
         empty_current_store = bool(
-            self.store and target_path == self.store.path and self.manifest is None
+            self.store
+            and target_path == self.store.path
+            and self._workspace_info is None
         )
         if target_exists and not (
             (replace_existing and is_registered) or empty_current_store
@@ -2231,37 +2459,21 @@ class DesktopBackend(QObject):
 
     @Slot(result=bool)
     def refreshWorkspace(self):
-        if self.store is None or self.manifest is None:
+        if self.store is None or self._workspace_info is None:
             self._set_error("No hay una sede abierta para actualizar.")
             return False
-        loaded, manifest, error = self._load_manifest(self.store)
-        if not loaded or manifest is None:
-            self._set_error(
-                f"No se pudieron actualizar los datos locales: "
-                f"{error or 'la base no contiene una sede válida.'}"
-            )
-            return False
-
-        self.manifest = manifest
-        student_ids = {student["id"] for student in manifest["students"]}
-        enrollment_ids = {enrollment["id"] for enrollment in manifest["enrollments"]}
-        course_ids = {course["id"] for course in manifest["courses"]}
-        if self._selected_student_id not in student_ids:
-            self._selected_student_id = ""
-        if self._selected_enrollment_id not in enrollment_ids:
-            self._selected_enrollment_id = ""
-        if self._selected_course_id not in course_ids:
-            courses = manifest["courses"]
-            self._selected_course_id = courses[0]["id"] if courses else None
+        self._request_workspace_info()
+        self._request_dashboard_summary()
         self._invalidate_student_rows()
-        self.dataChanged.emit()
+        self._refresh_list_models()
+        self.workspaceInfoChanged.emit()
         self.selectionChanged.emit()
         self._set_error("Datos actualizados desde la base local.")
         return True
 
     @Slot(result=bool)
     def closeCampus(self):
-        if self.store is None or self.manifest is None:
+        if self.store is None or self._workspace_info is None:
             self._set_error("No hay una sede abierta para cerrar.")
             return False
         if self.catalog:
@@ -2273,6 +2485,8 @@ class DesktopBackend(QObject):
         previous_store = self.store
         self.store = None
         self.manifest = None
+        self._workspace_info = None
+        self._workspace_info_request_id += 1
         self._invalidate_student_rows()
         self._selected_student_id = ""
         self._selected_enrollment_id = ""
@@ -2302,6 +2516,7 @@ class DesktopBackend(QObject):
         previous_store = self.store
         self.store = store
         self.manifest = manifest
+        self._workspace_info = self._workspace_info_from_manifest(manifest)
         self._invalidate_student_rows()
         self._selected_student_id = ""
         self._selected_enrollment_id = ""
@@ -2317,6 +2532,51 @@ class DesktopBackend(QObject):
             self.backupStateChanged.emit()
         self._set_error(f"{message} {catalog_error}" if catalog_error else message)
         return True
+
+    def _finish_database_restore(
+        self,
+        store: WorkspaceStore,
+        workspace_info: dict[str, Any],
+        message: str,
+    ) -> None:
+        previous_store = self.store
+        self.store = store
+        self.manifest = None
+        self._workspace_info = workspace_info
+        self._invalidate_student_rows()
+        self._selected_student_id = ""
+        self._selected_enrollment_id = ""
+        self._selected_course_id = workspace_info.get("first_course_id")
+        if previous_store is not None and previous_store is not store:
+            self._dispose_store(previous_store)
+        self.dataChanged.emit()
+        self.selectionChanged.emit()
+        if previous_store is None or previous_store.path != store.path:
+            self._backup_items = []
+            self.backupDirectoryChanged.emit()
+            self.backupStateChanged.emit()
+        self.workspaceInfoChanged.emit()
+        self._set_error(message)
+
+    @staticmethod
+    def _workspace_info_from_manifest(
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        courses = manifest.get("courses", [])
+        return {
+            "format": manifest["format"],
+            "version": manifest["version"],
+            "bundle_id": manifest["bundle_id"],
+            "campus_id": manifest["campus_id"],
+            "campus_name": manifest["campus_name"],
+            "campus_address": manifest.get("campus_address", ""),
+            "campus_mode": manifest.get("campus_mode", "existing"),
+            "students": len(manifest.get("students", [])),
+            "enrollments": len(manifest.get("enrollments", [])),
+            "courses": len(courses),
+            "promoters": len(manifest.get("promoters", [])),
+            "first_course_id": courses[0]["id"] if courses else None,
+        }
 
     @Slot(str)
     def exportPackage(self, path):
@@ -2417,6 +2677,23 @@ class DesktopBackend(QObject):
         self._invalidate_student_rows()
         self.dataChanged.emit()
         self.selectionChanged.emit()
+
+    def _sync_promoter_projection(self, promoter: dict[str, Any]) -> None:
+        promoter_id = int(promoter["id"])
+        if self.manifest is not None:
+            existing_promoter = next(
+                (
+                    item
+                    for item in self.manifest["promoters"]
+                    if item["id"] == promoter_id
+                ),
+                None,
+            )
+            if existing_promoter is None:
+                self.manifest["promoters"].append(promoter)
+            else:
+                existing_promoter.update(promoter)
+        self.dataChanged.emit()
 
     @Slot(str, str, str, str, str, str, str, result=int)
     def createCourse(
@@ -2628,19 +2905,50 @@ class DesktopBackend(QObject):
 
     @Slot(str, result=int)
     def createPromoter(self, name):
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return 0
+        store = self.store
+        if store is None:
+            self._set_error(
+                "Los promotores se crean desde Desktop al preparar una sede nueva."
+            )
+            return 0
         try:
-            if not self.manifest:
-                raise ValueError(
-                    "Los promotores se crean desde Desktop al preparar una sede nueva."
-                )
-            mutation = self._record_service.create_promoter(self.manifest, name)
-            promoter_id = int(mutation.record["id"])
+            promoter = self._run_store_write(
+                store.create_promoter(name, self._record_service)
+            )
         except ValueError as exc:
             self._log_validation_failure("promoter.create", exc)
             self._set_error(str(exc))
             return 0
-        if not self._save({"promoters": [mutation]}):
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.promoter_create_failed",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo guardar el promotor localmente: {exc}")
             return 0
+        if not isinstance(promoter, dict) or isinstance(promoter.get("id"), bool):
+            self._set_error("La creación del promotor devolvió datos no válidos.")
+            return 0
+        try:
+            promoter_id = int(promoter["id"])
+        except (TypeError, ValueError, KeyError) as exc:
+            logger.error(
+                "workspace.promoter_create_invalid_result",
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error("La creación del promotor devolvió datos no válidos.")
+            return 0
+        self._sync_promoter_projection(promoter)
         self._set_error("Promotor guardado localmente.")
         return promoter_id
 
@@ -2662,6 +2970,8 @@ class DesktopBackend(QObject):
     @Slot(int)
     def selectCourse(self, source_id):
         self._selected_course_id = source_id
+        self._course_students_cache = []
+        self._request_course_students()
         self.selectionChanged.emit()
 
     @Slot()
@@ -2669,16 +2979,75 @@ class DesktopBackend(QObject):
         self._selected_enrollment_id = ""
         self.selectionChanged.emit()
 
+    def _save_enrollment_image(
+        self,
+        attachment_path: str | None,
+        image_hash: str | None,
+        encoded_content: str | None,
+        operation: str,
+        success_message: str,
+        missing_selection_message: str,
+    ) -> None:
+        if self.isBusy:
+            self._set_error("Ya hay un guardado en curso.")
+            return
+        store = self.store
+        if store is None:
+            self._set_error("Primero abre el archivo de una sede.")
+            return
+        enrollment_id = str(self._selected_enrollment_id or "")
+        if not enrollment_id:
+            self._set_error(missing_selection_message)
+            return
+        try:
+            result = self._run_store_write(
+                store.update_enrollment_image(
+                    enrollment_id,
+                    attachment_path,
+                    image_hash,
+                    encoded_content,
+                )
+            )
+        except ValueError as exc:
+            self._log_validation_failure(operation, exc)
+            self._set_error(str(exc) or "Revisa los datos de la imagen de ficha.")
+            return
+        except (
+            OSError,
+            RuntimeError,
+            SQLAlchemyError,
+            sqlite3.Error,
+            TypeError,
+            KeyError,
+        ) as exc:
+            logger.error(
+                "workspace.enrollment_image_update_failed",
+                operation=operation,
+                error_type=exc.__class__.__name__,
+            )
+            self._set_error(f"No se pudo actualizar la imagen de ficha: {exc}")
+            return
+
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("record"), dict)
+            or not isinstance(result.get("attachments_changed"), bool)
+            or (
+                result["attachments_changed"]
+                and not isinstance(result.get("attachment_data"), dict)
+            )
+        ):
+            self._set_error(
+                "La actualización de la imagen de ficha devolvió datos no válidos."
+            )
+            return
+        self._sync_enrollment_projection(result)
+        self._set_error(success_message)
+
     @Slot(str)
     def attachEnrollmentImage(self, path):
-        row = self.selectedEnrollment
-        if not self.manifest or not row:
+        if not self._selected_enrollment_id:
             self._set_error("Guarda primero la matrícula para adjuntar una imagen.")
-            return
-        if not row.get("record_code"):
-            self._set_error(
-                "Ingresa y guarda el código de ficha antes de adjuntar una imagen."
-            )
             return
         try:
             image_path = Path(self._local_path(path))
@@ -2695,46 +3064,29 @@ class DesktopBackend(QObject):
                     "enrollment.image_attach_failed",
                     error_type=exc.__class__.__name__,
                 )
-            self._set_error(str(exc))
-            return
+                self._set_error(str(exc))
+                return
         image_hash = hashlib.sha256(content).hexdigest()
         package_path = f"attachments/{image_hash}.jpg"
-        self.manifest.setdefault("_attachment_data", {})[package_path] = (
-            base64.b64encode(content).decode("ascii")
+        self._save_enrollment_image(
+                package_path,
+                image_hash,
+                base64.b64encode(content).decode("ascii"),
+                "enrollment.image_attach",
+                "Imagen de ficha guardada localmente.",
+                "Guarda primero la matrícula para adjuntar una imagen.",
         )
-        row["record_image"] = package_path
-        row["record_image_hash"] = image_hash
-        mutation = self._mutation_for_record(self.manifest, "enrollments", row)
-        if not self._save({"enrollments": [mutation]}):
-            return
-        self.selectionChanged.emit()
-        self._set_error("Imagen de ficha guardada localmente.")
 
     @Slot()
     def clearEnrollmentImage(self):
-        row = (
-            next(
-                (
-                    item
-                    for item in self.manifest["enrollments"]
-                    if item["id"] == self._selected_enrollment_id
-                ),
+        self._save_enrollment_image(
                 None,
-            )
-            if self.manifest
-            else None
+                None,
+                None,
+                "enrollment.image_clear",
+                "Se quitará la imagen al sincronizar con la web.",
+                "La matrícula seleccionada no tiene imagen de ficha.",
         )
-        if not self.manifest or not row or not row.get("record_image"):
-            self._set_error("La matrícula seleccionada no tiene imagen de ficha.")
-            return
-        row["record_image"] = None
-        row["record_image_hash"] = ""
-        self._record_service.remove_unused_attachments(self.manifest)
-        mutation = self._mutation_for_record(self.manifest, "enrollments", row)
-        if not self._save({"enrollments": [mutation]}):
-            return
-        self.selectionChanged.emit()
-        self._set_error("Se quitará la imagen al sincronizar con la web.")
 
     def _sync_student_projection(
         self, student: dict[str, Any], *, select_student: bool = False
@@ -2755,6 +3107,29 @@ class DesktopBackend(QObject):
                 existing_student.update(student)
         if select_student:
             self._selected_student_id = student_id
+        self._invalidate_student_rows()
+        self.dataChanged.emit()
+        self.selectionChanged.emit()
+
+    def _sync_enrollment_projection(self, result: dict[str, Any]) -> None:
+        enrollment = result["record"]
+        enrollment_id = str(enrollment["id"])
+        if self.manifest is not None:
+            existing_enrollment = next(
+                (
+                    item
+                    for item in self.manifest["enrollments"]
+                    if item["id"] == enrollment["id"]
+                ),
+                None,
+            )
+            if existing_enrollment is None:
+                self.manifest["enrollments"].append(enrollment)
+            else:
+                existing_enrollment.update(enrollment)
+            if result["attachments_changed"]:
+                self.manifest["_attachment_data"] = result["attachment_data"]
+        self._selected_enrollment_id = enrollment_id
         self._invalidate_student_rows()
         self.dataChanged.emit()
         self.selectionChanged.emit()
@@ -2938,37 +3313,16 @@ class DesktopBackend(QObject):
             not isinstance(result, dict)
             or not isinstance(result.get("record"), dict)
             or not isinstance(result.get("attachments_changed"), bool)
+            or (
+                result["attachments_changed"]
+                and not isinstance(result.get("attachment_data"), dict)
+            )
         ):
             self._set_error(
                 "La actualización de la matrícula devolvió datos no válidos."
             )
             return False
-        enrollment = result["record"]
-        if self.manifest is not None:
-            existing_enrollment = next(
-                (
-                    item
-                    for item in self.manifest["enrollments"]
-                    if item["id"] == enrollment["id"]
-                ),
-                None,
-            )
-            if existing_enrollment is None:
-                self.manifest["enrollments"].append(enrollment)
-            else:
-                existing_enrollment.update(enrollment)
-            if result["attachments_changed"]:
-                attachment_data = result.get("attachment_data")
-                if not isinstance(attachment_data, dict):
-                    self._set_error(
-                        "Los adjuntos actualizados de la matrícula no son válidos."
-                    )
-                    return False
-                self.manifest["_attachment_data"] = attachment_data
-        self._selected_enrollment_id = str(enrollment["id"])
-        self._invalidate_student_rows()
-        self.dataChanged.emit()
-        self.selectionChanged.emit()
+        self._sync_enrollment_projection(result)
         self._set_error("Matrícula guardada en este dispositivo.")
         return True
 
