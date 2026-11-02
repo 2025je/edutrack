@@ -1056,3 +1056,30 @@ Validación: `tests/test_backend.py tests/test_sync.py` **56 pasaron**;
 `git diff --check` pasaron para los archivos Python modificados. Las operaciones
 de importación/exportación y varios flujos heredados todavía crean o consultan
 manifiestos temporales; no se cambió el esquema ni el formato `.edutrack`.
+
+## 36. Fase 2 incremental — alta de matrícula sin duplicar registros en memoria
+
+El alta del asistente ya no agrega el estudiante ni la matrícula guardados a
+`backend.manifest`. `LocalStore.create_enrollment()` persiste ambos registros en
+una única transacción y devuelve únicamente sus identificadores y si se creó el
+estudiante; el backend conserva las señales de actualización de los modelos SQL.
+Las pruebas verifican los datos persistidos consultando SQLite y que un
+manifiesto previamente cargado no cambie durante el alta. No se modificó el
+formato `.edutrack` ni el esquema.
+
+Validación: `tests/test_enrollment_use_case.py` **15 pasaron**; Ruff,
+`compileall` y `git diff --check` pasaron. Las dos pruebas QML focalizadas no
+pudieron cargar `AppTheme.qml` porque falta una dependencia del plugin
+Qt Quick Controls Material en este entorno.
+
+## 37. Fase 2 incremental — creación de promotores sin proyección de manifiesto
+
+La creación de promotores ya persiste en SQLite y devuelve únicamente el ID.
+Se retiró la copia al manifiesto y la propiedad `promoterOptions`, que no tenía
+consumidores en el QML actual; la creación sigue notificando cambios para
+refrescar metadatos/modelos. Una prueba verifica que el manifiesto cargado no
+cambia y que el promotor está en la base. No se modificó el esquema ni el
+formato `.edutrack`.
+
+Validación: `tests/test_backend.py` **42 pasaron**; Ruff,
+`compileall`, compatibilidad de firma Pylance y `git diff --check` pasaron.

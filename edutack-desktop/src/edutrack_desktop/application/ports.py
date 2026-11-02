@@ -61,7 +61,7 @@ class WorkspaceStore(Protocol):
         self,
         name: str,
         record_service: "RecordServicePort",
-    ) -> dict[str, Any]: ...
+    ) -> int: ...
 
     async def save_student(
         self,

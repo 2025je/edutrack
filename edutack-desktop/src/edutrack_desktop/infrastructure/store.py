@@ -515,7 +515,7 @@ class LocalStore:
         self,
         name: str,
         record_service: RecordServicePort,
-    ) -> dict[str, Any]:
+    ) -> int:
         await self.initialize()
         async with self.session_factory.begin() as session:
             workspace = await session.get(Workspace, 1)
@@ -544,7 +544,7 @@ class LocalStore:
                     )
                 )
             )
-            return dict(mutation.record)
+            return int(mutation.record["id"])
 
     async def save_student(
         self,
@@ -2220,12 +2220,6 @@ class LocalStore:
             )
             await session.flush()
 
-            student_record = next(
-                item
-                for item in manifest_context["students"]
-                if item["id"] == student_id
-            )
-
         audit_logger.info(
             "database.enrollment_created",
             student_created=student_created,
@@ -2234,8 +2228,6 @@ class LocalStore:
             "student_id": student_id,
             "enrollment_id": str(enrollment_change.record["id"]),
             "student_created": student_created,
-            "student_record": student_record,
-            "enrollment_record": enrollment_change.record,
         }
 
     async def _save(self, manifest, sync_history_event=None):

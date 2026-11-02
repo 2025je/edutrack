@@ -1,5 +1,6 @@
 import asyncio
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -232,6 +233,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
         "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
 
+    manifest_before_save = deepcopy(backend.manifest)
     QTest.keyClick(
         view,
         Qt.Key.Key_S,
@@ -241,11 +243,13 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
     gui_application.processEvents()
 
     assert root.property("currentStep") == 4
-    assert len(backend.manifest["enrollments"]) == 1
+    assert backend.manifest == manifest_before_save
     assert root.property("savedResult").toVariant()["student"] == "PEREZ ANA"
-    assert backend.manifest["enrollments"][0]["record_code"] is None
-    assert backend.manifest["enrollments"][0]["promoter_ids"] == []
-    assert backend.manifest["enrollments"][0]["monthly_fee"] == "80.70"
+    persisted = asyncio.run(backend.store.load())
+    assert len(persisted["enrollments"]) == 1
+    assert persisted["enrollments"][0]["record_code"] is None
+    assert persisted["enrollments"][0]["promoter_ids"] == []
+    assert persisted["enrollments"][0]["monthly_fee"] == "80.70"
     assert not any(
         "Código de ficha" in text or text == "Promotores" for text in _qml_texts(root)
     )
@@ -351,10 +355,12 @@ def test_qml_wizard_creates_student_without_leaving_enrollment(
     _click(view, _item(root, "enrollmentSaveButton"))
 
     assert root.property("currentStep") == 4
-    assert len(backend.manifest["students"]) == 2
-    assert len(backend.manifest["enrollments"]) == 1
-    assert backend.manifest["students"][-1]["last_name"] == "ROJAS"
-    assert backend.manifest["students"][-1]["first_name"] == "LUCIA"
+    assert backend.manifest is None
+    persisted = asyncio.run(backend.store.load())
+    assert len(persisted["students"]) == 2
+    assert len(persisted["enrollments"]) == 1
+    assert persisted["students"][-1]["last_name"] == "ROJAS"
+    assert persisted["students"][-1]["first_name"] == "LUCIA"
 
 
 def test_main_ctrl_m_opens_enrollment_wizard_after_lazy_loading(

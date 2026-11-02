@@ -1036,10 +1036,6 @@ class DesktopBackend(QObject):
     def studentOptions(self):
         return [{"id": "", "label": "Sin estudiante"}] + self.students
 
-    @Property("QVariantList", notify=dataChanged)
-    def promoterOptions(self):
-        return self.manifest["promoters"] if self.manifest else []
-
     @Property(str, notify=selectionChanged)
     def enrollmentImageName(self):
         image_path = self.selectedEnrollment.get("record_image")
@@ -2678,23 +2674,6 @@ class DesktopBackend(QObject):
         self.dataChanged.emit()
         self.selectionChanged.emit()
 
-    def _sync_promoter_projection(self, promoter: dict[str, Any]) -> None:
-        promoter_id = int(promoter["id"])
-        if self.manifest is not None:
-            existing_promoter = next(
-                (
-                    item
-                    for item in self.manifest["promoters"]
-                    if item["id"] == promoter_id
-                ),
-                None,
-            )
-            if existing_promoter is None:
-                self.manifest["promoters"].append(promoter)
-            else:
-                existing_promoter.update(promoter)
-        self.dataChanged.emit()
-
     @Slot(str, str, str, str, str, str, str, result=int)
     def createCourse(
         self,
@@ -2915,7 +2894,7 @@ class DesktopBackend(QObject):
             )
             return 0
         try:
-            promoter = self._run_store_write(
+            promoter_id = self._run_store_write(
                 store.create_promoter(name, self._record_service)
             )
         except ValueError as exc:
@@ -2936,19 +2915,10 @@ class DesktopBackend(QObject):
             )
             self._set_error(f"No se pudo guardar el promotor localmente: {exc}")
             return 0
-        if not isinstance(promoter, dict) or isinstance(promoter.get("id"), bool):
+        if isinstance(promoter_id, bool) or not isinstance(promoter_id, int):
             self._set_error("La creación del promotor devolvió datos no válidos.")
             return 0
-        try:
-            promoter_id = int(promoter["id"])
-        except (TypeError, ValueError, KeyError) as exc:
-            logger.error(
-                "workspace.promoter_create_invalid_result",
-                error_type=exc.__class__.__name__,
-            )
-            self._set_error("La creación del promotor devolvió datos no válidos.")
-            return 0
-        self._sync_promoter_projection(promoter)
+        self.dataChanged.emit()
         self._set_error("Promotor guardado localmente.")
         return promoter_id
 
@@ -3253,10 +3223,6 @@ class DesktopBackend(QObject):
             )
             return failure
 
-        if self.manifest is not None:
-            if result.student_created:
-                self.manifest["students"].append(result.student_record)
-            self.manifest["enrollments"].append(result.enrollment_record)
         self._selected_student_id = result.student_id
         self._selected_enrollment_id = result.enrollment_id
         self._invalidate_student_rows()

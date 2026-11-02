@@ -251,6 +251,22 @@ def test_create_promoter_persists_to_sqlite_without_manifest(tmp_path):
     assert len(persisted["promoters"]) == promoter_count
 
 
+def test_create_promoter_does_not_update_loaded_manifest(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede inicial", "Av. Principal 123")
+    store = backend.store
+    assert store is not None
+    manifest_before = deepcopy(backend.manifest)
+
+    promoter_id = backend.createPromoter("Promotor local")
+
+    assert promoter_id > 0
+    assert backend.manifest == manifest_before
+    persisted = asyncio.run(store.load())
+    assert persisted is not None
+    assert any(item["id"] == promoter_id for item in persisted["promoters"])
+
+
 def test_create_promoter_keeps_existing_campus_restriction_without_manifest(
     tmp_path,
 ):

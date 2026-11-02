@@ -22,8 +22,6 @@ class PersistedEnrollmentCreation:
     student_id: str
     enrollment_id: str
     student_created: bool
-    student_record: dict[str, Any]
-    enrollment_record: dict[str, Any]
 
 
 class CreateEnrollmentUseCase:
@@ -58,8 +56,6 @@ class CreateEnrollmentUseCase:
             student_id=result["student_id"],
             enrollment_id=result["enrollment_id"],
             student_created=result["student_created"],
-            student_record=result["student_record"],
-            enrollment_record=result["enrollment_record"],
         )
 
     def execute(
