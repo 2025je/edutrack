@@ -1,10 +1,15 @@
-# EduTrack Desktop — Auditoría técnica (FASE 0)
+# EduTrack Desktop — Auditoría técnica incremental
 
 Fecha: 2026-10-30
 Línea base verificada: `uv run pytest tests -q` → **36 pruebas, todas pasan** (~15 s), sobre el árbol de trabajo actual (incluye cambios sin commitear).
 
-> Objetivo: documentar la arquitectura real, los problemas encontrados, los riesgos de
-> compatibilidad y el plan incremental de la FASE 1, **sin modificar código todavía**.
+> Alcance vigente: SQLite es la única fuente de verdad operativa; `.edutrack` se usa
+> temporalmente para importar y exportar. Desktop administra estudiantes, cursos y
+> matrículas. Promotores, códigos e imágenes de fichas pertenecen a EduTrack Web y se
+> preservan si ya fueron importados. Pagos y recibos están fuera del alcance.
+>
+> Las secciones iniciales documentan la línea base histórica; los cambios recientes y
+> las decisiones vigentes se registran en las últimas secciones.
 
 ---
 
@@ -53,22 +58,21 @@ edutack-desktop/
 
 ### 1.1 Modelo de datos y flujo de persistencia
 
-- La **fuente de verdad en memoria es el "manifiesto"**: un `dict` con claves
-  `format`, `version`, `bundle_id`, `campus_id`, `campus_name`, `campus_address`,
-  `students[]`, `enrollments[]`, `courses[]`, `promoters[]` y opcionales
-  `_attachment_data{}` y `campus_mode`.
-- `LocalStore` (SQLite, una base por sede) materializa el manifiesto en 5 tablas
+- **SQLite es la única fuente de verdad operativa** de estudiantes, cursos y
+  matrículas. El manifiesto es una estructura temporal de importación/exportación;
+  no se carga como caché ni se usa para consultas o CRUD. Los campos de promotores
+  y fichas permanecen por compatibilidad y se conservan cuando vienen de la web.
+- `LocalStore` (SQLite, una base por sede) almacena los datos en 5 tablas
   (`desktop_workspaces`, `desktop_students`, `desktop_courses`, `desktop_promoters`,
-  `desktop_enrollments`). **`_save()` borra todas las filas y reescribe el manifiesto
-  completo en una sola transacción** (`store.py:217-221`).
+  `desktop_enrollments`). El CRUD normal actualiza filas específicas; la sincronización
+  reemplaza los datos importados dentro de una transacción.
 - `LocalStore.initialize()` ejecuta `alembic upgrade head` al abrir y migra el formato
   legado (tabla `workspace` con JSON) sin pérdida de datos (`_migrate_legacy_workspace`).
 - El motor usa `NullPool` deliberadamente: el mismo store se usa desde `asyncio.run`
   (worker) y desde el bucle QtAsyncio (no cambiar).
-- `DesktopBackend` guarda con dos mecanismos:
-  - `_persist_manifest()` → `_run_async()` (bucle anidado `QEventLoop`) para la mayoría
-    de operaciones (estudiante, matrícula, importación…), con overlay "Guardando…".
-  - `_WorkspaceSaveWorker` (`QRunnable` + `asyncio.run`) solo para `saveCourseAsync`.
+- `DesktopBackend` consulta y modifica los registros operativos mediante operaciones
+  SQL específicas; la persistencia del manifiesto se reserva para crear sedes e
+  importar paquetes.
 
 ### 1.2 Formato `.edutrack` y sincronización con EduTrack Web
 
@@ -99,18 +103,18 @@ edutack-desktop/
 | Área | Archivo / función | Responsabilidad |
 |---|---|---|
 | Dominio | `RecordService.save_student` | Normaliza (MAYÚSCULAS), valida teléfonos peruanos (9 dígitos, inicia en 9), longitudes, duplicado exacto por apellidos+nombres |
-| Dominio | `RecordService.save_enrollment` | Valida estudiante/curso/fecha/montos (`Decimal` con 2 decimales vía `_amount`), código de ficha (único por fecha), promotores (activos, sin repetir, PARTICULAR/NN excluyentes), calidad de imagen; preserva valores existentes si el campo no viene; soporta matrículas "pendientes" (solo estudiante o solo curso) |
+| Dominio | `RecordService.save_enrollment` | Valida los datos académicos y preserva los valores web-managed existentes; Desktop no crea ni modifica promotores o fichas |
 | Dominio | `RecordService.normalize_course_fields` | Identidad de curso única (nombre+horario+grupo), fecha ISO, capacidad entera positiva |
 | Dominio | `RecordService.set_student_active`, `remove_unused_attachments` | Activación y limpieza de adjuntos huérfanos |
-| Aplicación | `presenters.py` | Proyección manifiesto→filas para QML (labels, orden, filtro en memoria) |
-| Infraestructura | `LocalStore.load/save/initialize/dispose` | Carga/guardado completo + migraciones + legado |
+| Aplicación | `presenters.py` | Proyecciones de filas SQL para QML |
+| Infraestructura | `LocalStore` | CRUD incremental en SQLite, importación transaccional, exportación desde SQL, migraciones y legado |
 | Infraestructura | `transfer.read_package/write_package/validate_manifest` | Validación estricta del paquete (pydantic + reglas), escritura atómica (tmp + `os.replace`) |
 | Infraestructura | `CampusCatalog` | `campuses.json` validado, escritura atómica, sede activa |
-| Presentación | `DesktopBackend.saveStudent/saveEnrollment/setStudentActive` | Delegan a RecordService + `_save()` (guardado completo) |
+| Presentación | `DesktopBackend.saveStudent/saveEnrollment/setStudentActive` | Delegan al store SQL y al servicio de dominio para validar los cambios locales |
 | Presentación | `DesktopBackend.openPackage/exportPackage/switchCampus/openLocalDatabase/closeCampus/createWorkspace` | Ciclo de vida de sedes y paquetes |
-| Presentación | `DesktopBackend.studentPage/matchingStudentCount` | Paginación con caché en memoria (usada por StudentsPage; **no** por el asistente) |
-| Presentación | `DesktopBackend.attachEnrollmentImage/clearEnrollmentImage` | Adjuntar imagen de ficha (slots existentes; **sin UI que los invoque actualmente**) |
-| QML | `EnrollmentWizardPage.qml` | Asistente de 2 pasos (buscar/crear estudiante → datos de matrícula) |
+| Presentación | Modelos de lista y backend | Búsqueda, filtros y paginación consultados desde SQLite |
+| Presentación | `DesktopBackend` | No expone operaciones CRUD de promotores ni de fichas |
+| QML | `EnrollmentWizardPage.qml` | Asistente para buscar/crear estudiante y registrar matrícula académica |
 | QML | `EnrollmentEditorPage.qml` | Edición de matrícula (estudiante, curso, fecha, montos, activa) |
 | QML | `SummaryPage.qml` | "Resumen": totales, ocupación de cursos, matrículas recientes, exportar Excel |
 | QML | `WorkspacePage.qml` | Navegación lateral: Matrículas / Estudiantes / Cursos / Resumen (carga perezosa) |
@@ -118,6 +122,9 @@ edutack-desktop/
 ---
 
 ## 3. Problemas identificados (por gravedad)
+
+La lista siguiente describe la auditoría inicial; las brechas ya resueltas y las
+decisiones vigentes deben leerse junto con las últimas secciones de este documento.
 
 ### ALTA
 
@@ -307,7 +314,7 @@ errores en el asistente; flujo completo validado en runtime (plataforma offscree
 |---|---|
 | 1.1 Guardado atómico | Nuevo `application/enrollment.py` (`CreateEnrollmentUseCase`: opera sobre copia del manifiesto; si falla cualquier validación, no queda estudiante parcial). Nuevo slot `DesktopBackend.createEnrollment(studentFields, enrollmentFields)` con una única persistencia; `saveStudent`/`saveEnrollment` se conservan para ediciones. Pruebas en `tests/test_enrollment_use_case.py` (8). |
 | 1.2 Búsqueda desde Python | Nuevo slot `DesktopBackend.searchStudents(query, limit=20)` (normaliza, limita a 20–100, reutiliza cachés, más recientes primero). Prueba en `test_backend.py`. |
-| 1.3 Asistente completo | `EnrollmentWizardPage.qml` reescrito: búsqueda con debounce de 250 ms y "Mostrar más"; paso 2 con curso, fecha, costos precargados editables, código de ficha y promotores (multi-selección); resumen antes de confirmar; pantalla de resultado con confirmación local y adjuntado de imagen de ficha (reutiliza `attachEnrollmentImage`). El estudiante nuevo ya no se guarda por separado: viaja con la matrícula vía `createEnrollment`. |
+| 1.3 Asistente completo | La implementación histórica incorporó búsqueda con debounce, resumen, matrícula atómica y datos de ficha/promotores. Por la delimitación de responsabilidades vigente, Desktop conserva el flujo académico y ya no ofrece controles para crear o editar esos campos web-managed; véase la sección 55. |
 | 1.4 Advertencias | En el paso 1 se advierte si el estudiante seleccionado tiene matrículas activas y, al crear uno nuevo, se listan posibles duplicados (vía `searchStudents`); el bloqueo por nombre exacto del dominio se conserva. |
 
 ---
@@ -1083,3 +1090,259 @@ formato `.edutrack`.
 
 Validación: `tests/test_backend.py` **42 pasaron**; Ruff,
 `compileall`, compatibilidad de firma Pylance y `git diff --check` pasaron.
+
+## 38. Fase 2 incremental — contexto reducido al crear promotores
+
+`LocalStore.create_promoter()` ya no materializa los registros ORM completos.
+Lee solo la columna de nombres, necesaria para conservar la validación
+Unicode/casefold de duplicados, y obtiene el próximo ID y la posición con
+agregaciones SQL. `RecordService` mantiene la normalización y la validación; la
+API directa del servicio conserva sus valores por defecto para los flujos que
+aún operan sobre manifiestos temporales.
+
+Validación: `tests/test_backend.py tests/test_enrollment_use_case.py` **58
+pasaron**; Ruff, `compileall`, compatibilidad de firma Pylance y
+`git diff --check` pasaron.
+
+## 39. Fase 2 incremental — contexto acotado al guardar cursos
+
+`LocalStore.create_course()` y `update_course()` ya no materializan toda la
+tabla de cursos para invocar `RecordService`. Primero normalizan los campos con
+el servicio de dominio y usan el `search_text` normalizado para consultar solo
+posibles duplicados; la edición agrega al contexto únicamente el curso objetivo.
+La creación obtiene el siguiente ID y la posición con agregaciones SQL. La
+validación final de identidad sigue en `RecordService`, que conserva el
+comportamiento por defecto para los flujos que aún usan snapshots temporales.
+No se modificaron el esquema ni el formato `.edutrack`.
+
+Validación: `tests/test_backend.py` **44 pasaron**, `tests/test_transfer.py`
+**17 pasaron** y `tests/test_enrollment_use_case.py` **15 pasaron**; Ruff,
+`compileall`, compatibilidad de firma Pylance y `git diff --check` pasaron.
+
+## 40. Fase 2 incremental — listado de cursos sin proyección de manifiesto
+
+Se retiró la propiedad heredada `backend.courses` y su caché, que derivaban
+filas desde el manifiesto y podían quedar desactualizadas después de una
+escritura SQL. La pantalla de cursos ya usa `CourseListModel`, que obtiene las
+filas paginadas y el conteo de estudiantes desde `LocalStore.course_page()`.
+Las pruebas que necesitaban un curso ahora lo consultan mediante ese modelo o
+el store SQL. No se modificaron el esquema ni el formato `.edutrack`.
+
+Validación: `tests/test_backend.py tests/test_enrollment_use_case.py` **59
+pasaron**; Ruff, `compileall` y `git diff --check` pasaron. Dos pruebas QML
+focalizadas no pudieron validarse porque Qt no carga el plugin
+`QtQuick.Controls.Material` (`qtquickcontrols2materialstyleplugin.dll` no
+encuentra una dependencia en este entorno).
+
+## 41. Fase 2 incremental — retirada de getters heredados sin consumidores
+
+Se eliminaron `backend.enrollments` y `backend.selectedCourse`, junto con la
+caché que materializaba todas las matrículas desde el manifiesto. La búsqueda
+en QML confirmó que ninguna pantalla dependía de esas propiedades; cursos y
+matrículas siguen consultándose mediante sus modelos paginados respaldados por
+SQLite. No se modificaron el esquema ni el formato `.edutrack`.
+
+Validación: `tests/test_backend.py tests/test_enrollment_use_case.py` **59
+pasaron**; Ruff, `compileall` y `git diff --check` pasaron.
+
+## 42. Fase 2 incremental — selección de matrícula desde escrituras SQL
+
+`selectedEnrollment` ya no busca registros en el manifiesto: conserva solo el
+registro individual devuelto por `LocalStore` al guardar la matrícula o su
+imagen, y se limpia al cambiar de matrícula o de sede. `enrollmentImageName`
+mantiene así la etiqueta del adjunto en `EnrollmentWizardPage.qml`. Las
+operaciones de matrícula e imagen dejaron de copiar al backend la colección
+completa `_attachment_data`; los adjuntos siguen persistidos en SQLite y se
+exportan por las rutas de transferencia. Ninguna escritura modifica el
+manifiesto operativo.
+
+Validación: `tests/test_backend.py tests/test_enrollment_use_case.py
+tests/test_transfer.py` **76 pasaron**; Ruff, `compileall` y
+`git diff --check` pasaron.
+
+## 43. Fase 2 incremental — escrituras de cursos sin proyección
+
+Las operaciones de creación y edición de cursos ya no copian ni actualizan
+registros en `backend.manifest`; conservan únicamente el ID seleccionado y
+notifican a los modelos, que vuelven a consultar SQLite. Se ajustó la prueba de
+preservación de `server_id` para preparar ese dato en el store y comprobar que
+una escritura normal no altera el manifiesto en memoria.
+
+Validación: `tests/test_backend.py tests/test_enrollment_use_case.py
+tests/test_transfer.py` **76 pasaron**; Ruff, `compileall` y
+`git diff --check` pasaron.
+
+## 44. Fase 2 incremental — apertura local con metadatos SQL
+
+`switchCampus()` y `openLocalDatabase()` ahora consultan
+`LocalStore.workspace_info()` en vez de cargar `LocalStore.load()` para abrir
+una base existente. El backend recibe conteos y metadatos de la sede, conserva
+`manifest=None` y selecciona el primer curso usando el ID devuelto por SQL.
+Una prueba sustituye `store.load()` por un error para comprobar que ambos
+flujos no materializan los registros operativos.
+
+Validación: `tests/test_backend.py` **44 pasaron**, `tests/test_enrollment_use_case.py
+tests/test_transfer.py` **32 pasaron**, y la prueba focalizada de apertura pasó;
+Ruff, `compileall` y `git diff --check` pasaron.
+
+## 45. Fase 2 incremental — manifiesto temporal tras crear/importar
+
+Al finalizar la creación de una sede o la importación de un paquete,
+`_finish_database_change()` conserva únicamente los metadatos de la sede y deja
+`manifest=None`; el objeto recibido para persistencia/transferencia no queda
+retenido como copia operativa. La protección para no quitar una sede activa del
+catálogo ahora consulta `_workspace_info` en lugar de depender de que el
+manifiesto esté cargado.
+
+Validación: `tests/test_backend.py` **44 pasaron**,
+`tests/test_enrollment_use_case.py` **15 pasaron**, `tests/test_sync.py`
+**15 pasaron** y `tests/test_transfer.py` **17 pasaron**; Ruff, `compileall` y
+`git diff --check` pasaron.
+
+## 46. Fase 2 incremental — lista y escrituras de estudiantes desde SQLite
+
+Se retiraron los getters y la caché heredados de estudiantes, que duplicaban
+filas del manifiesto: la interfaz activa usa `StudentListModel` y consulta
+SQLite. Las escrituras conservan como máximo el registro individual seleccionado
+y notifican a los modelos para refrescar desde SQL. También se retiraron
+`_save()` y `_mutation_for_record()`, sin referencias de código, que formaban
+parte de la ruta heredada para persistir mutaciones del manifiesto. La
+persistencia de manifiestos se mantiene para creación e importación.
+
+Validación: `tests/test_backend.py` **44 pasaron**,
+`tests/test_enrollment_use_case.py` **15 pasaron**, `tests/test_sync.py`
+**15 pasaron** y `tests/test_transfer.py` **17 pasaron**; Ruff, `compileall` y
+`git diff --check` pasaron. Las pruebas QML siguen sin validarse por el bloqueo
+conocido del plugin `QtQuick.Controls.Material` en este entorno.
+
+## 47. Fase 2 incremental — auditoría de importación y brechas de dominio
+
+La importación rutinaria retiene el paquete y el snapshot local solo durante la
+vista previa. Al confirmar, vuelve a leer la sede, comprueba que no cambió,
+revalida sede, paquete y conflictos, crea un respaldo y guarda los registros
+junto con el historial dentro de una transacción SQL. Los conflictos bloquean
+la confirmación y deben resolverse en EduTrack Web; la ruta `openPackage()` se
+mantiene separada para importaciones/reemplazos explícitos, con confirmación en
+la interfaz.
+
+La cobertura comprueba que una vista previa conflictiva no permite confirmar
+ni modifica la base, el historial o los respaldos. Además, la última
+comparación del snapshot ahora se ejecuta dentro de la misma transacción que
+guarda los datos y el historial. La validación entre conexiones independientes
+se documenta en la sección 49.
+
+Los pagos y recibos están fuera del alcance de EduTrack Desktop y no deben
+implementarse en esta aplicación; las tarifas de cursos/matrículas son datos
+académicos, no registros de pagos.
+
+Validación: `tests/test_sync.py` **18 pasaron**, `tests/test_backend.py`
+**44 pasaron**, `tests/test_transfer.py` **17 pasaron** y
+`tests/test_enrollment_use_case.py` **15 pasaron**; Ruff, `compileall` y
+`git diff --check` pasaron.
+
+## 48. Retirada de ruta heredada de guardado
+
+Se eliminó `_WorkspaceSaveWorker`, que no tenía instancias ni llamadas, junto
+con la bifurcación de `_persist_manifest()` para `save_records()`. Las
+operaciones normales ya escriben directamente en SQLite; la persistencia del
+manifiesto queda limitada a guardar snapshots de creación e importación.
+La comprobación de compatibilidad confirmó las dos llamadas restantes de
+`_persist_manifest()`.
+
+Validación: `tests/test_backend.py` **44 pasaron**; Pylance confirmó que las
+dos llamadas son compatibles con la firma actual y `git diff --check` pasó.
+
+## 49. Serialización de importaciones concurrentes
+
+La prueba con dos `LocalStore` independientes en modo WAL mostró que una
+transacción SQLite diferida podía leer el snapshot esperado y, después de que
+otra conexión confirmara una escritura, continuar con una importación basada
+en un snapshot obsoleto sin rechazarla. Para cerrar esa ventana, `_save()`
+inicia con `BEGIN IMMEDIATE` cuando recibe `expected_snapshot`; así la lectura de
+revalidación y la escritura quedan serializadas frente a otros escritores.
+
+La prueba inicia dos importaciones desde el mismo snapshot en conexiones
+independientes: la primera confirma y la segunda detecta el snapshot obsoleto,
+falla sin sobrescribir los datos y no registra un historial de éxito.
+
+## 50. Ejecución de pruebas QML en Windows
+
+Las pruebas QML no podían cargar los plugins de Qt porque Windows no tenía
+registrada la carpeta de DLL de PySide6 en la búsqueda de bibliotecas. El
+`conftest.py` de pruebas ahora registra esa carpeta y conserva el handle
+durante la ejecución, sin cambiar la configuración de la aplicación.
+También se normaliza `QJSValue` en la aserción del estudiante seleccionado.
+
+La suite QML completa pasó: **33 pruebas**. Para el diálogo de cierre, el
+runner offscreen no activó el botón superior con `QTest.mouseClick`; la prueba
+invoca el método `click()` del botón y valida el mismo flujo QML. Queda una
+validación manual del clic físico en Windows.
+
+## 51. Retirada del alta de matrícula basada en manifiesto
+
+`CreateEnrollmentUseCase` ya no expone la ruta `execute(manifest, ...)`, que
+copiaba y mutaba el manifiesto para crear estudiantes y matrículas. El flujo
+activo queda en `execute_and_persist()`, que delega en la operación transaccional
+de `LocalStore.create_enrollment()`. Las pruebas de referencias inactivas y
+estudiantes inexistentes ahora preparan y consultan los datos en SQLite.
+
+Validación: `tests/test_enrollment_use_case.py` **12 pasaron**.
+
+## 52. CRUD operativo exclusivamente en SQLite
+
+Se retiró `LocalStore.save_records()` y su declaración en `WorkspaceStore`: no
+tenía consumidores de producción y aceptaba manifiestos para persistir
+mutaciones parciales, manteniendo una ruta CRUD heredada. Las pruebas y
+benchmarks asociados ahora actualizan estudiantes y matrículas mediante
+`save_student()` y `save_enrollment()`, que validan con el servicio de dominio y
+escriben los registros seleccionados directamente en SQLite. El guardado de
+manifiestos queda reservado a importación/exportación.
+
+## 53. Ediciones de estudiantes con referencias obsoletas
+
+`save_student()` podía interpretar un ID de edición inexistente como un alta:
+el servicio de dominio no encontraba la fila en el contexto SQL y generaba un
+ID nuevo, que el store insertaba. Ahora el store rechaza explícitamente los
+IDs no vacíos que no corresponden a un estudiante existente; el backend muestra
+el error y la prueba de regresión verifica que SQLite queda sin cambios.
+
+## 54. Capacidad de cursos informativa
+
+Se confirmó que la capacidad es un indicador, no un límite que bloquee
+matrículas. El conteo de ocupación considera estudiantes activos asociados a
+matrículas activas; las reservas sin estudiante no cuentan como alumnos. Una
+prueba cubre el guardado al superar la capacidad, la presencia del curso en la
+búsqueda y el indicador de curso completo. Esta decisión también queda
+aclarada en el README para evitar que la ocupación se convierta en una
+validación de escritura por accidente.
+
+## 55. Promotores y fichas administrados desde EduTrack Web
+
+Desktop ya no crea promotores, no asigna promotores a matrículas y no permite
+crear, adjuntar, reemplazar o quitar fichas. Se retiraron las operaciones del
+store, los puertos, el servicio de dominio, el backend y los controles del
+asistente; las sedes nuevas tampoco siembran los promotores `PARTICULAR` y
+`NN`. La validación SQL rechaza cambios no vacíos de esos campos durante altas
+y ediciones, pero conserva los valores y adjuntos que ya existían en registros
+importados. El esquema y el formato `.edutrack` se mantienen para importar,
+exportar y sincronizar esos datos sin pérdida.
+
+Pagos y recibos también permanecen fuera del alcance de Desktop.
+
+## 56. Validación integrada del CRUD SQLite
+
+Se agregó una regresión para confirmar que intentar editar una matrícula cuyo ID
+ya no existe devuelve un error y no inserta una matrícula nueva. La suite
+completa de Desktop, ejecutada con `uv run pytest tests -vv -x`, terminó con
+**142 pruebas aprobadas**; los **20 benchmarks** quedaron excluidos por el
+marcador `performance` configurado en pytest. Ejecutados por separado con
+`uv run pytest tests/test_performance_benchmarks.py -m performance -q`, los
+**20 benchmarks** también pasaron (33,91 s).
+
+## 57. Cierre de ventana durante operaciones activas
+
+Cuando se solicita cerrar la ventana mientras el backend está ocupado, el
+`closeEvent` se pospone y `DatabaseSavingOverlay` permanece visible con su
+indicador animado y el mensaje de finalización. Al terminar la operación se
+retira el estado de espera y se cierra la ventana. Las pruebas QML cubren el
+cierre diferido y el cierre normal durante la pantalla de inicio.
