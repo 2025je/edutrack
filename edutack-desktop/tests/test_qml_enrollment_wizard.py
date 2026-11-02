@@ -886,6 +886,13 @@ def test_main_close_button_waits_for_active_operation(tmp_path, gui_application)
 
         assert root.isVisible()
         assert root.property("closeAfterCurrentOperation") is True
+        overlay = root.findChild(QObject, "databaseSavingOverlay")
+        assert overlay is not None
+        assert overlay.property("visible") is True
+        assert (
+            overlay.property("forcedMessage")
+            == "Finalizando la operación antes de cerrar..."
+        )
 
         backend._save_in_progress = False
         backend.activityStateChanged.emit()
@@ -893,6 +900,9 @@ def test_main_close_button_waits_for_active_operation(tmp_path, gui_application)
         gui_application.processEvents()
 
         assert root.isVisible() is False
+        assert root.property("closeAfterCurrentOperation") is False
+        assert overlay.property("forceVisible") is False
+        assert overlay.property("overlayActive") is False
     finally:
         root_objects = engine.rootObjects()
         if root_objects:

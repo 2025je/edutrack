@@ -523,5 +523,7 @@ ApplicationWindow {
     DatabaseSavingOverlay {
         backendObject: backend
         theme: appTheme
+        forceVisible: appWindow.closeAfterCurrentOperation
+        forcedMessage: "Finalizando la operación antes de cerrar..."
     }
 }

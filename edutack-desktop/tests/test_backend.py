@@ -1458,6 +1458,27 @@ def test_enrollment_validation_rejects_duplicate_student_course_pair(tmp_path):
     assert "ya está matriculado" in backend.errorMessage
 
 
+def test_saving_enrollment_rejects_missing_edit_target(tmp_path):
+    backend = DesktopBackend(tmp_path / "workspace.sqlite3")
+    backend.createWorkspace("Sede de prueba", "")
+    course_id = backend.createCourse(
+        "Matemáticas", "Mañana", "1", "2026-01-01", "100.00", "80.00", "20"
+    )
+    backend.saveStudent("", "Pérez", "Ana", "", "987654321")
+    fields = {
+        "student_id": backend.selectedStudent["id"],
+        "course_id": course_id,
+        "enrollment_date": "2026-01-02",
+        "enrollment_fee": "100.00",
+        "monthly_fee": "80.00",
+    }
+
+    assert not backend.saveEnrollment("missing-enrollment", fields)
+    assert "ya no existe" in backend.errorMessage
+    workspace_info = asyncio.run(backend.store.workspace_info())
+    assert workspace_info["enrollments"] == 0
+
+
 def test_desktop_create_enrollment_rejects_web_managed_fields(tmp_path):
     backend = DesktopBackend(tmp_path / "workspace.sqlite3")
     backend.createWorkspace("Sede inicial", "")
