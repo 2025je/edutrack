@@ -169,7 +169,7 @@ def test_qml_wizard_search_selection_validation_and_keyboard_save(
         "result_list_height": result_list.height(),
     }
     _click(view, option)
-    selected_student = root.property("selectedStudent")
+    selected_student = _variant(root.property("selectedStudent"))
     assert selected_student is not None, option_state
     assert selected_student["id"] == results[0]["id"]
 
@@ -996,12 +996,15 @@ def test_main_closes_after_opening_and_closing_a_saved_campus(
         QTest.qWait(250)
         assert backend.hasWorkspace
 
-        _click(
-            root,
-            _find_visual_item(root, "closeCampusButton"),
-        )
-        QTest.qWait(100)
-        dialog = root.findChild(QObject, "closeCampusDialog")
+        close_button = _find_visual_item(root, "closeCampusButton")
+        assert QMetaObject.invokeMethod(close_button, "click")
+        dialog = None
+        for _ in range(100):
+            gui_application.processEvents()
+            dialog = root.findChild(QObject, "closeCampusDialog")
+            if dialog is not None and dialog.property("visible"):
+                break
+            QTest.qWait(10)
         assert dialog is not None
         assert dialog.property("visible")
         confirm_button = root.findChild(QObject, "confirmCloseCampusButton")

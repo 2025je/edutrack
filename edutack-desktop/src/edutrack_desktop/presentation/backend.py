@@ -33,7 +33,7 @@ from ..application.ports import (
 )
 from ..application.presenters import dashboard_summary
 from ..application.sync import build_import_preview
-from ..domain.record_service import RecordMutation, RecordService
+from ..domain.record_service import RecordService
 from ..infrastructure.app_settings import DesktopSettings
 from ..infrastructure.backup import (
     create_sqlite_backup,
@@ -58,53 +58,6 @@ logger = structlog.get_logger(__name__)
 
 def _create_local_store(path: Path) -> WorkspaceStore:
     return LocalStore(path)
-
-
-class _WorkspaceSaveWorkerSignals(QObject):
-    finished = Signal(bool, object, str)
-
-
-class _WorkspaceSaveWorker(QRunnable):
-    def __init__(
-        self,
-        store: WorkspaceStore,
-        manifest: dict[str, Any],
-        record_changes: dict[str, list[RecordMutation]] | None = None,
-    ):
-        super().__init__()
-        self.setAutoDelete(False)
-        self._store = store
-        self._manifest = manifest
-        self._record_changes = record_changes
-        self.signals = _WorkspaceSaveWorkerSignals()
-
-    def run(self):
-        try:
-            operation = (
-                self._store.save(self._manifest)
-                if self._record_changes is None
-                else self._store.save_records(self._manifest, self._record_changes)
-            )
-            run_async_operation(operation)
-        except (
-            OSError,
-            RuntimeError,
-            SQLAlchemyError,
-            ValueError,
-            KeyError,
-            TypeError,
-        ) as exc:
-            logger.error(
-                "workspace.save_failed",
-                error_type=exc.__class__.__name__,
-            )
-            self.signals.finished.emit(
-                False,
-                None,
-                str(exc) or exc.__class__.__name__,
-            )
-            return
-        self.signals.finished.emit(True, self._manifest, "")
 
 
 class _SyncOperationWorkerSignals(QObject):
@@ -1625,9 +1578,7 @@ class DesktopBackend(QObject):
             return False
         return row is not None
 
-    def _persist_manifest(
-        self, store, manifest, record_changes=None, history_event=None
-    ):
+    def _persist_manifest(self, store, manifest, history_event=None):
         if self.isBusy:
             return False, "Ya hay un guardado en curso."
 
@@ -1636,14 +1587,11 @@ class DesktopBackend(QObject):
         self.savingStateChanged.emit()
         self.activityStateChanged.emit()
         try:
-            if history_event is not None:
-                operation = store.save_with_sync_history(
-                    deepcopy(manifest), history_event
-                )
-            elif record_changes is None:
-                operation = store.save(deepcopy(manifest))
-            else:
-                operation = store.save_records(manifest, record_changes)
+            operation = (
+                store.save_with_sync_history(deepcopy(manifest), history_event)
+                if history_event is not None
+                else store.save(deepcopy(manifest))
+            )
             self._run_async(operation)
         except (
             OSError,

@@ -17,6 +17,7 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
+    text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -2269,6 +2270,7 @@ class LocalStore:
     ):
         async with self.session_factory.begin() as session:
             if expected_snapshot is not None:
+                await session.execute(text("BEGIN IMMEDIATE"))
                 current = await self._load_from_session(session)
                 if current != expected_snapshot:
                     raise ValueError(

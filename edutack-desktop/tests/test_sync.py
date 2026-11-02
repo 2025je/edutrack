@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
+from sqlalchemy import event as sqlalchemy_event
 
 from edutrack_desktop.application.sync import (
     _enrollment_fingerprint,
@@ -571,6 +572,98 @@ def test_import_confirmation_detects_write_between_precheck_and_save(
     assert len(history) == 1
     assert history[0]["status"] == "failed"
     assert history[0]["bundle_id"] == incoming["bundle_id"]
+
+
+def test_competing_imports_from_independent_connections_revalidate_snapshot(
+    manifest, tmp_path, monkeypatch
+):
+    database_path = tmp_path / "workspace.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        journal_mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+    assert journal_mode.lower() == "wal"
+    asyncio.run(LocalStore(database_path).save(manifest))
+
+    importer = LocalStore(database_path)
+    competing_importer = LocalStore(database_path)
+    first_import = deepcopy(manifest)
+    first_import["bundle_id"] = str(uuid.uuid4())
+    first_import["campus_name"] = "Primera importación"
+    second_import = deepcopy(manifest)
+    second_import["bundle_id"] = str(uuid.uuid4())
+    second_import["campus_address"] = "Importación obsoleta"
+
+    def history_event(import_manifest):
+        return {
+            "operation": "import",
+            "bundle_id": import_manifest["bundle_id"],
+            "created_at": "2026-01-02T03:04:05+00:00",
+            "status": "success",
+            "affected_counts": {"new": 0, "updated": 1, "unchanged": 0},
+            "message": "Paquete validado e importado.",
+        }
+
+    async def verify():
+        await importer.initialize()
+        await competing_importer.initialize()
+        expected_snapshot = await importer.load()
+        first_snapshot_read = asyncio.Event()
+        release_first_import = asyncio.Event()
+        second_begin_attempt = asyncio.Event()
+        load_from_session = importer._load_from_session
+
+        async def hold_first_snapshot(session):
+            snapshot = await load_from_session(session)
+            first_snapshot_read.set()
+            await asyncio.wait_for(release_first_import.wait(), timeout=10)
+            return snapshot
+
+        def signal_second_begin(_connection, _cursor, statement, *_args):
+            if statement.strip().upper() == "BEGIN IMMEDIATE":
+                second_begin_attempt.set()
+
+        monkeypatch.setattr(importer, "_load_from_session", hold_first_snapshot)
+        sqlalchemy_event.listen(
+            competing_importer.engine.sync_engine,
+            "before_cursor_execute",
+            signal_second_begin,
+        )
+        try:
+            first_task = asyncio.create_task(
+                importer.save_with_sync_history(
+                    first_import,
+                    history_event(first_import),
+                    expected_snapshot=expected_snapshot,
+                )
+            )
+            await asyncio.wait_for(first_snapshot_read.wait(), timeout=10)
+            second_task = asyncio.create_task(
+                competing_importer.save_with_sync_history(
+                    second_import,
+                    history_event(second_import),
+                    expected_snapshot=expected_snapshot,
+                )
+            )
+            await asyncio.wait_for(second_begin_attempt.wait(), timeout=10)
+            release_first_import.set()
+            await asyncio.wait_for(first_task, timeout=10)
+            with pytest.raises(
+                ValueError, match="La sede cambió después de la vista previa"
+            ):
+                await asyncio.wait_for(second_task, timeout=10)
+        finally:
+            release_first_import.set()
+            sqlalchemy_event.remove(
+                competing_importer.engine.sync_engine,
+                "before_cursor_execute",
+                signal_second_begin,
+            )
+
+        assert await importer.load() == first_import
+        history = await importer.list_sync_history()
+        assert len(history) == 1
+        assert history[0]["bundle_id"] == first_import["bundle_id"]
+
+    asyncio.run(verify())
 
 
 def test_backend_manages_and_restores_only_compatible_backups(manifest, tmp_path):
