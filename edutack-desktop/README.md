@@ -68,20 +68,20 @@ La ejecución predeterminada corre `pyside6-qmllint`, las pruebas con cobertura,
 
 ## Crear el instalador de Windows
 
-En Windows, instala [Inno Setup 6](https://jrsoftware.org/isinfo.php) en el equipo de compilación. No hace falta instalarlo en los equipos donde se usará la aplicación. Después, ejecuta desde PowerShell:
+En Windows, instala [Inno Setup 6](https://jrsoftware.org/isinfo.php) en el equipo de compilación. No hace falta instalarlo en los equipos donde se usará la aplicación. Desde `edutack-desktop`, ejecuta la sesión Nox:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+uv run nox -s build
 ```
 
-El script compila un ejecutable autocontenido con PyInstaller y crea `dist\installer\EduTrackDesktop-Setup-<versión>.exe`. El instalador permite elegir la instalación para el usuario actual, agrega accesos directos y permite desinstalar la app. El paquete incluye Python, Qt/PySide6, los módulos QML, iconos, fuentes, migraciones y los DLL de runtime necesarios; el equipo de destino no necesita instalar Python, uv, Qt ni el redistribuible de Visual C++ por separado. El instalador es para Windows x64 10 o posterior. No incluye ni borra las bases SQLite de las sedes, que permanecen en la ubicación elegida por el usuario.
+La sesión Nox ejecuta `build.ps1`, que compila un ejecutable autocontenido con PyInstaller y crea `dist\installer\EduTrackDesktop-Setup-<versión>.exe`. El instalador permite elegir la instalación para el usuario actual, agrega accesos directos y permite desinstalar la app. El paquete incluye Python, Qt/PySide6, los módulos QML, iconos, fuentes, migraciones y los DLL de runtime necesarios; el equipo de destino no necesita instalar Python, uv, Qt ni el redistribuible de Visual C++ por separado. El instalador es para Windows x64 10 o posterior. No incluye ni borra las bases SQLite de las sedes, que permanecen en la ubicación elegida por el usuario. La sesión se invoca explícitamente porque requiere Inno Setup y no forma parte de `uv run nox`.
 
 Para compilar únicamente el ejecutable, sin generar el instalador:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -SkipInstaller
+uv run nox -s build -- -SkipInstaller
 ```
 
 Distribuye el instalador generado, no los archivos de `build\`. Se recomienda probarlo en una PC Windows limpia o una máquina virtual antes de entregarlo a usuarios.
 
-El workflow **EduTrack Desktop Windows Installer** compila el instalador en Windows al cambiar `edutack-desktop/` o al ejecutarlo manualmente. Instala el paquete en el runner, inicia el ejecutable en modo de prueba para comprobar que Qt, QML y sus DLL cargan, y publica el instalador como artefacto de la ejecución.
+El workflow **EduTrack Desktop CI and Windows Installer** ejecuta Nox en Ubuntu para validar la app desktop y compila el instalador en Windows al cambiar `edutack-desktop/` o al ejecutarlo manualmente. En Windows, instala el paquete, inicia el ejecutable en modo de prueba para comprobar que Qt, QML y sus DLL cargan, y publica el instalador como artefacto de la ejecución.

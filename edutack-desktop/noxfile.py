@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from nox import Session, options
@@ -52,4 +53,22 @@ def performance(session: Session) -> None:
         "--benchmark-only",
         "-q",
         *session.posargs,
+    )
+
+
+@session(uv_groups=["dev"])
+def build(session: Session) -> None:
+    if sys.platform != "win32":
+        raise RuntimeError("The EduTrack Desktop build is available only on Windows.")
+
+    build_script = Path(__file__).parent / "build.ps1"
+    session.run(
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(build_script),
+        *session.posargs,
+        external=True,
     )
