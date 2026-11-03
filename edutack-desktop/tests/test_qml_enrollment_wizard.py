@@ -638,6 +638,13 @@ def test_main_restores_and_persists_selected_workspace_section(
         _wait_for_model(backend.studentListModel, gui_application, 1)
         assert backend.studentListModel.matchingCount == 1
 
+        for _ in range(100):
+            gui_application.processEvents()
+            if not course_filter.property("popupVisible"):
+                break
+            QTest.qWait(10)
+        assert course_filter.property("popupVisible") is False
+
         status_filter.setProperty("currentIndex", 0)
         assert QMetaObject.invokeMethod(course_filter, "resetSelection")
         assert QMetaObject.invokeMethod(students_page, "applyStudentFilters")

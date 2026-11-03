@@ -16,6 +16,7 @@ Item {
     property bool searchPending: false
     property string searchQuery: ""
     property string errorText: ""
+    readonly property bool popupVisible: coursePicker.visible
     signal courseSelected(int courseId)
 
     readonly property var filteredOptions: {
