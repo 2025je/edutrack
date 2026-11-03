@@ -1,4 +1,4 @@
-name: EduTrack Desktop Windows Installer
+name: EduTrack Desktop CI and Windows Installer
 
 on:
   push:
@@ -15,10 +15,40 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-windows-${{ github.ref }}
+  group: desktop-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  linux-quality-checks:
+    name: Linux desktop quality checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edutack-desktop
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: edutack-desktop/uv.lock
+
+      - name: Install Nox
+        run: uv sync --locked --group nox
+
+      - name: Run desktop quality checks
+        run: uv run --locked nox
+
   build-and-smoke-test:
     name: Build, install, and smoke-test
     runs-on: windows-latest
